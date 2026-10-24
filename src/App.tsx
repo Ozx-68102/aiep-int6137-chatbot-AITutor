@@ -262,7 +262,11 @@ export default function App() {
           />
           <button
             type="submit"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white disabled:cursor-default disabled:border-stone-300 disabled:bg-white disabled:text-inherit disabled:opacity-50"
+            className={
+              draft.trim() === ''
+                ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
+                : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white'
+            }
             aria-label={text.send}
             title={text.send}
             disabled={draft.trim() === ''}
