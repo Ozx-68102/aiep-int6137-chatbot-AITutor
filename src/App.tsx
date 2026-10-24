@@ -1,93 +1,81 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { sendMessage } from './api/chat.ts'
-import { locales, translations, type Locale } from './i18n.ts'
-
-type Message = {
-  id: string
-  role: 'user' | 'assistant'
-  text: string
-  locale: Locale
-}
-
-type Session = {
-  id: string
-  title: string | null
-  titleLocale: Locale | null
-  messages: Message[]
-}
+import {type SubmitEvent, useEffect, useState} from 'react';
+import {sendMessage} from './api/chat.ts';
+import {locales, translations} from './i18n.ts';
+import type {Message, Session} from './type/chat.ts';
+import type {Locale} from './type/locale.ts';
 
 const htmlLang: Record<Locale, string> = {
   'zh-CN': 'zh-Hans',
   'zh-TW': 'zh-Hant',
-  en: 'en',
-}
+  'en': 'en',
+};
 
 function createSession(): Session {
-  return { id: crypto.randomUUID(), title: null, titleLocale: null, messages: [] }
+  return {id: crypto.randomUUID(), title: null, titleLocale: null, messages: []};
 }
 
 function sessionTitle(session: Session, fallback: string): string {
-  return session.title ?? fallback
+  return session.title ?? fallback;
 }
 
 export default function App() {
-  const [locale, setLocale] = useState<Locale>('zh-CN')
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [sessions, setSessions] = useState<Session[]>(() => [createSession()])
-  const [activeId, setActiveId] = useState(() => sessions[0]?.id ?? '')
-  const [draft, setDraft] = useState('')
-  const text = translations[locale]
-  const active = sessions.find((session) => session.id === activeId) ?? sessions[0]
+  const [locale, setLocale] = useState<Locale>('zh-CN');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessions, setSessions] = useState<Session[]>(() => [createSession()]);
+  const [activeId, setActiveId] = useState(() => sessions[0]?.id ?? '');
+  const [draft, setDraft] = useState('');
+  const text = translations[locale];
+  const active = sessions.find((session) => session.id === activeId) ?? sessions[0];
 
   useEffect(() => {
-    document.documentElement.lang = htmlLang[locale]
-    document.title = 'H^2 Bot'
-  }, [locale])
+    document.documentElement.lang = htmlLang[locale];
+    document.title = 'H^2 Bot';
+  }, [locale]);
 
   function openSession(id: string) {
-    setActiveId(id)
+    setActiveId(id);
   }
 
   function addSession() {
-    const session = createSession()
-    setSessions((current) => [session, ...current])
-    setActiveId(session.id)
-    setDraft('')
+    const session = createSession();
+    setSessions((current) => [session, ...current]);
+    setActiveId(session.id);
+    setDraft('');
   }
 
-  function submitMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const question = draft.trim()
+  function submitMessage(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const question = draft.trim();
     if (!question || !active) {
-      return
+      return;
     }
-    const answer = sendMessage(question, locale)
+    const answer = sendMessage(question, locale);
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       text: question,
       locale,
-    }
+    };
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
       role: 'assistant',
       text: answer,
       locale,
-    }
+    };
     setSessions((current) =>
       current.map((session) => {
         if (session.id !== active.id) {
-          return session
+          return session;
         }
         return {
           ...session,
           title: session.title ?? question,
           titleLocale: session.titleLocale ?? locale,
           messages: [...session.messages, userMessage, assistantMessage],
-        }
+        };
       }),
-    )
-    setDraft('')
+    );
+    setDraft('');
   }
 
   return (
@@ -169,5 +157,5 @@ export default function App() {
         </form>
       </main>
     </div>
-  )
+  );
 }

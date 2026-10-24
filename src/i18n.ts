@@ -1,10 +1,10 @@
-export const locales = [
-  { id: 'zh-CN', label: '简体中文' },
-  { id: 'zh-TW', label: '繁體中文' },
-  { id: 'en', label: 'English' },
-] as const
+import type {Locale} from './type/locale.ts';
 
-export type Locale = (typeof locales)[number]['id']
+export const locales = [
+  {id: 'zh-CN', label: '简体中文'},
+  {id: 'zh-TW', label: '繁體中文'},
+  {id: 'en', label: 'English'},
+] as const satisfies readonly {id: Locale; label: string}[];
 
 export const translations = {
   'zh-CN': {
@@ -27,7 +27,7 @@ export const translations = {
     send: '發送',
     empty: '還沒有對話。在下方輸入問題。',
   },
-  en: {
+  'en': {
     sessions: 'Chats',
     newChat: 'New chat',
     hideSidebar: 'Hide chat list',
@@ -37,4 +37,4 @@ export const translations = {
     send: 'Send',
     empty: 'No messages yet. Type a question below.',
   },
-} satisfies Record<Locale, Record<string, string>>
+} satisfies Record<Locale, Record<string, string>>;
