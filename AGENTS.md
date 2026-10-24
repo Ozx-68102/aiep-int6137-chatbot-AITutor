@@ -16,9 +16,13 @@
 - **No Secrets in the Client**: Never put API keys, tokens, or `.env` values in frontend code or commits. Do not call FastGPT directly from browser code. Do not prefix FastGPT variables with `VITE_`. Vite copies `VITE_` variables into the browser bundle.
 - **No Invented Contract**: Do not invent Base URL, appId, `variables`, auth, or endpoints. Stop and ask when they are missing.
 
+## Code Style
+- **Semicolons Required**: In TypeScript (`.ts` and `.tsx`), end every statement with a semicolon. Do not omit semicolons. End type and interface members with a semicolon as well. Use a comma only where the syntax requires a separator, such as object and array literals, parameter lists, import and export specifiers, and enum members. This rule must NOT be skipped.
+
 ## Git & Commits
 - **History Preservation**: Never rewrite pushed or non-HEAD git history. Make new commits instead.
 - **No Secret Commits**: Never stage `.env` or credential files.
 
 ## Verification
+- **Lint Before Done**: After any TypeScript or React change, run `pnpm lint` before declaring the work complete. This command includes type-aware rules. `pnpm build` still runs `tsc --noEmit` separately.
 - **Browser Before Done**: After any UI, layout, routing, or client-state change, verify the affected flow in the browser before declaring it complete. If browser tools are unavailable, say what was not verified.
