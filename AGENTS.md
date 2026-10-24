@@ -21,8 +21,9 @@
 
 ## Git & Commits
 - **History Preservation**: Never rewrite pushed or non-HEAD git history. Make new commits instead.
+- **Remote Blocks Force Push**: Remote Restrict Deletions and Block Force Pushes stay on. Before push, fix with a new commit, `git revert`, or `git commit-tree`. After push, do not force-push; ask the maintainer if those rules must be lifted.
 - **No Secret Commits**: Never stage `.env` or credential files.
-- **One Change, One Commit**: Keep commits atomic: one feature, fix, chore, docs update, or other single logical change maps to one commit. Include whatever files that change needs (code, config, lockfile, docs) in the same commit. Do not split one change across many tiny commits, and do not mix unrelated changes into one commit.
+- **One Change, One Commit**: One logical change maps to one commit. Keep related files together; do not split one change thinly or mix unrelated changes.
 
 ## Verification
 - **Lint Before Done**: After any TypeScript or React change, run `pnpm lint` before declaring the work complete. This command includes type-aware rules. `pnpm build` still runs `tsc --noEmit` separately.
