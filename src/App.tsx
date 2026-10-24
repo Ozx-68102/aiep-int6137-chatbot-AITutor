@@ -26,6 +26,7 @@ export default function App() {
   const [activeId, setActiveId] = useState(() => sessions[0]?.id ?? '');
   const [draft, setDraft] = useState('');
   const [languageOpen, setLanguageOpen] = useState(false);
+  const [enteringIds, setEnteringIds] = useState<string[]>([]);
   const languageMenuRef = useRef<HTMLDivElement>(null);
   const text = translations[locale];
   const active = sessions.find((session) => session.id === activeId) ?? sessions[0];
@@ -100,17 +101,35 @@ export default function App() {
         };
       }),
     );
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduceMotion) {
+      setEnteringIds((current) => [...current, userMessage.id, assistantMessage.id]);
+    }
     setDraft('');
   }
 
   return (
-    <div className={sidebarOpen ? 'app' : 'app sidebar-closed'}>
-      {sidebarOpen ? (
-        <aside className="sidebar" aria-label={text.sessions}>
-          <div className="sidebar-top">
+    <div
+      className={
+        sidebarOpen
+          ? 'grid h-full grid-cols-[16rem_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
+          : 'grid h-full grid-cols-[0_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
+      }
+    >
+      <aside
+        className={
+          sidebarOpen
+            ? 'flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r border-stone-300 bg-stone-200 p-3'
+            : 'flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r-0 bg-stone-200 px-0 py-3'
+        }
+        aria-label={text.sessions}
+        aria-hidden={!sidebarOpen}
+        inert={!sidebarOpen}
+      >
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
-              className="icon-button"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
               aria-label={text.newChat}
               title={text.newChat}
               onClick={addSession}
@@ -119,7 +138,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="icon-button"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
               aria-label={text.hideSidebar}
               title={text.hideSidebar}
               onClick={() => setSidebarOpen(false)}
@@ -127,12 +146,16 @@ export default function App() {
               <PanelLeftClose aria-hidden="true" />
             </button>
           </div>
-          <ul className="session-list">
+          <ul className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
             {sessions.map((session) => (
               <li key={session.id}>
                 <button
                   type="button"
-                  className={session.id === active?.id ? 'session current' : 'session'}
+                  className={
+                    session.id === active?.id
+                      ? 'mb-1 w-full truncate rounded-lg border border-emerald-900 bg-emerald-50 px-3 py-2 text-left'
+                      : 'mb-1 w-full truncate rounded-lg border border-transparent bg-transparent px-3 py-2 text-left'
+                  }
                   lang={session.titleLocale ? htmlLang[session.titleLocale] : undefined}
                   aria-current={session.id === active?.id ? 'true' : undefined}
                   onClick={() => openSession(session.id)}
@@ -143,13 +166,12 @@ export default function App() {
             ))}
           </ul>
         </aside>
-      ) : null}
-      <main className="chat">
-        <header className="chat-bar">
+      <main className="flex min-h-0 min-w-0 flex-col bg-white">
+        <header className="flex items-center justify-between gap-2 border-b border-stone-300 px-4 py-3">
           {sidebarOpen ? null : (
             <button
               type="button"
-              className="icon-button"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
               aria-label={text.showSidebar}
               title={text.showSidebar}
               onClick={() => setSidebarOpen(true)}
@@ -157,11 +179,11 @@ export default function App() {
               <PanelLeftOpen aria-hidden="true" />
             </button>
           )}
-          <h1 lang="en">H^2 Bot</h1>
-          <div className="languages" ref={languageMenuRef}>
+          <h1 lang="en" className="m-0 text-lg">H^2 Bot</h1>
+          <div className="relative ml-auto" ref={languageMenuRef}>
             <button
               type="button"
-              className="icon-button"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
               aria-label={text.language}
               aria-expanded={languageOpen}
               aria-haspopup="menu"
@@ -170,44 +192,69 @@ export default function App() {
             >
               <Languages aria-hidden="true" />
             </button>
-            {languageOpen ? (
-              <div className="language-menu" role="menu" aria-label={text.language}>
-                {locales.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="menuitemradio"
+            <div
+              className={
+                languageOpen
+                  ? 'absolute top-[calc(100%+0.35rem)] right-0 z-10 flex min-w-36 animate-in flex-col rounded-lg border border-stone-300 bg-white p-1.5 fade-in slide-in-from-top-2 duration-200'
+                  : 'absolute top-[calc(100%+0.35rem)] right-0 z-10 hidden'
+              }
+              role="menu"
+              aria-label={text.language}
+              aria-hidden={!languageOpen}
+              inert={!languageOpen}
+            >
+              {locales.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitemradio"
                     lang={htmlLang[item.id]}
+                    className={
+                      item.id === locale
+                        ? 'rounded-md border border-emerald-900 bg-emerald-50 px-2.5 py-1.5 text-left'
+                        : 'rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left'
+                    }
                     aria-checked={item.id === locale}
-                    onClick={() => {
-                      setLocale(item.id);
-                      setLanguageOpen(false);
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+                  onClick={() => {
+                    setLocale(item.id);
+                    setLanguageOpen(false);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
-        <div className="messages" aria-live="polite">
+        <div className="min-h-0 flex-1 overflow-auto p-4" aria-live="polite">
           {active && active.messages.length > 0 ? (
             active.messages.map((message) => (
               <p
                 key={message.id}
                 lang={htmlLang[message.locale]}
-                className={message.role === 'user' ? 'bubble user' : 'bubble assistant'}
+                className={
+                  message.role === 'user'
+                    ? enteringIds.includes(message.id)
+                      ? 'mb-3 ml-auto max-w-xl animate-in rounded-xl bg-emerald-900 px-3.5 py-2.5 whitespace-pre-wrap text-white fade-in slide-in-from-bottom-2 duration-200'
+                      : 'mb-3 ml-auto max-w-xl rounded-xl bg-emerald-900 px-3.5 py-2.5 whitespace-pre-wrap text-white'
+                    : enteringIds.includes(message.id)
+                      ? 'mb-3 max-w-xl animate-in rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap fade-in slide-in-from-bottom-2 duration-200'
+                      : 'mb-3 max-w-xl rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap'
+                }
+                onAnimationEnd={() => {
+                  setEnteringIds((current) => current.filter((id) => id !== message.id));
+                }}
               >
                 {message.text}
               </p>
             ))
           ) : (
-            <p className="empty">{text.empty}</p>
+            <p className="m-0 text-stone-500">{text.empty}</p>
           )}
         </div>
-        <form className="composer" onSubmit={submitMessage}>
+        <form className="flex items-center gap-2 border-t border-stone-300 px-4 pt-3 pb-4" onSubmit={submitMessage}>
           <input
+            className="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5"
             value={draft}
             placeholder={text.placeholder}
             aria-label={text.placeholder}
@@ -215,7 +262,7 @@ export default function App() {
           />
           <button
             type="submit"
-            className="icon-button"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white disabled:cursor-default disabled:border-stone-300 disabled:bg-white disabled:text-inherit disabled:opacity-50"
             aria-label={text.send}
             title={text.send}
             disabled={draft.trim() === ''}
