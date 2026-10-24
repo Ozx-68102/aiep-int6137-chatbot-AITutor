@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Conventional Commits (no scope): type: subject
+# Types: feat fix chore docs refactor test ci build perf style revert
+# Optional ! before : for breaking changes. Merge/fixup/squash/revert subjects skipped.
+
+set -euo pipefail
+
+msg_file="${1:-}"
+if [[ -z "$msg_file" || ! -f "$msg_file" ]]; then
+  echo "commit-msg: missing message file" >&2
+  exit 1
+fi
+
+# First non-comment, non-empty line is the subject.
+subject=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+  case "$line" in
+    \#*) continue ;;
+  esac
+  [[ -z "$line" ]] && continue
+  subject="$line"
+  break
+done <"$msg_file"
+
+if [[ -z "$subject" ]]; then
+  echo "commit-msg: empty commit message" >&2
+  exit 1
+fi
+
+# Git-generated subjects we do not rewrite-check.
+case "$subject" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *)
+    exit 0
+    ;;
+esac
+
+pattern='^(feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert)!?: .+'
+if [[ ! "$subject" =~ $pattern ]]; then
+  cat >&2 <<'EOF'
+commit-msg: subject must be Conventional Commits with no scope:
+  type: subject
+Allowed types: feat fix chore docs refactor test ci build perf style revert
+Optional ! before : for breaking (e.g. feat!: ...).
+EOF
+  exit 1
+fi
