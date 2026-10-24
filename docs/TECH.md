@@ -26,6 +26,7 @@ npm install -g pnpm
 
 - 构建：Vite 8.3.5，插件 @vitejs/plugin-react 6.1.2
 - UI：React 19.3.1、react-dom 19.3.1
+- 图标：lucide-react 1.61.0
 - 语言：TypeScript 7.0.2
 
 ## 环境变量
