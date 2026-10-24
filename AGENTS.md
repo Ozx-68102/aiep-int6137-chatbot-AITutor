@@ -22,6 +22,7 @@
 ## Git & Commits
 - **History Preservation**: Never rewrite pushed or non-HEAD git history. Make new commits instead.
 - **No Secret Commits**: Never stage `.env` or credential files.
+- **One Change, One Commit**: Keep commits atomic: one feature, fix, chore, docs update, or other single logical change maps to one commit. Include whatever files that change needs (code, config, lockfile, docs) in the same commit. Do not split one change across many tiny commits, and do not mix unrelated changes into one commit.
 
 ## Verification
 - **Lint Before Done**: After any TypeScript or React change, run `pnpm lint` before declaring the work complete. This command includes type-aware rules. `pnpm build` still runs `tsc --noEmit` separately.
