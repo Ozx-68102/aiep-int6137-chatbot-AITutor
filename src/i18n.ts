@@ -4,7 +4,7 @@ export const locales = [
   {id: 'zh-CN', label: '简体中文'},
   {id: 'zh-TW', label: '繁體中文'},
   {id: 'en', label: 'English'},
-] as const satisfies readonly {id: Locale; label: string}[];
+] as const satisfies readonly { id: Locale; label: string }[];
 
 export const translations = {
   'zh-CN': {
