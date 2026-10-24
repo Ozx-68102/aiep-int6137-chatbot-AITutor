@@ -69,6 +69,29 @@ button {
   gap: 0.5rem;
 }
 
+.sidebar-top {
+  justify-content: space-between;
+}
+
+.icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid #cfcabe;
+  border-radius: 0.5rem;
+  background: #fff;
+  color: inherit;
+}
+
+.icon-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
 .session-list {
   flex: 1;
   min-height: 0;
@@ -78,15 +101,10 @@ button {
   list-style: none;
 }
 
-.session,
-.new-chat,
-.chat-bar button,
-.sidebar-top button,
-.languages button,
-.composer button {
-  border: 1px solid #cfcabe;
+.session {
+  border: 1px solid transparent;
   border-radius: 0.5rem;
-  background: #fff;
+  background: transparent;
   color: inherit;
 }
 
@@ -105,12 +123,37 @@ button {
   background: #e7f0eb;
 }
 
-.new-chat,
-.sidebar-top button,
-.chat-bar button,
-.languages button,
-.composer button {
-  padding: 0.45rem 0.7rem;
+.languages {
+  position: relative;
+  margin-left: auto;
+}
+
+.language-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 8.5rem;
+  padding: 0.35rem;
+  border: 1px solid #ddd9d0;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.language-menu button {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.language-menu button[aria-checked='true'] {
+  border-color: #1f4b3a;
+  background: #e7f0eb;
 }
 
 .chat {
@@ -130,15 +173,6 @@ button {
 .chat-bar h1 {
   margin: 0;
   font-size: 1.1rem;
-}
-
-.languages {
-  margin-left: auto;
-}
-
-.languages button[aria-pressed='true'] {
-  border-color: #1f4b3a;
-  background: #e7f0eb;
 }
 
 .messages {
@@ -184,7 +218,16 @@ button {
   border-radius: 0.5rem;
 }
 
-.composer button:disabled {
+.composer .icon-button {
+  background: #1f4b3a;
+  border-color: #1f4b3a;
+  color: #fff;
+}
+
+.composer .icon-button:disabled {
   cursor: default;
   opacity: 0.55;
+  background: #fff;
+  border-color: #cfcabe;
+  color: inherit;
 }
