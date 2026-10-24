@@ -28,6 +28,12 @@ npm install -g pnpm
 - UI：React 19.3.1、react-dom 19.3.1
 - 语言：TypeScript 7.0.2
 
+## 环境变量
+
+FastGPT 的访问地址、API 密钥和应用 ID 写在仓库根目录的 `.env`。这个文件已被忽略，不会提交。`.env.example` 只说明每一项该填什么。
+
+变量名不要以 `VITE_` 开头。Vite 会把 `VITE_` 开头的变量放进浏览器能下载到的页面里，密钥就会暴露。这三项只给服务端读取，页面代码不要读。
+
 ## Git
 
 提交说明由 `.githooks/commit-msg` 检查，格式是不带 scope 的 `type: subject`。

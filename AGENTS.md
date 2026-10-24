@@ -13,7 +13,7 @@
 
 ## Environment & Tooling
 - **No Stack Until Named**: Do not initialize a project, add dependencies, or pick a framework, package manager, or directory layout until the user names them.
-- **No Secrets in the Client**: Never put API keys, tokens, or `.env` values in frontend code or commits. Do not call FastGPT directly from browser code.
+- **No Secrets in the Client**: Never put API keys, tokens, or `.env` values in frontend code or commits. Do not call FastGPT directly from browser code. Do not prefix FastGPT variables with `VITE_`. Vite copies `VITE_` variables into the browser bundle.
 - **No Invented Contract**: Do not invent Base URL, appId, `variables`, auth, or endpoints. Stop and ask when they are missing.
 
 ## Git & Commits
