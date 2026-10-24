@@ -1,0 +1,44 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Operating System & Editor Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+
+# Node.js
+# Dependencies
+node_modules/
+jspm_packages/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs & framework artifacts
+/dist/
+/build/
+.next/
+.nuxt/
+.output/
+
+# Caches & tool artifacts
+.npm
+.eslintcache
+.stylelintcache
+.node_repl_history
+*.tgz
+.yarn/cache
+.pnpm-store/
