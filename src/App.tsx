@@ -1,4 +1,5 @@
-import {type SubmitEvent, useEffect, useState} from 'react';
+import {Languages, PanelLeftClose, PanelLeftOpen, Plus, Send} from 'lucide-react';
+import {type SubmitEvent, useEffect, useRef, useState} from 'react';
 import {sendMessage} from './api/chat.ts';
 import {locales, translations} from './i18n.ts';
 import type {Message, Session} from './type/chat.ts';
@@ -24,6 +25,8 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>(() => [createSession()]);
   const [activeId, setActiveId] = useState(() => sessions[0]?.id ?? '');
   const [draft, setDraft] = useState('');
+  const [languageOpen, setLanguageOpen] = useState(false);
+  const languageMenuRef = useRef<HTMLDivElement>(null);
   const text = translations[locale];
   const active = sessions.find((session) => session.id === activeId) ?? sessions[0];
 
@@ -31,6 +34,28 @@ export default function App() {
     document.documentElement.lang = htmlLang[locale];
     document.title = 'H^2 Bot';
   }, [locale]);
+
+  useEffect(() => {
+    if (!languageOpen) {
+      return;
+    }
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (!languageMenuRef.current?.contains(event.target as Node)) {
+        setLanguageOpen(false);
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setLanguageOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [languageOpen]);
 
   function openSession(id: string) {
     setActiveId(id);
@@ -83,8 +108,23 @@ export default function App() {
       {sidebarOpen ? (
         <aside className="sidebar" aria-label={text.sessions}>
           <div className="sidebar-top">
-            <button type="button" onClick={() => setSidebarOpen(false)}>
-              {text.hideSidebar}
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={text.newChat}
+              title={text.newChat}
+              onClick={addSession}
+            >
+              <Plus aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={text.hideSidebar}
+              title={text.hideSidebar}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <PanelLeftClose aria-hidden="true" />
             </button>
           </div>
           <ul className="session-list">
@@ -102,31 +142,53 @@ export default function App() {
               </li>
             ))}
           </ul>
-          <button type="button" className="new-chat" onClick={addSession}>
-            {text.newChat}
-          </button>
         </aside>
       ) : null}
       <main className="chat">
         <header className="chat-bar">
           {sidebarOpen ? null : (
-            <button type="button" onClick={() => setSidebarOpen(true)}>
-              {text.showSidebar}
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={text.showSidebar}
+              title={text.showSidebar}
+              onClick={() => setSidebarOpen(true)}
+            >
+              <PanelLeftOpen aria-hidden="true" />
             </button>
           )}
           <h1 lang="en">H^2 Bot</h1>
-          <div className="languages" role="group" aria-label={text.language}>
-            {locales.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                lang={htmlLang[item.id]}
-                aria-pressed={item.id === locale}
-                onClick={() => setLocale(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="languages" ref={languageMenuRef}>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={text.language}
+              aria-expanded={languageOpen}
+              aria-haspopup="menu"
+              title={text.language}
+              onClick={() => setLanguageOpen((open) => !open)}
+            >
+              <Languages aria-hidden="true" />
+            </button>
+            {languageOpen ? (
+              <div className="language-menu" role="menu" aria-label={text.language}>
+                {locales.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="menuitemradio"
+                    lang={htmlLang[item.id]}
+                    aria-checked={item.id === locale}
+                    onClick={() => {
+                      setLocale(item.id);
+                      setLanguageOpen(false);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         </header>
         <div className="messages" aria-live="polite">
@@ -151,8 +213,14 @@ export default function App() {
             aria-label={text.placeholder}
             onChange={(event) => setDraft(event.target.value)}
           />
-          <button type="submit" disabled={draft.trim() === ''}>
-            {text.send}
+          <button
+            type="submit"
+            className="icon-button"
+            aria-label={text.send}
+            title={text.send}
+            disabled={draft.trim() === ''}
+          >
+            <Send aria-hidden="true" />
           </button>
         </form>
       </main>
