@@ -40,16 +40,19 @@ export default function App() {
     if (!languageOpen) {
       return;
     }
+
     function closeOnOutsidePointer(event: PointerEvent) {
       if (!languageMenuRef.current?.contains(event.target as Node)) {
         setLanguageOpen(false);
       }
     }
+
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setLanguageOpen(false);
       }
     }
+
     document.addEventListener('pointerdown', closeOnOutsidePointer);
     document.addEventListener('keydown', closeOnEscape);
     return () => {
@@ -126,46 +129,46 @@ export default function App() {
         aria-hidden={!sidebarOpen}
         inert={!sidebarOpen}
       >
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
-              aria-label={text.newChat}
-              title={text.newChat}
-              onClick={addSession}
-            >
-              <Plus aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
-              aria-label={text.hideSidebar}
-              title={text.hideSidebar}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <PanelLeftClose aria-hidden="true" />
-            </button>
-          </div>
-          <ul className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <button
-                  type="button"
-                  className={
-                    session.id === active?.id
-                      ? 'mb-1 w-full truncate rounded-lg border border-emerald-900 bg-emerald-50 px-3 py-2 text-left'
-                      : 'mb-1 w-full truncate rounded-lg border border-transparent bg-transparent px-3 py-2 text-left'
-                  }
-                  lang={session.titleLocale ? htmlLang[session.titleLocale] : undefined}
-                  aria-current={session.id === active?.id ? 'true' : undefined}
-                  onClick={() => openSession(session.id)}
-                >
-                  {sessionTitle(session, text.newChat)}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
+            aria-label={text.newChat}
+            title={text.newChat}
+            onClick={addSession}
+          >
+            <Plus aria-hidden="true"/>
+          </button>
+          <button
+            type="button"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
+            aria-label={text.hideSidebar}
+            title={text.hideSidebar}
+            onClick={() => setSidebarOpen(false)}
+          >
+            <PanelLeftClose aria-hidden="true"/>
+          </button>
+        </div>
+        <ul className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
+          {sessions.map((session) => (
+            <li key={session.id}>
+              <button
+                type="button"
+                className={
+                  session.id === active?.id
+                    ? 'mb-1 w-full truncate rounded-lg border border-emerald-900 bg-emerald-50 px-3 py-2 text-left'
+                    : 'mb-1 w-full truncate rounded-lg border border-transparent bg-transparent px-3 py-2 text-left'
+                }
+                lang={session.titleLocale ? htmlLang[session.titleLocale] : undefined}
+                aria-current={session.id === active?.id ? 'true' : undefined}
+                onClick={() => openSession(session.id)}
+              >
+                {sessionTitle(session, text.newChat)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </aside>
       <main className="flex min-h-0 min-w-0 flex-col bg-white">
         <header className="flex items-center justify-between gap-2 border-b border-stone-300 px-4 py-3">
           {sidebarOpen ? null : (
@@ -176,7 +179,7 @@ export default function App() {
               title={text.showSidebar}
               onClick={() => setSidebarOpen(true)}
             >
-              <PanelLeftOpen aria-hidden="true" />
+              <PanelLeftOpen aria-hidden="true"/>
             </button>
           )}
           <h1 lang="en" className="m-0 text-lg">H^2 Bot</h1>
@@ -190,7 +193,7 @@ export default function App() {
               title={text.language}
               onClick={() => setLanguageOpen((open) => !open)}
             >
-              <Languages aria-hidden="true" />
+              <Languages aria-hidden="true"/>
             </button>
             <div
               className={
@@ -208,13 +211,13 @@ export default function App() {
                   key={item.id}
                   type="button"
                   role="menuitemradio"
-                    lang={htmlLang[item.id]}
-                    className={
-                      item.id === locale
-                        ? 'rounded-md border border-emerald-900 bg-emerald-50 px-2.5 py-1.5 text-left'
-                        : 'rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left'
-                    }
-                    aria-checked={item.id === locale}
+                  lang={htmlLang[item.id]}
+                  className={
+                    item.id === locale
+                      ? 'rounded-md border border-emerald-900 bg-emerald-50 px-2.5 py-1.5 text-left'
+                      : 'rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left'
+                  }
+                  aria-checked={item.id === locale}
                   onClick={() => {
                     setLocale(item.id);
                     setLanguageOpen(false);
@@ -271,7 +274,7 @@ export default function App() {
             title={text.send}
             disabled={draft.trim() === ''}
           >
-            <Send aria-hidden="true" />
+            <Send aria-hidden="true"/>
           </button>
         </form>
       </main>
