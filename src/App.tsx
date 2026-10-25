@@ -1,6 +1,6 @@
 import {Languages, PanelLeftClose, PanelLeftOpen, Send, SquarePlus} from 'lucide-react';
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
-import logoUrl from './assets/H-Squared_Bot.png';
+import logoUrl from './assets/H-Squared_Bot_Vector.svg';
 import {sendMessage} from './api/chat.ts';
 import {locales, translations} from './i18n.ts';
 import type {Message, Session} from './type/chat.ts';
