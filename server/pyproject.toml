@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
     "ruff>=0.17.2",
+    "sqlalchemy>=2.1.6",
     "uvicorn>=0.54.0",
 ]
 

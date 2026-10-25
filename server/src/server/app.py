@@ -4,10 +4,12 @@ from uuid import UUID
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import FastAPI, HTTPException, status
-from psycopg import Connection
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from server.database import database_connection
+from server.database import db_session
+from server.models import Account
 
 _ADMIN_USERNAME = "admin"
 _UNAUTHORIZED = "用户名或密码不正确"
@@ -40,67 +42,35 @@ def login(body: LoginRequest) -> LoginResponse:
     if body.username != _ADMIN_USERNAME:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
 
-    with database_connection() as connection:
-        return _login_admin(connection, body.password)
+    with db_session() as session:
+        return _login_admin(session, body.password)
 
 
-def _login_admin(connection: Connection, password: str) -> LoginResponse:
-    row = connection.execute(
-        """
-        SELECT id, password_hash
-        FROM account
-        WHERE username = %s
-        """,
-        (_ADMIN_USERNAME,),
-    ).fetchone()
-    if row is None:
+def _login_admin(session: Session, password: str) -> LoginResponse:
+    account = session.scalar(select(Account).where(Account.username == _ADMIN_USERNAME))
+    if account is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
 
-    account_id, password_hash = row
     hasher = PasswordHasher()
-    if not _password_matches(hasher, password_hash, password):
+    if not _password_matches(hasher, account.password_hash, password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
 
-    if hasher.check_needs_rehash(password_hash):
-        connection.execute(
-            """
-            UPDATE account
-            SET password_hash = %s
-            WHERE id = %s
-            """,
-            (hasher.hash(password), account_id),
-        )
+    if hasher.check_needs_rehash(account.password_hash):
+        account.password_hash = hasher.hash(password)
 
-    locale_row = connection.execute(
-        """
-        SELECT locale
-        FROM language_setting
-        WHERE account_id = %s
-        """,
-        (account_id,),
-    ).fetchone()
-    if locale_row is None:
+    if account.language_setting is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "账号没有语言设置")
 
-    session_rows = connection.execute(
-        """
-        SELECT id, title, title_locale, created_at
-        FROM session
-        WHERE account_id = %s
-        ORDER BY created_at
-        """,
-        (account_id,),
-    ).fetchall()
     sessions = [
         SessionItem(
-            id=session_id,
-            title=title,
-            title_locale=title_locale,
-            created_at=created_at,
+            id=item.id,
+            title=item.title,
+            title_locale=item.title_locale,
+            created_at=item.created_at,
         )
-        for session_id, title, title_locale, created_at in session_rows
+        for item in account.sessions
     ]
-    return LoginResponse(locale=locale_row[0], sessions=sessions)
+    return LoginResponse(locale=account.language_setting.locale, sessions=sessions)
 
 
 def _password_matches(hasher: PasswordHasher, stored_hash: str, password: str) -> bool:
