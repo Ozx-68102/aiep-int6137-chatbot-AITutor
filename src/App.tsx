@@ -1,5 +1,6 @@
-import {Languages, PanelLeftClose, PanelLeftOpen, Plus, Send} from 'lucide-react';
+import {Languages, PanelLeftClose, PanelLeftOpen, Send, SquarePlus} from 'lucide-react';
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
+import logoUrl from './assets/H-Squared_Bot.png';
 import {sendMessage} from './api/chat.ts';
 import {locales, translations} from './i18n.ts';
 import type {Message, Session} from './type/chat.ts';
@@ -115,7 +116,7 @@ export default function App() {
     <div
       className={
         sidebarOpen
-          ? 'grid h-full grid-cols-[16rem_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
+          ? 'grid h-full grid-cols-[20rem_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
           : 'grid h-full grid-cols-[0_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
       }
     >
@@ -129,16 +130,21 @@ export default function App() {
         aria-hidden={!sidebarOpen}
         inert={!sidebarOpen}
       >
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
-            aria-label={text.newChat}
-            title={text.newChat}
-            onClick={addSession}
-          >
-            <Plus aria-hidden="true"/>
-          </button>
+        <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <button
+              type="button"
+              className="shrink-0 cursor-pointer border-0 bg-transparent p-0"
+              aria-label={text.createSession}
+              title={text.createSession}
+              onClick={addSession}
+            >
+              <img src={logoUrl} alt="" className="h-12 w-auto"/>
+            </button>
+            <p lang="en" className="min-w-0 text-xs leading-tight text-stone-600">
+              Help × Higher Understanding
+            </p>
+          </div>
           <button
             type="button"
             className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
@@ -149,6 +155,14 @@ export default function App() {
             <PanelLeftClose aria-hidden="true"/>
           </button>
         </div>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left"
+          onClick={addSession}
+        >
+          <SquarePlus aria-hidden="true" className="size-4 shrink-0"/>
+          {text.createSession}
+        </button>
         <ul className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
           {sessions.map((session) => (
             <li key={session.id}>
@@ -182,7 +196,12 @@ export default function App() {
               <PanelLeftOpen aria-hidden="true"/>
             </button>
           )}
-          <h1 lang="en" className="m-0 text-lg">H^2 Bot</h1>
+          <h1
+            lang={active?.titleLocale ? htmlLang[active.titleLocale] : undefined}
+            className="m-0 min-w-0 flex-1 truncate text-lg"
+          >
+            {active ? sessionTitle(active, text.newChat) : text.newChat}
+          </h1>
           <div className="relative ml-auto" ref={languageMenuRef}>
             <button
               type="button"

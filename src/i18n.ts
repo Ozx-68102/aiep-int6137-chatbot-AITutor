@@ -10,6 +10,7 @@ export const translations = {
   'zh-CN': {
     sessions: '会话',
     newChat: '新对话',
+    createSession: '创建新会话',
     hideSidebar: '收起会话列表',
     showSidebar: '展开会话列表',
     language: '语言',
@@ -20,6 +21,7 @@ export const translations = {
   'zh-TW': {
     sessions: '對話',
     newChat: '新對話',
+    createSession: '建立新對話',
     hideSidebar: '收起對話列表',
     showSidebar: '展開對話列表',
     language: '語言',
@@ -30,6 +32,7 @@ export const translations = {
   'en': {
     sessions: 'Chats',
     newChat: 'New chat',
+    createSession: 'Create new chat',
     hideSidebar: 'Hide chat list',
     showSidebar: 'Show chat list',
     language: 'Language',
