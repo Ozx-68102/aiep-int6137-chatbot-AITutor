@@ -1,2 +1,7 @@
+import uvicorn
+
+from server.app import app
+
+
 def main() -> None:
-    print("Hello from server!")
+    uvicorn.run(app, host="127.0.0.1", port=3001)
