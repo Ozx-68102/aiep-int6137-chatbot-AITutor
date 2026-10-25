@@ -22,8 +22,8 @@ def _create_tables(connection: Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS account (
             id uuid PRIMARY KEY,
-            username text NOT NULL UNIQUE,
-            password_hash text NOT NULL
+            username varchar(64) NOT NULL UNIQUE,
+            password_hash varchar(255) NOT NULL
         )
         """,
     )
@@ -31,7 +31,7 @@ def _create_tables(connection: Connection) -> None:
         f"""
         CREATE TABLE IF NOT EXISTS language_setting (
             account_id uuid PRIMARY KEY REFERENCES account (id),
-            locale text NOT NULL,
+            locale varchar(5) NOT NULL,
             CONSTRAINT language_setting_locale_check
                 CHECK (locale IN ({_LOCALES}))
         )
@@ -42,8 +42,8 @@ def _create_tables(connection: Connection) -> None:
         CREATE TABLE IF NOT EXISTS session (
             id uuid PRIMARY KEY,
             account_id uuid NOT NULL REFERENCES account (id),
-            title text,
-            title_locale text,
+            title varchar(500),
+            title_locale varchar(5),
             created_at timestamptz NOT NULL DEFAULT now(),
             CONSTRAINT session_title_locale_check
                 CHECK (title_locale IS NULL OR title_locale IN ({_LOCALES}))
