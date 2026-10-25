@@ -33,9 +33,9 @@ npm install -g pnpm
 
 ## 环境变量
 
-FastGPT 的访问地址、API 密钥和应用 ID 写在仓库根目录的 `.env`。这个文件已被忽略，不会提交。`.env.example` 只说明每一项该填什么。
+FastGPT 的访问地址、API 密钥和应用 ID，以及 PostgreSQL 的连接信息，写在仓库根目录的 `.env`。这个文件已被忽略，不会提交。`.env.example` 只说明每一项该填什么。
 
-变量名不要以 `VITE_` 开头。Vite 会把 `VITE_` 开头的变量放进浏览器能下载到的页面里，密钥就会暴露。这三项只给服务端读取，页面代码不要读。
+变量名不要以 `VITE_` 开头。Vite 会把 `VITE_` 开头的变量放进浏览器能下载到的页面里，密钥就会暴露。这些项只给服务端读取，页面代码不要读。
 
 薄代理如何读取上述变量并做流式转发，见 [FASTGPT-PROXY-PROPOSAL.md](./FASTGPT-PROXY-PROPOSAL.md)（提议，代码尚未落地）。
 
