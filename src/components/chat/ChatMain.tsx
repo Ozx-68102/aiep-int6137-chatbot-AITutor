@@ -6,6 +6,13 @@ import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
 
+function visibleText(role: 'user' | 'assistant' | 'error', text: string): string {
+  if (role !== 'assistant') {
+    return text;
+  }
+  return text.replace(/^\n+/, '');
+}
+
 export function ChatMain({
   locale,
   sidebarOpen,
@@ -43,7 +50,7 @@ export function ChatMain({
         {sidebarOpen ? null : (
           <button
             type="button"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
             aria-label={text.showSidebar}
             title={text.showSidebar}
             onClick={onShowSidebar}
@@ -69,16 +76,22 @@ export function ChatMain({
           </p>
         ) : null}
         {active && active.messages.length > 0 ? (
-          active.messages.map((message) => (
-            <p
-              key={message.id}
-              lang={message.locale ? htmlLang[message.locale] : undefined}
-              className={bubbleClass(message.role, enteringIds.includes(message.id))}
-              onAnimationEnd={() => onAnimationEnd(message.id)}
-            >
-              {message.text}
-            </p>
-          ))
+          active.messages.map((message) => {
+            const textShown = visibleText(message.role, message.text);
+            if (textShown === '') {
+              return null;
+            }
+            return (
+              <p
+                key={message.id}
+                lang={message.locale ? htmlLang[message.locale] : undefined}
+                className={bubbleClass(message.role, enteringIds.includes(message.id))}
+                onAnimationEnd={() => onAnimationEnd(message.id)}
+              >
+                {textShown}
+              </p>
+            );
+          })
         ) : null}
         {!active || (active.messagesKnown && active.messages.length === 0) ? (
           <p className="m-0 text-stone-500">{text.empty}</p>
@@ -102,7 +115,7 @@ export function ChatMain({
           className={
             sendLocked || draft.trim() === ''
               ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
-              : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white'
+              : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
           }
           aria-label={text.send}
           title={text.send}

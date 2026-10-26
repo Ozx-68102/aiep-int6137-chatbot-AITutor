@@ -11,6 +11,7 @@ export type Session = {
   id: string;
   title: string | null;
   titleLocale: Locale | null;
+  pinned: boolean;
   messages: Message[];
   messagesKnown: boolean;
 };
