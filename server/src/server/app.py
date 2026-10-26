@@ -5,6 +5,7 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -17,7 +18,7 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -129,6 +130,7 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
 
 @app.post("/api/login")
 def login(body: LoginRequest, response: Response) -> LoginResponse:
+    _sweep_expired_tokens()
     with db_session() as session:
         result, token = _login_account(session, body.username, body.password)
 
@@ -421,7 +423,11 @@ def _login_account(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
 
     token = secrets.token_urlsafe(32)
-    session.add(LoginToken(account=account, token_hash=_token_hash(token)))
+    session.add(LoginToken(
+        account=account,
+        token_hash=_token_hash(token),
+        expires_at=_login_deadline(),
+    ))
     result = LoginResponse(
         locale=language.locale,
         sessions=_session_items(account),
@@ -440,12 +446,27 @@ def _login_token(session: Session, login_cookie: str | None) -> LoginToken | Non
     if login_cookie is None or login_cookie == "":
         return None
 
+    _sweep_expired_tokens()
     token = session.scalar(
         select(LoginToken).where(LoginToken.token_hash == _token_hash(login_cookie)),
     )
     if not isinstance(token, LoginToken):
         return None
+    token.expires_at = _login_deadline()
     return token
+
+
+def _login_deadline() -> datetime:
+    return datetime.now(UTC) + timedelta(seconds=_COOKIE_MAX_AGE)
+
+
+def _sweep_expired_tokens() -> None:
+    with db_session() as session:
+        session.execute(
+            delete(LoginToken).where(
+                LoginToken.expires_at <= datetime.now(UTC),
+            ),
+        )
 
 
 def _profile(account: Account) -> ProfileResponse:
