@@ -20,8 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from server.database import db_session
-from server.models import Account, ChatSession, LoginToken
+from server.db import Account, ChatSession, LoginToken, db_session
 from server.settings import load_settings
 
 logger = logging.getLogger("server.app")
