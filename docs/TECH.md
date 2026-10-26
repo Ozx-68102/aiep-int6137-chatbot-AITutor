@@ -49,7 +49,7 @@ npm install -g pnpm
 
 FastGPT 的访问地址、API 密钥和应用 ID，PostgreSQL 和 Redis 的连接信息，以及 `DEBUG`，写在仓库根目录的 `.env`。这个文件已被忽略，不会提交。`.env.example` 只说明每一项该填什么。
 
-变量名不要以 `VITE_` 开头。Vite 会把 `VITE_` 开头的变量放进浏览器能下载到的页面里，密钥就会暴露。这些项只给服务端读取，页面代码不要读。服务端在 `server/src/server/settings.py` 读取仓库根目录的 `.env`。
+变量名不要以 `VITE_` 开头。Vite 会把 `VITE_` 开头的变量放进浏览器能下载到的页面里，密钥就会暴露。这些项只给服务端读取，页面代码不要读。服务端在 `server/src/server/settings.py` 读取仓库根目录的 `.env`。配置模型和接口模型在 `server/types`。
 
 ## Git
 
