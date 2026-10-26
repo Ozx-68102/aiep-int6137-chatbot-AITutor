@@ -14,11 +14,16 @@ class SessionItem(BaseModel):
     id: UUID
     title: str | None
     title_locale: str | None
+    pinned: bool
     created_at: datetime
 
 
 class SessionRename(BaseModel):
     title: str = Field(min_length=1, max_length=500)
+
+
+class SessionPin(BaseModel):
+    pinned: bool
 
 
 class LoginResponse(BaseModel):

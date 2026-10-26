@@ -42,6 +42,7 @@ from server.types import (
     ProfileResponse,
     ProfileUpdate,
     SessionItem,
+    SessionPin,
     SessionRename,
     empty_fastgpt_fields,
 )
@@ -60,7 +61,6 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await fastgpt.aclose()
 
 
-_ADMIN_USERNAME = "admin"
 _UNAUTHORIZED = "用户名或密码不正确"
 _LOGIN_REQUIRED = "未登录"
 _COOKIE_NAME = "login"
@@ -129,13 +129,8 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
 
 @app.post("/api/login")
 def login(body: LoginRequest, response: Response) -> LoginResponse:
-    # TODO: 现在只允许用户名 admin 登录。
-    #  以后改为按 account 表里的用户名查找并核对密码，不要写死这一个账号。
-    if body.username != _ADMIN_USERNAME:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
-
     with db_session() as session:
-        result, token = _login_admin(session, body.password)
+        result, token = _login_account(session, body.username, body.password)
 
     _set_login_cookie(response, token)
     return result
@@ -215,6 +210,19 @@ def rename_session(
         account = _account_from_cookie(session, login_cookie)
         chat = _require_session(session, account, session_id)
         chat.title = body.title
+        return _session_item(chat)
+
+
+@app.patch("/api/sessions/{session_id}/pin")
+def pin_session(
+    session_id: UUID,
+    body: SessionPin,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> SessionItem:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        chat = _require_session(session, account, session_id)
+        chat.pinned = body.pinned
         return _session_item(chat)
 
 
@@ -391,8 +399,12 @@ def _require_session(
     return found
 
 
-def _login_admin(session: Session, password: str) -> tuple[LoginResponse, str]:
-    account = session.scalar(select(Account).where(Account.username == _ADMIN_USERNAME))
+def _login_account(
+    session: Session,
+    username: str,
+    password: str,
+) -> tuple[LoginResponse, str]:
+    account = session.scalar(select(Account).where(Account.username == username))
     if not isinstance(account, Account):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
 
@@ -480,6 +492,7 @@ def _session_item(item: ChatSession) -> SessionItem:
         id=item.id,
         title=item.title,
         title_locale=item.title_locale,
+        pinned=item.pinned,
         created_at=item.created_at,
     )
 
