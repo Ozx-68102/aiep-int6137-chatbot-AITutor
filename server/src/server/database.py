@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from sqlalchemy import URL, Engine, create_engine
 from sqlalchemy.orm import Session
 
-from server.settings import Settings
+from server.settings import Settings, load_settings
 
 _engine: Engine | None = None
 
@@ -14,8 +14,7 @@ def get_engine(settings: Settings | None = None) -> Engine:
     if _engine is not None:
         return _engine
 
-    # noinspection PyArgumentList
-    settings = Settings() if settings is None else settings
+    settings = load_settings() if settings is None else settings
     _engine = create_engine(
         URL.create(
             drivername="postgresql+psycopg",
