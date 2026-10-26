@@ -1,9 +1,9 @@
 import {PanelLeftClose, SquarePlus, User} from 'lucide-react';
+import {SessionRow} from './SessionRow.tsx';
 import logoUrl from '../../assets/H-Squared_Bot_Vector.svg';
 import {translations} from '../../i18n.ts';
-import {sessionTitle} from '../../session/empty.ts';
 import type {Session} from '../../type/chat.ts';
-import {htmlLang, type Locale} from '../../type/locale.ts';
+import type {Locale} from '../../type/locale.ts';
 import {sidebarClass} from './class.ts';
 
 export function Sidebar({
@@ -17,6 +17,8 @@ export function Sidebar({
   onCreate,
   onClose,
   onOpenSession,
+  onRename,
+  onDelete,
   onOpenSettings,
 }: {
   locale: Locale;
@@ -29,6 +31,8 @@ export function Sidebar({
   onCreate: () => void;
   onClose: () => void;
   onOpenSession: (id: string) => void;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
   onOpenSettings: () => void;
 }) {
   const text = translations[locale];
@@ -89,21 +93,16 @@ export function Sidebar({
         </button>
         <ul className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
           {sessions.map((session) => (
-            <li key={session.id}>
-              <button
-                type="button"
-                className={
-                  session.id === activeId
-                    ? 'mb-1 w-full truncate rounded-lg border border-emerald-900 bg-emerald-50 px-3 py-2 text-left'
-                    : 'mb-1 w-full truncate rounded-lg border border-transparent bg-transparent px-3 py-2 text-left'
-                }
-                lang={session.titleLocale ? htmlLang[session.titleLocale] : undefined}
-                aria-current={session.id === activeId ? 'true' : undefined}
-                onClick={() => onOpenSession(session.id)}
-              >
-                {sessionTitle(session, text.newChat)}
-              </button>
-            </li>
+            <SessionRow
+              key={session.id}
+              locale={locale}
+              session={session}
+              active={session.id === activeId}
+              fallbackTitle={text.newChat}
+              onOpen={() => onOpenSession(session.id)}
+              onRename={(title) => onRename(session.id, title)}
+              onDelete={() => onDelete(session.id)}
+            />
           ))}
         </ul>
         <button
