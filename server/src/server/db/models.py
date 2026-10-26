@@ -83,4 +83,5 @@ class LoginToken(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     account: Mapped[Account] = relationship()
