@@ -12,7 +12,8 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "./scripts/start-server.sh",
     "build": "tsc --noEmit && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
