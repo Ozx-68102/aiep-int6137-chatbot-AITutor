@@ -35,3 +35,6 @@
 - **Lint Before Done**: After any TypeScript or React change, run `pnpm lint` before declaring the work complete. This command includes type-aware rules. `pnpm build` still runs `tsc --noEmit` separately.
 - **Python Lint**: After any edit under `server/`, run `uv run ruff check .` from `server/`. Fix all issues before requesting review.
 - **Browser Before Done**: After any UI, layout, routing, or client-state change, verify the affected flow in the browser before declaring it complete. If browser tools are unavailable, say what was not verified.
+
+## Findings
+Observed behavior that is not obvious from the code or the upstream docs goes in [docs/FINDINGS.md](docs/FINDINGS.md). Add new findings there. Do not write secrets, passwords, or cookies into that file.
