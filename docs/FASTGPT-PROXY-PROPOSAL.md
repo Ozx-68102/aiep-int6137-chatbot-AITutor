@@ -39,7 +39,7 @@ FastGPT 负责 AI 与工作流（检索、编排、调用模型等）。浏览�
 
 原则：
 
-- 根目录仍以 **pnpm 构建与开发前端** 为主；`pnpm dev` / `pnpm build` 默认行为可保持不变，是否在文档中增加「同时启动代理」由团队决定。
+- 根目录用 pnpm。页面是 `pnpm run dev:frontend`，接口是 `pnpm run dev:backend`，构建是 `pnpm build`。没有 `pnpm dev`。
 - 不把 Python 虚拟环境、`node_modules` 提交进 git（`.env` 的忽略规则沿用现有约定）。
 - 前端不 import 代理目录中的代码，只通过 HTTP 访问代理。
 
@@ -78,7 +78,7 @@ FastGPT 侧具体字段与示例以维护者文档为准；可在代理实现旁
 两个进程：
 
 1. 代理：例如 `http://localhost:3001`。
-2. 前端：`pnpm dev`，在 `vite.config.ts` 将 `/api` 代理到上述服务，页面统一请求 `/api/...`。
+2. 前端：`pnpm run dev:frontend`，在 `vite.config.ts` 将 `/api` 代理到上述服务，页面统一请求 `/api/...`。接口另开一个终端，用 `pnpm run dev:backend`。
 
 这是小组作业。成品部署在专业老师设置的服务器上，使用本专业所属部门的公网域名，给其他人从公网访问。语言等设置和左侧会话列表存在服务器上，挂在登录账号下。可以先只有一个 `admin` / `admin`。同一个账号换一台电脑登录，看到的是同一份。
 
