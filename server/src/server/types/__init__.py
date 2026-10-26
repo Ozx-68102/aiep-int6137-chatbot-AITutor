@@ -5,6 +5,8 @@ from server.types.api import (
     LoginRequest,
     LoginResponse,
     PartialReplyResponse,
+    ProfileResponse,
+    ProfileUpdate,
     SessionItem,
 )
 from server.types.env import Settings, empty_fastgpt_fields
@@ -16,6 +18,8 @@ __all__ = [
     "LoginRequest",
     "LoginResponse",
     "PartialReplyResponse",
+    "ProfileResponse",
+    "ProfileUpdate",
     "SessionItem",
     "Settings",
     "empty_fastgpt_fields",

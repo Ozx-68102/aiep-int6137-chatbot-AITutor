@@ -22,6 +22,16 @@ class LoginResponse(BaseModel):
     sessions: list[SessionItem]
 
 
+class ProfileResponse(BaseModel):
+    id: UUID
+    username: str
+    locale: Literal["zh-CN", "zh-TW", "en"]
+
+
+class ProfileUpdate(BaseModel):
+    locale: Literal["zh-CN", "zh-TW", "en"]
+
+
 class PartialReplyResponse(BaseModel):
     status: str | None
     text: str

@@ -19,6 +19,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from server.db import Account, ChatSession, LoginToken, db_session
 from server.fastgpt import FastGPT, FastGPTError, open_fastgpt
@@ -37,6 +39,8 @@ from server.types import (
     LoginRequest,
     LoginResponse,
     PartialReplyResponse,
+    ProfileResponse,
+    ProfileUpdate,
     SessionItem,
     empty_fastgpt_fields,
 )
@@ -59,7 +63,9 @@ _ADMIN_USERNAME = "admin"
 _UNAUTHORIZED = "用户名或密码不正确"
 _LOGIN_REQUIRED = "未登录"
 _COOKIE_NAME = "login"
+_COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 _SERVER_ERROR = "服务器错误"
+_NO_LANGUAGE = "账号没有语言设置"
 _running: set[asyncio.Task[None]] = set()
 
 
@@ -72,6 +78,38 @@ class _Relay:
 
 
 app = FastAPI(lifespan=_lifespan)
+
+
+class _RefreshLoginCookie:
+    def __init__(self, asgi_app: ASGIApp) -> None:
+        self._asgi_app = asgi_app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._asgi_app(scope, receive, send)
+            return
+
+        cookie = Request(scope).cookies.get(_COOKIE_NAME)
+        refresh = cookie is not None and _cookie_is_valid(cookie)
+
+        async def send_with_refresh(message: Message) -> None:
+            starting = message["type"] == "http.response.start"
+            if starting and refresh and cookie is not None:
+                headers = MutableHeaders(raw=message["headers"])
+                already_set = any(
+                    value.startswith(f"{_COOKIE_NAME}=")
+                    for value in headers.getlist("set-cookie")
+                )
+                if not already_set:
+                    fresh = Response()
+                    _set_login_cookie(fresh, cookie)
+                    headers.append("set-cookie", fresh.headers["set-cookie"])
+            await send(message)
+
+        await self._asgi_app(scope, receive, send_with_refresh)
+
+
+app.add_middleware(_RefreshLoginCookie)
 
 
 @app.exception_handler(Exception)
@@ -98,14 +136,50 @@ def login(body: LoginRequest, response: Response) -> LoginResponse:
     with db_session() as session:
         result, token = _login_admin(session, body.password)
 
-    response.set_cookie(
-        key=_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        path="/",
-    )
+    _set_login_cookie(response, token)
     return result
+
+
+@app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> Response:
+    with db_session() as session:
+        token = _login_token(session, login_cookie)
+        if token is None:
+            result = JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": _LOGIN_REQUIRED},
+            )
+            _clear_login_cookie(result)
+            return result
+        session.delete(token)
+
+    result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_login_cookie(result)
+    return result
+
+
+@app.get("/api/profile")
+def read_profile(
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> ProfileResponse:
+    with db_session() as session:
+        return _profile(_account_from_cookie(session, login_cookie))
+
+
+@app.patch("/api/profile")
+def update_profile(
+    body: ProfileUpdate,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> ProfileResponse:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        language = account.language_setting
+        if language is None:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
+        language.locale = body.locale
+        return _profile(account)
 
 
 @app.get("/api/sessions")
@@ -285,7 +359,7 @@ def _login_admin(session: Session, password: str) -> tuple[LoginResponse, str]:
 
     language = account.language_setting
     if language is None:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "账号没有语言设置")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
 
     token = secrets.token_urlsafe(32)
     session.add(LoginToken(account=account, token_hash=_token_hash(token)))
@@ -297,16 +371,58 @@ def _login_admin(session: Session, password: str) -> tuple[LoginResponse, str]:
 
 
 def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
-    if login_cookie is None or login_cookie == "":
+    token = _login_token(session, login_cookie)
+    if token is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+    return token.account
+
+
+def _login_token(session: Session, login_cookie: str | None) -> LoginToken | None:
+    if login_cookie is None or login_cookie == "":
+        return None
 
     token = session.scalar(
         select(LoginToken).where(LoginToken.token_hash == _token_hash(login_cookie)),
     )
     if not isinstance(token, LoginToken):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+        return None
+    return token
 
-    return token.account
+
+def _profile(account: Account) -> ProfileResponse:
+    language = account.language_setting
+    if language is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
+
+    locale = language.locale
+    if locale != "zh-CN" and locale != "zh-TW" and locale != "en":
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
+    return ProfileResponse(id=account.id, username=account.username, locale=locale)
+
+
+def _cookie_is_valid(login_cookie: str) -> bool:
+    with db_session() as session:
+        return _login_token(session, login_cookie) is not None
+
+
+def _set_login_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=_COOKIE_NAME,
+        value=token,
+        max_age=_COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_login_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
 
 
 def _session_items(account: Account) -> list[SessionItem]:
