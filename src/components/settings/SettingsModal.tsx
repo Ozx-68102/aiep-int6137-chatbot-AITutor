@@ -49,36 +49,44 @@ export function SettingsModal({
       >
         <CloseButton label={text.close} onClick={onClose}/>
         <h2 id="settings-title" className="m-0 pr-10 text-2xl" lang={htmlLang[locale]}>{text.profile}</h2>
-        {username ? <p className="m-0 text-lg" lang={htmlLang[locale]}>{accountLine(locale, username)}</p> : null}
-        <div className="flex items-center justify-between gap-4">
-          <p className="m-0" lang={htmlLang[locale]}>{text.language}</p>
-          <LanguageMenu
-            locale={locale}
-            variant="current"
-            onChange={(next) => {
-              if (saving) {
-                return;
-              }
-              onLocale(next);
-            }}
-          />
+        <div className="flex flex-col">
+          <div className="border-b border-stone-300 py-4">
+            <p className="m-0 text-lg" lang={htmlLang[locale]}>
+              {username ? accountLine(locale, username) : `${text.username}${locale === 'en' ? ':' : '：'}`}
+            </p>
+          </div>
+          <div className="flex items-center justify-between gap-4 border-b border-stone-300 py-4">
+            <p className="m-0" lang={htmlLang[locale]}>{text.language}</p>
+            <LanguageMenu
+              locale={locale}
+              variant="current"
+              onChange={(next) => {
+                if (saving) {
+                  return;
+                }
+                onLocale(next);
+              }}
+            />
+          </div>
+          <div className="py-4">
+            {error ? (
+              <p
+                className="mb-3 text-red-600"
+                role="alert"
+                lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+              >
+                {error}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="w-fit rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600"
+              onClick={onLogout}
+            >
+              {text.logOut}
+            </button>
+          </div>
         </div>
-        {error ? (
-          <p
-            className="m-0 text-red-600"
-            role="alert"
-            lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
-          >
-            {error}
-          </p>
-        ) : null}
-        <button
-          type="button"
-          className="mt-auto w-fit rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600"
-          onClick={onLogout}
-        >
-          {text.logOut}
-        </button>
       </div>
     </div>
   );

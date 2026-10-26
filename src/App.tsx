@@ -5,7 +5,7 @@ import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {logout, readProfile, updateProfile} from './api/profile.ts';
 import type {Profile} from './api/profile.ts';
-import {createSession, emptySession, listSessions, login, sessionsFromList} from './api/session.ts';
+import {createSession, deleteSession, emptySession, listSessions, login, renameSession, sessionsFromList} from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
@@ -15,6 +15,7 @@ import {chatFrameClass} from './components/shell/frame-class.ts';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {translations} from './i18n.ts';
 import {isEmptySession} from './session/empty.ts';
+import {markEmptySessions} from './session/emptiness.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
@@ -44,7 +45,7 @@ export default function App() {
   const loginError = loginOffline ? text.connectionError : loginDetail;
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
-  const composerLocked = !active || !active.messagesKnown || activePending;
+  const composerLocked = !active || activePending;
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -73,7 +74,21 @@ export default function App() {
         if (cancelled) {
           return;
         }
-        const next = sessionsFromList(items);
+        let next = sessionsFromList(items);
+        try {
+          next = await markEmptySessions(next);
+        } catch (error) {
+          if (cancelled) {
+            return;
+          }
+          if (error instanceof ApiError && error.status === 401) {
+            setAuth('anonymous');
+            return;
+          }
+        }
+        if (cancelled) {
+          return;
+        }
         setSessions(next);
         setActiveId(next[0]?.id ?? null);
         if (profile) {
@@ -141,7 +156,7 @@ export default function App() {
     setLoginDetail(null);
     try {
       const result = await login(usernameValue, password);
-      openAccount(result);
+      await openAccount(result);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setLoginDetail(error.detail);
@@ -157,10 +172,18 @@ export default function App() {
     }
   }
 
-  function openAccount(result: LoginResult) {
-    const next = sessionsFromList(result.sessions);
+  async function openAccount(result: LoginResult) {
     if (isLocale(result.locale)) {
       setLocale(result.locale);
+    }
+    let next = sessionsFromList(result.sessions);
+    try {
+      next = await markEmptySessions(next);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
     }
     setSessions(next);
     setActiveId(next[0]?.id ?? null);
@@ -178,6 +201,10 @@ export default function App() {
     });
   }
 
+  // TODO: 点了「创建新会话」却没写任何东西，再打开别的会话时，静默删掉这条空会话。
+  // 输入框里写了内容但没发送，就点了别的会话时，把这段文字留在浏览器内存里。
+  // 下次再点「创建新会话」，把这段未发送的文字填回输入框。
+  // 只有关掉这个页面或退出浏览器，这段未发送的文字才丢掉。
   function openSession(id: string) {
     setActiveId(id);
     setNotice(null);
@@ -225,6 +252,68 @@ export default function App() {
     }
   }
 
+  async function renameOpenSession(id: string, title: string) {
+    const trimmed = title.trim();
+    if (trimmed === '') {
+      return;
+    }
+    try {
+      const item = await renameSession(id, trimmed);
+      setSessions((current) => current.map((session) => {
+        if (session.id !== id) {
+          return session;
+        }
+        return {
+          ...session,
+          title: item.title,
+          titleLocale: isLocale(item.title_locale) ? item.title_locale : null,
+        };
+      }));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      setNotice(explain(error, text.connectionError));
+    }
+  }
+
+  async function removeSession(id: string) {
+    const wasCurrent = activeId === id;
+    try {
+      await deleteSession(id);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      setNotice(explain(error, text.connectionError));
+      return;
+    }
+    let created: Session | null = null;
+    if (wasCurrent) {
+      try {
+        created = emptySession(await createSession());
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          enterLogin(error.detail);
+          return;
+        }
+        setNotice(explain(error, text.connectionError));
+      }
+    }
+    setSessions((current) => {
+      const rest = current.filter((session) => session.id !== id);
+      return created ? [created, ...rest] : rest;
+    });
+    if (!wasCurrent) {
+      return;
+    }
+    setActiveId(created?.id ?? null);
+    setDraft('');
+    setView('chat');
+  }
+
   async function addSession() {
     if (creatingRef.current || sessions.some(isEmptySession)) {
       return;
@@ -251,7 +340,7 @@ export default function App() {
   function submitMessage(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = draft.trim();
-    if (!question || !active || !active.messagesKnown || sendingRef.current.has(active.id)) {
+    if (!question || !active || sendingRef.current.has(active.id)) {
       return;
     }
     const sessionId = active.id;
@@ -361,6 +450,12 @@ export default function App() {
         }}
         onClose={() => setSidebarOpen(false)}
         onOpenSession={openSession}
+        onRename={(id, title) => {
+          void renameOpenSession(id, title);
+        }}
+        onDelete={(id) => {
+          void removeSession(id);
+        }}
         onOpenSettings={() => {
           setConfirmLogout(false);
           setProfileError(null);

@@ -1,6 +1,6 @@
-import {isLocale} from '../type/locale.ts';
 import type {Session} from '../type/chat.ts';
-import {ApiError, isRecord, requestJson} from './http.ts';
+import {isLocale} from '../type/locale.ts';
+import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
 
 export type SessionItem = {
   id: string;
@@ -31,6 +31,21 @@ export async function listSessions(): Promise<SessionItem[]> {
     throw new ApiError(0, null);
   }
   return body;
+}
+
+export async function renameSession(sessionId: string, title: string): Promise<SessionItem> {
+  const body = await requestJson(`/api/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({title}),
+  });
+  if (!isSessionItem(body)) {
+    throw new ApiError(0, null);
+  }
+  return body;
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await requestEmpty(`/api/sessions/${sessionId}`, {method: 'DELETE'});
 }
 
 export async function createSession(): Promise<SessionItem> {
