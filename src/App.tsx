@@ -17,7 +17,6 @@ import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
-import {forgetPinTime, rememberPinTime} from './session/pin-order.ts';
 import {loadThread} from './session/thread.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
@@ -437,14 +436,11 @@ export default function App() {
 
   async function pinOpenSession(id: string, pinned: boolean) {
     try {
-      const item = await pinSession(id, pinned);
-      if (item.pinned) {
-        rememberPinTime(id);
-      } else {
-        forgetPinTime(id);
-      }
+      const item = await pinSession(id, pinned, pinned ? new Date().toISOString() : null);
       setSessions((current) => current.map((session) => (
-        session.id === id ? {...session, pinned: item.pinned} : session
+        session.id === id
+          ? {...session, pinned: item.pinned, pinnedAt: item.pinned_at}
+          : session
       )));
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {

@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -15,6 +15,7 @@ class SessionItem(BaseModel):
     title: str | None
     title_locale: str | None
     pinned: bool
+    pinned_at: datetime | None
     created_at: datetime
 
 
@@ -24,6 +25,16 @@ class SessionRename(BaseModel):
 
 class SessionPin(BaseModel):
     pinned: bool
+    pinned_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _pin_time(self) -> Self:
+        if not self.pinned:
+            self.pinned_at = None
+            return self
+        if self.pinned_at is None:
+            raise ValueError("置顶需要 pinned_at")
+        return self
 
 
 class LoginResponse(BaseModel):

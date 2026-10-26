@@ -15,6 +15,7 @@ def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_pinned_column(engine)
+    _ensure_pinned_at_column(engine)
     with db_session() as session:
         _ensure_admin(session)
 
@@ -26,6 +27,17 @@ def _ensure_pinned_column(engine: Engine) -> None:
     with engine.begin() as connection:
         connection.execute(text(
             "ALTER TABLE session ADD COLUMN pinned boolean NOT NULL DEFAULT false"
+        ))
+
+
+
+def _ensure_pinned_at_column(engine: Engine) -> None:
+    columns = {column["name"] for column in inspect(engine).get_columns("session")}
+    if "pinned_at" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE session ADD COLUMN pinned_at timestamp with time zone"
         ))
 
 
