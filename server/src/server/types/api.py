@@ -17,6 +17,10 @@ class SessionItem(BaseModel):
     created_at: datetime
 
 
+class SessionRename(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+
+
 class LoginResponse(BaseModel):
     locale: str
     sessions: list[SessionItem]
