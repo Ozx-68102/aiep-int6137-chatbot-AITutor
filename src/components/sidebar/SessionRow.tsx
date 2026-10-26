@@ -1,4 +1,4 @@
-import {Ellipsis} from 'lucide-react';
+import {Ellipsis, Pin} from 'lucide-react';
 import {type MouseEvent, useEffect, useRef, useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
@@ -6,6 +6,31 @@ import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {ConfirmDelete} from './ConfirmDelete.tsx';
 import {RenameSession} from './RenameSession.tsx';
+
+function menuPointFor(button: HTMLButtonElement): {top: number; right: number} {
+  const rect = button.getBoundingClientRect();
+  const origin = menuOrigin(button);
+  return {
+    top: rect.bottom + 4 - origin.top,
+    right: origin.right - rect.right,
+  };
+}
+
+function menuOrigin(node: HTMLElement): {top: number; right: number} {
+  let current = node.parentElement;
+  while (current) {
+    const style = getComputedStyle(current);
+    if (style.translate !== 'none' || style.transform !== 'none' || style.scale !== 'none' || style.rotate !== 'none') {
+      const box = current.getBoundingClientRect();
+      return {
+        top: box.top + (Number.parseFloat(style.borderTopWidth) || 0),
+        right: box.right - (Number.parseFloat(style.borderRightWidth) || 0),
+      };
+    }
+    current = current.parentElement;
+  }
+  return {top: 0, right: window.innerWidth};
+}
 
 export function SessionRow({
   locale,
@@ -15,6 +40,8 @@ export function SessionRow({
   onOpen,
   onRename,
   onDelete,
+  onPin,
+  rowRef,
 }: {
   locale: Locale;
   session: Session;
@@ -23,6 +50,8 @@ export function SessionRow({
   onOpen: () => void;
   onRename: (title: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
+  onPin: (pinned: boolean) => void;
+  rowRef?: (node: HTMLLIElement | null) => void;
 }) {
   const text = translations[locale];
   const [menuOpen, setMenuOpen] = useState(false);
@@ -30,6 +59,7 @@ export function SessionRow({
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -56,21 +86,40 @@ export function SessionRow({
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+    function place() {
+      const button = buttonRef.current;
+      if (!button) {
+        return;
+      }
+      setMenuPoint(menuPointFor(button));
+    }
+    document.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      document.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [menuOpen]);
+
   function openMenu(event: MouseEvent<HTMLButtonElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenuPoint({top: rect.bottom + 4, right: window.innerWidth - rect.right});
+    setMenuPoint(menuPointFor(event.currentTarget));
     setMenuOpen((open) => !open);
   }
 
   const rowClass = active
     ? 'group mb-1 flex items-center rounded-lg border border-emerald-900 bg-emerald-50'
-    : 'group mb-1 flex items-center rounded-lg border border-transparent';
-  const actionClass = menuOpen || renameOpen || deleteOpen
+    : 'group mb-1 flex items-center rounded-lg border border-transparent transition-colors duration-150 ease-out hover:bg-stone-900/5';
+  const dotsShown = menuOpen || renameOpen || deleteOpen || active;
+  const actionClass = dotsShown
     ? 'relative mr-1 shrink-0 opacity-100 transition-opacity duration-200 ease-out'
-    : 'pointer-events-none relative mr-1 shrink-0 opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100';
+    : 'relative mr-1 shrink-0 opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 group-focus-within:opacity-100';
 
   return (
-    <li className={rowClass}>
+    <li ref={rowRef} className={rowClass}>
       <button
         type="button"
         className="min-w-0 flex-1 truncate border-0 bg-transparent px-3 py-2 text-left"
@@ -80,10 +129,12 @@ export function SessionRow({
       >
         {sessionTitle(session, fallbackTitle)}
       </button>
+      {session.pinned ? <Pin aria-hidden="true" className="mr-1 size-3.5 shrink-0"/> : null}
       <div className={actionClass} ref={menuRef}>
         <button
           type="button"
-          className="inline-flex size-8 items-center justify-center rounded-lg border border-transparent bg-transparent text-inherit transition-colors duration-200 ease-out hover:bg-stone-900/10"
+          className="inline-flex size-8 items-center justify-center rounded-lg border border-transparent bg-transparent text-inherit transition-colors duration-150 ease-out hover:bg-stone-900/15 active:bg-stone-900/25"
+          ref={buttonRef}
           aria-label={text.sessionActions}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
@@ -105,7 +156,7 @@ export function SessionRow({
           <button
             type="button"
             role="menuitem"
-            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left"
+            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
             onClick={() => {
               setMenuOpen(false);
               setRenameOpen(true);
@@ -116,7 +167,18 @@ export function SessionRow({
           <button
             type="button"
             role="menuitem"
-            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left"
+            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+            onClick={() => {
+              setMenuOpen(false);
+              onPin(!session.pinned);
+            }}
+          >
+            {session.pinned ? text.unpin : text.pin}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20"
             onClick={() => {
               setMenuOpen(false);
               setDeleteOpen(true);

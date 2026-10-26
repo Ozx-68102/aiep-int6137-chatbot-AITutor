@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
@@ -43,7 +44,7 @@ export function ConfirmDelete({
     return () => document.removeEventListener('keydown', closeOnEscape, true);
   }, [onCancel]);
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
       onClick={onCancel}
@@ -61,14 +62,14 @@ export function ConfirmDelete({
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5"
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
             onClick={onCancel}
           >
             {text.cancel}
           </button>
           <button
             type="button"
-            className="inline-flex min-w-16 items-center justify-center rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 disabled:opacity-60"
+            className="inline-flex min-w-16 items-center justify-center rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20 disabled:opacity-60"
             disabled={pending}
             aria-busy={pending}
             onClick={() => {
@@ -79,6 +80,7 @@ export function ConfirmDelete({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
