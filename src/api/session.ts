@@ -1,5 +1,5 @@
 import type {Session} from '../type/chat.ts';
-import {isLocale} from '../type/locale.ts';
+import {isLocale, type Locale} from '../type/locale.ts';
 import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
 
 export type SessionItem = {
@@ -33,10 +33,10 @@ export async function listSessions(): Promise<SessionItem[]> {
   return body;
 }
 
-export async function renameSession(sessionId: string, title: string): Promise<SessionItem> {
+export async function renameSession(sessionId: string, title: string, titleLocale: Locale | null): Promise<SessionItem> {
   const body = await requestJson(`/api/sessions/${sessionId}`, {
     method: 'PATCH',
-    body: JSON.stringify({title}),
+    body: JSON.stringify({title, title_locale: titleLocale}),
   });
   if (!isSessionItem(body)) {
     throw new ApiError(0, null);

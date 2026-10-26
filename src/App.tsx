@@ -14,7 +14,7 @@ import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {translations} from './i18n.ts';
-import {isEmptySession} from './session/empty.ts';
+import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
@@ -33,19 +33,20 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'profile'>('chat');
+  const [composingNew, setComposingNew] = useState(false);
+  const [sendingNew, setSendingNew] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [savingLocale, setSavingLocale] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
-  const creatingRef = useRef(false);
   const sendingRef = useRef<Set<string>>(new Set());
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
-  const composerLocked = !active || activePending;
+  const composerLocked = sendingNew || activePending || (!active && !composingNew);
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -128,6 +129,7 @@ export default function App() {
     setNotice(null);
     setUsername(null);
     setView('chat');
+    setComposingNew(false);
     setConfirmLogout(false);
     setProfileError(null);
     setPendingIds(new Set());
@@ -201,12 +203,22 @@ export default function App() {
     });
   }
 
-  // TODO: 点了「创建新会话」却没写任何东西，再打开别的会话时，静默删掉这条空会话。
-  // 输入框里写了内容但没发送，就点了别的会话时，把这段文字留在浏览器内存里。
-  // 下次再点「创建新会话」，把这段未发送的文字填回输入框。
-  // 只有关掉这个页面或退出浏览器，这段未发送的文字才丢掉。
+  function rememberDraft() {
+    const typed = draft.trim();
+    if (typed !== '') {
+      saveUnsent(typed);
+    }
+  }
+
   function openSession(id: string) {
+    if (id === activeId && !composingNew) {
+      setView('chat');
+      return;
+    }
+    rememberDraft();
+    setComposingNew(false);
     setActiveId(id);
+    setDraft('');
     setNotice(null);
     setView('chat');
   }
@@ -258,7 +270,7 @@ export default function App() {
       return;
     }
     try {
-      const item = await renameSession(id, trimmed);
+      const item = await renameSession(id, trimmed, locale);
       setSessions((current) => current.map((session) => {
         if (session.id !== id) {
           return session;
@@ -290,57 +302,87 @@ export default function App() {
       setNotice(explain(error, text.connectionError));
       return;
     }
-    let created: Session | null = null;
-    if (wasCurrent) {
-      try {
-        created = emptySession(await createSession());
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 401) {
-          enterLogin(error.detail);
-          return;
-        }
-        setNotice(explain(error, text.connectionError));
-      }
-    }
-    setSessions((current) => {
-      const rest = current.filter((session) => session.id !== id);
-      return created ? [created, ...rest] : rest;
-    });
+    setSessions((current) => current.filter((session) => session.id !== id));
     if (!wasCurrent) {
       return;
     }
-    setActiveId(created?.id ?? null);
-    setDraft('');
+    setComposingNew(true);
+    setActiveId(null);
+    setDraft(readUnsent());
+    setNotice(null);
     setView('chat');
   }
 
-  async function addSession() {
-    if (creatingRef.current || sessions.some(isEmptySession)) {
+  function addSession() {
+    if (composingNew) {
+      setView('chat');
       return;
     }
-    creatingRef.current = true;
+    rememberDraft();
+    setComposingNew(true);
+    setActiveId(null);
+    setDraft(readUnsent());
     setNotice(null);
+    setView('chat');
+  }
+
+  async function sendFirstMessage(question: string) {
+    setSendingNew(true);
+    setNotice(null);
+    let sessionId = '';
     try {
-      const session = emptySession(await createSession());
-      setSessions((current) => [session, ...current]);
-      setActiveId(session.id);
+      const created = emptySession(await createSession());
+      sessionId = created.id;
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        text: question,
+        locale,
+      };
+      setComposingNew(false);
+      setSessions((current) => [{
+        ...created,
+        title: question,
+        titleLocale: locale,
+        messages: [userMessage],
+        messagesKnown: true,
+      }, ...current]);
+      setActiveId(created.id);
+      clearUnsent();
       setDraft('');
-      setView('chat');
+      markEntering(userMessage.id);
+      sendingRef.current.add(sessionId);
+      setPendingIds((current) => new Set(current).add(sessionId));
+      await sendQuestion(sessionId, question);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
         return;
       }
-      setNotice(explain(error, text.connectionError));
+      if (sessionId === '') {
+        setNotice(explain(error, text.connectionError));
+      }
     } finally {
-      creatingRef.current = false;
+      setSendingNew(false);
+      if (sessionId !== '') {
+        sendingRef.current.delete(sessionId);
+        setPendingIds((current) => {
+          const next = new Set(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
     }
   }
 
   function submitMessage(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = draft.trim();
-    if (!question || !active || sendingRef.current.has(active.id)) {
+    if (!question || sendingNew || (active && sendingRef.current.has(active.id))) {
+      return;
+    }
+    if (!active) {
+      void sendFirstMessage(question);
       return;
     }
     const sessionId = active.id;
@@ -353,6 +395,7 @@ export default function App() {
     sendingRef.current.add(sessionId);
     setPendingIds((current) => new Set(current).add(sessionId));
     setNotice(null);
+    clearUnsent();
     setDraft('');
     updateSession(sessionId, (session) => ({
       ...session,
@@ -445,9 +488,7 @@ export default function App() {
         activeId={activeId}
         settingsOpen={view === 'profile'}
         username={username}
-        onCreate={() => {
-          void addSession();
-        }}
+        onCreate={addSession}
         onClose={() => setSidebarOpen(false)}
         onOpenSession={openSession}
         onRename={(id, title) => {
