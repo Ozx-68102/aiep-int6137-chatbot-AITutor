@@ -79,7 +79,7 @@ export function LoginScreen({
           className={
             blocked
               ? 'rounded-lg border border-stone-300 bg-white px-3 py-2.5 opacity-50'
-              : 'rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white'
+              : 'rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
           }
           disabled={blocked}
         >

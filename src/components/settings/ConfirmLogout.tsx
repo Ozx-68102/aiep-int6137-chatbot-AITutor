@@ -58,14 +58,14 @@ export function ConfirmLogout({
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5"
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
             onClick={onCancel}
           >
             {text.cancel}
           </button>
           <button
             type="button"
-            className="rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 disabled:border-red-600 disabled:text-red-600"
+            className="rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20 disabled:border-red-600 disabled:text-red-600"
             disabled={loggingOut}
             onClick={onConfirm}
           >

@@ -80,7 +80,7 @@ export function SettingsModal({
             ) : null}
             <button
               type="button"
-              className="w-fit rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600"
+              className="w-fit rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20"
               onClick={onLogout}
             >
               {text.logOut}

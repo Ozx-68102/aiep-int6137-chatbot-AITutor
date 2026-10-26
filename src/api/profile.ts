@@ -23,7 +23,7 @@ export async function logout(): Promise<void> {
 }
 
 function parseProfile(value: unknown): Profile {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.username !== 'string' || !isLocale(typeof value.locale === 'string' ? value.locale : null)) {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.username !== 'string' || typeof value.locale !== 'string' || !isLocale(value.locale)) {
     throw new ApiError(0, null);
   }
   return {id: value.id, username: value.username, locale: value.locale};

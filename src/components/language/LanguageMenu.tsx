@@ -50,8 +50,8 @@ export function LanguageMenu({
         type="button"
         className={
           variant === 'current'
-            ? 'inline-flex min-w-36 items-center justify-between gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left'
-            : 'inline-flex size-9 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit'
+            ? 'inline-flex min-w-36 items-center justify-between gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
+            : 'inline-flex size-9 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
         }
         aria-label={text.language}
         aria-expanded={open}
@@ -85,8 +85,8 @@ export function LanguageMenu({
             lang={htmlLang[item.id]}
             className={
               item.id === locale
-                ? 'rounded-md border border-emerald-900 bg-emerald-50 px-2.5 py-1.5 text-left'
-                : 'rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left'
+                ? 'rounded-md border border-emerald-900 bg-emerald-50 px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-emerald-100 enabled:active:bg-emerald-200'
+                : 'rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
             }
             aria-checked={item.id === locale}
             onClick={() => {

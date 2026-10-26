@@ -17,6 +17,7 @@ import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
+import {loadThread} from './session/thread.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
@@ -43,12 +44,20 @@ export default function App() {
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
+  const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
+  const [threadRetry, setThreadRetry] = useState(0);
   const sendingRef = useRef<Set<string>>(new Set());
+  const sessionsRef = useRef(sessions);
+  const loadedThreads = useRef(new Set<string>());
+  const threadFlight = useRef(new Set<string>());
+  const connectionToastRef = useRef<() => void>(() => undefined);
+  const connectionCopyRef = useRef('');
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
+  const historyLocked = historyLoadingId === active?.id && active.messages.length === 0;
   const connectionToast = toast === null ? null : (
     <ConnectionToast
       key={toast.id}
@@ -62,6 +71,67 @@ export default function App() {
     document.documentElement.lang = htmlLang[locale];
     document.title = 'H^2 Bot';
   }, [locale]);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+    connectionToastRef.current = showConnectionToast;
+    connectionCopyRef.current = text.connectionError;
+  });
+
+  useEffect(() => {
+    if (auth !== 'ready' || composingNew || activeId === null) {
+      return;
+    }
+    const sessionId = activeId;
+    const flights = threadFlight.current;
+    if (loadedThreads.current.has(sessionId) || flights.has(sessionId)) {
+      return;
+    }
+    const existing = sessionsRef.current.find((session) => session.id === sessionId);
+    if (existing && existing.messages.length > 0) {
+      loadedThreads.current.add(sessionId);
+      return;
+    }
+    let cancelled = false;
+    flights.add(sessionId);
+    setHistoryLoadingId(sessionId);
+    void loadThread(sessionId).then((messages) => {
+      if (cancelled) {
+        return;
+      }
+      loadedThreads.current.add(sessionId);
+      setSessions((current) => current.map((session) => {
+        if (session.id !== sessionId || session.messages.length > 0) {
+          return session;
+        }
+        return {...session, messages, messagesKnown: true};
+      }));
+    }).catch((error: unknown) => {
+      if (cancelled) {
+        return;
+      }
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        connectionToastRef.current();
+        return;
+      }
+      setNotice(explain(error, connectionCopyRef.current));
+    }).finally(() => {
+      if (cancelled) {
+        return;
+      }
+      flights.delete(sessionId);
+      setHistoryLoadingId((current) => current === sessionId ? null : current);
+    });
+    return () => {
+      cancelled = true;
+      flights.delete(sessionId);
+      setHistoryLoadingId((current) => current === sessionId ? null : current);
+    };
+  }, [activeId, auth, composingNew, threadRetry]);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +227,9 @@ export default function App() {
     setConfirmLogout(false);
     setProfileError(null);
     setPendingIds(new Set());
+    setHistoryLoadingId(null);
+    loadedThreads.current.clear();
+    threadFlight.current.clear();
     setToast(null);
     setLoginOffline(false);
     setLoginDetail(detail);
@@ -239,6 +312,9 @@ export default function App() {
   function openSession(id: string) {
     if (id === activeId && !composingNew) {
       setView('chat');
+      if (!loadedThreads.current.has(id) && !threadFlight.current.has(id)) {
+        setThreadRetry((current) => current + 1);
+      }
       return;
     }
     rememberDraft();
@@ -304,7 +380,7 @@ export default function App() {
       return false;
     }
     try {
-      const item = await renameSession(id, trimmed, locale);
+      const item = await renameSession(id, trimmed);
       setSessions((current) => current.map((session) => {
         if (session.id !== id) {
           return session;
@@ -378,6 +454,7 @@ export default function App() {
     try {
       const created = emptySession(await createSession());
       sessionId = created.id;
+      loadedThreads.current.add(sessionId);
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -573,7 +650,7 @@ export default function App() {
         pending={activePending}
         draft={draft}
         inputLocked={inputLocked}
-        sendLocked={inputLocked}
+        sendLocked={inputLocked || historyLocked}
         onDraft={setDraft}
         onSubmit={submitMessage}
       />
