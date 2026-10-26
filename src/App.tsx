@@ -1,8 +1,10 @@
-import {Languages, PanelLeftClose, PanelLeftOpen, Send, SquarePlus} from 'lucide-react';
+import {ChevronDown, Languages, PanelLeftClose, PanelLeftOpen, Send, SquarePlus, User} from 'lucide-react';
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
 import logoUrl from './assets/H-Squared_Bot_Vector.svg';
 import {streamReply} from './api/chat.ts';
 import {ApiError} from './api/http.ts';
+import {logout, readProfile, updateProfile} from './api/profile.ts';
+import type {Profile} from './api/profile.ts';
 import {createSession, emptySession, listSessions, login, sessionsFromList} from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
 import {locales, translations} from './i18n.ts';
@@ -56,11 +58,18 @@ export default function App() {
   const [loginOffline, setLoginOffline] = useState(false);
   const [loginDetail, setLoginDetail] = useState<string | null>(null);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const [sidebarOpen, setSidebarOpen] = useState(() => !window.matchMedia('(max-width: 767px)').matches);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [view, setView] = useState<'chat' | 'profile'>('chat');
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [savingLocale, setSavingLocale] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const creatingRef = useRef(false);
@@ -77,15 +86,46 @@ export default function App() {
   }, [locale]);
 
   useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    function onChange() {
+      setNarrow(media.matches);
+      if (media.matches) {
+        setSidebarOpen(false);
+      }
+    }
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     listSessions().then(
-      (items) => {
+      async (items) => {
+        if (cancelled) {
+          return;
+        }
+        let profile: Profile | null = null;
+        try {
+          profile = await readProfile();
+        } catch (error) {
+          if (cancelled) {
+            return;
+          }
+          if (error instanceof ApiError && error.status === 401) {
+            setAuth('anonymous');
+            return;
+          }
+        }
         if (cancelled) {
           return;
         }
         const next = sessionsFromList(items);
         setSessions(next);
         setActiveId(next[0]?.id ?? null);
+        if (profile) {
+          setUsername(profile.username);
+          setLocale(profile.locale);
+        }
         setAuth('ready');
       },
       (error: unknown) => {
@@ -117,6 +157,10 @@ export default function App() {
     setActiveId(null);
     setDraft('');
     setNotice(null);
+    setUsername(null);
+    setView('chat');
+    setConfirmLogout(false);
+    setProfileError(null);
     setPendingIds(new Set());
     setLoginOffline(false);
     setLoginDetail(detail);
@@ -161,17 +205,70 @@ export default function App() {
 
   function openAccount(result: LoginResult) {
     const next = sessionsFromList(result.sessions);
-    setLocale(isLocale(result.locale) ? result.locale : localeFromSystem());
+    if (isLocale(result.locale)) {
+      setLocale(result.locale);
+    }
     setSessions(next);
     setActiveId(next[0]?.id ?? null);
     setDraft('');
     setNotice(null);
+    setView('chat');
     setAuth('ready');
+    void readProfile().then((profile) => {
+      setUsername(profile.username);
+      setLocale(profile.locale);
+    }).catch((error: unknown) => {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+      }
+    });
   }
 
   function openSession(id: string) {
     setActiveId(id);
     setNotice(null);
+    setView('chat');
+  }
+
+  async function changeLocale(next: Locale) {
+    if (next === locale || savingLocale) {
+      return;
+    }
+    setSavingLocale(true);
+    setProfileError(null);
+    try {
+      const profile = await updateProfile(next);
+      setUsername(profile.username);
+      setLocale(profile.locale);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      setProfileError(explain(error, text.connectionError));
+    } finally {
+      setSavingLocale(false);
+    }
+  }
+
+  async function signOut() {
+    if (loggingOut) {
+      return;
+    }
+    setLoggingOut(true);
+    setProfileError(null);
+    try {
+      await logout();
+      enterLogin(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(null);
+        return;
+      }
+      setProfileError(explain(error, text.connectionError));
+    } finally {
+      setLoggingOut(false);
+    }
   }
 
   async function addSession() {
@@ -185,6 +282,7 @@ export default function App() {
       setSessions((current) => [session, ...current]);
       setActiveId(session.id);
       setDraft('');
+      setView('chat');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
@@ -297,17 +395,28 @@ export default function App() {
   return (
     <div
       className={
-        sidebarOpen
-          ? 'grid h-full grid-cols-[20rem_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
-          : 'grid h-full grid-cols-[0_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
+        narrow
+          ? 'relative grid h-full grid-cols-1'
+          : sidebarOpen
+            ? 'relative grid h-full grid-cols-[20rem_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
+            : 'relative grid h-full grid-cols-[0_minmax(0,1fr)] transition-[grid-template-columns] duration-200 ease-out'
       }
     >
+      {narrow ? (
+        <button
+          type="button"
+          className={
+            sidebarOpen
+              ? 'absolute inset-0 z-30 border-0 bg-stone-900/40 opacity-100 transition-opacity duration-200 ease-out'
+              : 'pointer-events-none absolute inset-0 z-30 border-0 bg-stone-900/40 opacity-0 transition-opacity duration-200 ease-out'
+          }
+          aria-label={text.hideSidebar}
+          tabIndex={sidebarOpen ? 0 : -1}
+          onClick={() => setSidebarOpen(false)}
+        />
+      ) : null}
       <aside
-        className={
-          sidebarOpen
-            ? 'flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r border-stone-300 bg-stone-200 p-3'
-            : 'flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r-0 bg-stone-200 px-0 py-3'
-        }
+        className={sidebarClass(narrow, sidebarOpen)}
         aria-label={text.sessions}
         aria-hidden={!sidebarOpen}
         inert={!sidebarOpen}
@@ -341,7 +450,7 @@ export default function App() {
         </div>
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2"
           onClick={() => {
             void addSession();
           }}
@@ -368,6 +477,23 @@ export default function App() {
             </li>
           ))}
         </ul>
+        <button
+          type="button"
+          className={
+            view === 'profile'
+              ? 'flex w-full items-center gap-2 rounded-lg border border-emerald-900 bg-emerald-50 px-3 py-2 text-left'
+              : 'flex w-full items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left'
+          }
+          aria-current={view === 'profile' ? 'page' : undefined}
+          onClick={() => {
+            setConfirmLogout(false);
+            setProfileError(null);
+            setView('profile');
+          }}
+        >
+          <User aria-hidden="true" className="size-4 shrink-0"/>
+          <span className="truncate">{username ?? text.profile}</span>
+        </button>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col bg-white">
         <header className="flex items-center justify-between gap-2 border-b border-stone-300 px-4 py-3">
@@ -388,7 +514,6 @@ export default function App() {
           >
             {active ? sessionTitle(active, text.newChat) : text.newChat}
           </h1>
-          <LanguageMenu locale={locale} onChange={setLocale}/>
         </header>
         <div className="min-h-0 flex-1 overflow-auto p-4" aria-live="polite" aria-busy={activePending}>
           {notice ? (
@@ -446,12 +571,238 @@ export default function App() {
           </button>
         </form>
       </main>
+      {view === 'profile' ? (
+        <ProfileModal
+          locale={locale}
+          username={username}
+          error={confirmLogout ? null : profileError}
+          saving={savingLocale}
+          onLocale={(next) => {
+            void changeLocale(next);
+          }}
+          onLogout={() => setConfirmLogout(true)}
+          onClose={() => {
+            setConfirmLogout(false);
+            setProfileError(null);
+            setView('chat');
+          }}
+        />
+      ) : null}
+      {confirmLogout ? (
+        <ConfirmLogout
+          locale={locale}
+          error={profileError}
+          loggingOut={loggingOut}
+          onCancel={() => {
+            setProfileError(null);
+            setConfirmLogout(false);
+          }}
+          onConfirm={() => {
+            void signOut();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function LanguageMenu({locale, onChange}: {locale: Locale; onChange: (locale: Locale) => void}) {
+function ProfileModal({
+  locale,
+  username,
+  error,
+  saving,
+  onLocale,
+  onLogout,
+  onClose,
+}: {
+  locale: Locale;
+  username: string | null;
+  error: string | null;
+  saving: boolean;
+  onLocale: (locale: Locale) => void;
+  onLogout: () => void;
+  onClose: () => void;
+}) {
   const text = translations[locale];
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    }
+
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex min-h-80 w-full max-w-2xl flex-col gap-8 rounded-xl border border-stone-300 bg-white p-8 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <CloseButton label={text.close} onClick={onClose}/>
+        <h2 id="profile-title" className="m-0 pr-10 text-2xl" lang={htmlLang[locale]}>{text.profile}</h2>
+        {username ? <p className="m-0 text-lg" lang={htmlLang[locale]}>{accountLine(locale, username)}</p> : null}
+        <div className="flex items-center justify-between gap-4">
+          <p className="m-0" lang={htmlLang[locale]}>{text.language}</p>
+          <LanguageMenu
+            locale={locale}
+            variant="current"
+            onChange={(next) => {
+              if (saving) {
+                return;
+              }
+              onLocale(next);
+            }}
+          />
+        </div>
+        {error ? (
+          <p
+            className="m-0 text-red-600"
+            role="alert"
+            lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+          >
+            {error}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          className="mt-auto w-fit rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600"
+          onClick={onLogout}
+        >
+          {text.logOut}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmLogout({
+  locale,
+  error,
+  loggingOut,
+  onCancel,
+  onConfirm,
+}: {
+  locale: Locale;
+  error: string | null;
+  loggingOut: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const text = translations[locale];
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      event.stopPropagation();
+      onCancel();
+    }
+
+    document.addEventListener('keydown', closeOnEscape, true);
+    return () => document.removeEventListener('keydown', closeOnEscape, true);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="relative flex w-full max-w-md flex-col gap-6 rounded-xl border border-stone-300 bg-white p-8 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="logout-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <CloseButton label={text.close} onClick={onCancel}/>
+        <h2 id="logout-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>{text.logOut}</h2>
+        <p className="m-0" lang={htmlLang[locale]}>{text.logOutConfirm}</p>
+        {error ? (
+          <p
+            className="m-0 text-red-600"
+            role="alert"
+            lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+          >
+            {error}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5"
+            onClick={onCancel}
+          >
+            {text.cancel}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 disabled:border-red-600 disabled:text-red-600"
+            disabled={loggingOut}
+            onClick={onConfirm}
+          >
+            {text.logOut}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function sidebarClass(narrow: boolean, open: boolean): string {
+  if (narrow && open) {
+    return 'fixed inset-y-0 left-0 z-40 flex w-80 max-w-[85vw] flex-col gap-3 overflow-hidden border-r border-stone-300 bg-stone-200 p-3 shadow-2xl transition-transform duration-200 ease-out translate-x-0';
+  }
+  if (narrow) {
+    return 'pointer-events-none fixed inset-y-0 left-0 z-40 flex w-80 max-w-[85vw] flex-col gap-3 overflow-hidden border-r border-stone-300 bg-stone-200 p-3 shadow-2xl transition-transform duration-200 ease-out -translate-x-full';
+  }
+  if (open) {
+    return 'flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r border-stone-300 bg-stone-200 p-3';
+  }
+  return 'flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r-0 bg-stone-200 px-0 py-3';
+}
+
+function accountLine(locale: Locale, name: string): string {
+  if (locale === 'en') {
+    return `${translations.en.username}: ${name}`;
+  }
+  return `${translations[locale].username}：${name}`;
+}
+
+function CloseButton({label, onClick}: {label: string; onClick: () => void}) {
+  return (
+    <button
+      type="button"
+      className="absolute top-3 right-3 inline-flex size-9 items-center justify-center rounded-lg border-0 bg-transparent text-2xl leading-none"
+      aria-label={label}
+      onClick={onClick}
+    >
+      ×
+    </button>
+  );
+}
+
+function LanguageMenu({
+  locale,
+  onChange,
+  variant = 'icon',
+}: {
+  locale: Locale;
+  onChange: (locale: Locale) => void;
+  variant?: 'icon' | 'current';
+}) {
+  const text = translations[locale];
+  const current = locales.find((item) => item.id === locale);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -467,16 +818,18 @@ function LanguageMenu({locale, onChange}: {locale: Locale; onChange: (locale: Lo
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setOpen(false);
+      if (event.key !== 'Escape') {
+        return;
       }
+      event.stopPropagation();
+      setOpen(false);
     }
 
     document.addEventListener('pointerdown', closeOnOutsidePointer);
-    document.addEventListener('keydown', closeOnEscape);
+    document.addEventListener('keydown', closeOnEscape, true);
     return () => {
       document.removeEventListener('pointerdown', closeOnOutsidePointer);
-      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('keydown', closeOnEscape, true);
     };
   }, [open]);
 
@@ -484,14 +837,23 @@ function LanguageMenu({locale, onChange}: {locale: Locale; onChange: (locale: Lo
     <div className="relative ml-auto shrink-0" ref={menuRef}>
       <button
         type="button"
-        className="inline-flex size-9 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit"
+        className={
+          variant === 'current'
+            ? 'inline-flex min-w-36 items-center justify-between gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left'
+            : 'inline-flex size-9 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit'
+        }
         aria-label={text.language}
         aria-expanded={open}
         aria-haspopup="menu"
         title={text.language}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen((currentOpen) => !currentOpen)}
       >
-        <Languages aria-hidden="true"/>
+        {variant === 'current' ? (
+          <span lang={htmlLang[locale]}>{current?.label}</span>
+        ) : (
+          <Languages aria-hidden="true"/>
+        )}
+        {variant === 'current' ? <ChevronDown aria-hidden="true" className="size-4 shrink-0"/> : null}
       </button>
       <div
         className={
