@@ -35,6 +35,7 @@ def _validation_message(exc: ValidationError) -> str:
             parts.append(f"{str(loc[0]).upper()}: {message}")
         else:
             parts.append(message)
+
     return "；".join(parts)
 
 
@@ -85,9 +86,7 @@ class Settings(BaseSettings):
     )
     @classmethod
     def _strip_text(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip()
-        return value
+        return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def _fastgpt_required_outside_debug(self) -> Self:

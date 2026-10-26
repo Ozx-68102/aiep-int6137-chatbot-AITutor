@@ -4,8 +4,7 @@ from argon2 import PasswordHasher
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from server.database import db_session, get_engine
-from server.models import Account, Base, LanguageSetting
+from server.db import Account, Base, LanguageSetting, db_session, get_engine
 
 _INITIAL_USERNAME = "admin"
 _INITIAL_PASSWORD = "admin"
