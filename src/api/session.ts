@@ -45,6 +45,16 @@ export async function renameSession(sessionId: string, title: string): Promise<S
   return body;
 }
 
+export async function pinSession(sessionId: string, pinned: boolean): Promise<SessionItem> {
+  const body = await requestJson(`/api/sessions/${sessionId}/pin`, {
+    method: 'PATCH',
+    body: JSON.stringify({pinned}),
+  });
+  if (!isSessionItem(body)) {
+    throw new ApiError(0, null);
+  }
+  return body;
+}
 
 export async function deleteSession(sessionId: string): Promise<void> {
   await requestEmpty(`/api/sessions/${sessionId}`, {method: 'DELETE'});

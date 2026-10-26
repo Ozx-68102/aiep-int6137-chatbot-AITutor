@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
@@ -48,7 +49,7 @@ export function RenameSession({
     return () => document.removeEventListener('keydown', closeOnEscape, true);
   }, [onCancel]);
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
       onClick={onCancel}
@@ -77,7 +78,7 @@ export function RenameSession({
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5"
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
             onClick={onCancel}
           >
             {text.cancel}
@@ -87,7 +88,7 @@ export function RenameSession({
             className={
               unchanged
                 ? 'inline-flex min-w-16 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2.5 opacity-50'
-                : 'inline-flex min-w-16 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white disabled:opacity-60'
+                : 'inline-flex min-w-16 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90 disabled:opacity-60'
             }
             disabled={unchanged || pending}
             aria-busy={pending}
@@ -96,6 +97,7 @@ export function RenameSession({
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }

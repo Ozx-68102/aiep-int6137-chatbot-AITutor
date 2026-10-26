@@ -5,7 +5,7 @@ import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {logout, readProfile, updateProfile} from './api/profile.ts';
 import type {Profile} from './api/profile.ts';
-import {createSession, deleteSession, emptySession, listSessions, login, renameSession, sessionsFromList} from './api/session.ts';
+import {createSession, deleteSession, emptySession, listSessions, login, pinSession, renameSession, sessionsFromList} from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
@@ -17,6 +17,7 @@ import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
+import {forgetPinTime, rememberPinTime} from './session/pin-order.ts';
 import {loadThread} from './session/thread.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
@@ -434,6 +435,30 @@ export default function App() {
     return true;
   }
 
+  async function pinOpenSession(id: string, pinned: boolean) {
+    try {
+      const item = await pinSession(id, pinned);
+      if (item.pinned) {
+        rememberPinTime(id);
+      } else {
+        forgetPinTime(id);
+      }
+      setSessions((current) => current.map((session) => (
+        session.id === id ? {...session, pinned: item.pinned} : session
+      )));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return;
+      }
+      setNotice(explain(error, text.connectionError));
+    }
+  }
+
   function addSession() {
     if (composingNew) {
       setView('chat');
@@ -631,6 +656,9 @@ export default function App() {
         onOpenSession={openSession}
         onRename={(id, title) => renameOpenSession(id, title)}
         onDelete={(id) => removeSession(id)}
+        onPin={(id, pinned) => {
+          void pinOpenSession(id, pinned);
+        }}
         onOpenSettings={() => {
           setConfirmLogout(false);
           setProfileError(null);
