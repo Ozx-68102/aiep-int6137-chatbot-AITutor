@@ -30,6 +30,7 @@ npm install -g pnpm
 - 样式：Tailwind CSS 4.3.3，插件 @tailwindcss/vite 4.3.3
 - 动画：tw-animate-css 1.4.0
 - 语言：TypeScript 7.0.2
+- 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
 
 ## 后端
 
@@ -44,6 +45,17 @@ npm install -g pnpm
 - 检查：ruff 0.17.2
 
 页面怎么调用见 [前端对接.md](./前端对接.md)。
+
+## 本地启动
+
+仓库根目录没有 `pnpm dev`。页面和接口分开起：
+
+```bash
+pnpm run dev:frontend
+pnpm run dev:backend
+```
+
+`dev:frontend` 只起页面。`dev:backend` 执行 `scripts/start-server.sh`，接口听 `127.0.0.1:3001`。数据库只需准备一次，命令写在 [前端对接.md](./前端对接.md)。
 
 ## 环境变量
 
