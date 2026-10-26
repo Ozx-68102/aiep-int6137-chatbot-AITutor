@@ -31,8 +31,8 @@ export function Sidebar({
   onCreate: () => void;
   onClose: () => void;
   onOpenSession: (id: string) => void;
-  onRename: (id: string, title: string) => void;
-  onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
   onOpenSettings: () => void;
 }) {
   const text = translations[locale];

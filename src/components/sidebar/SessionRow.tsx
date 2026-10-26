@@ -21,8 +21,8 @@ export function SessionRow({
   active: boolean;
   fallbackTitle: string;
   onOpen: () => void;
-  onRename: (title: string) => void;
-  onDelete: () => void;
+  onRename: (title: string) => Promise<boolean>;
+  onDelete: () => Promise<boolean>;
 }) {
   const text = translations[locale];
   const [menuOpen, setMenuOpen] = useState(false);
@@ -131,9 +131,12 @@ export function SessionRow({
           locale={locale}
           initialTitle={session.title ?? ''}
           onCancel={() => setRenameOpen(false)}
-          onConfirm={(title) => {
-            setRenameOpen(false);
-            onRename(title);
+          onConfirm={async (title) => {
+            const saved = await onRename(title);
+            if (saved) {
+              setRenameOpen(false);
+            }
+            return saved;
           }}
         />
       ) : null}
@@ -141,9 +144,12 @@ export function SessionRow({
         <ConfirmDelete
           locale={locale}
           onCancel={() => setDeleteOpen(false)}
-          onConfirm={() => {
-            setDeleteOpen(false);
-            onDelete();
+          onConfirm={async () => {
+            const removed = await onDelete();
+            if (removed) {
+              setDeleteOpen(false);
+            }
+            return removed;
           }}
         />
       ) : null}
