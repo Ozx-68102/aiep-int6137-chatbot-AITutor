@@ -42,6 +42,7 @@ from server.types import (
     ProfileResponse,
     ProfileUpdate,
     SessionItem,
+    SessionRename,
     empty_fastgpt_fields,
 )
 
@@ -204,6 +205,46 @@ def create_session(
         return _session_item(created)
 
 
+@app.patch("/api/sessions/{session_id}")
+def rename_session(
+    session_id: UUID,
+    body: SessionRename,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> SessionItem:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        chat = _require_session(session, account, session_id)
+        chat.title = body.title
+        return _session_item(chat)
+
+
+@app.delete("/api/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: UUID,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> Response:
+    fastgpt = _fastgpt()
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        _require_session(session, account, session_id)
+
+    try:
+        await fastgpt.delete_history(session_id)
+    except FastGPTError:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            _SERVER_ERROR,
+        ) from None
+
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        chat = _require_session(session, account, session_id)
+        session.delete(chat)
+
+    discard_reply(session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/api/sessions/{session_id}/partial")
 def read_session_partial(
     session_id: UUID,
@@ -334,7 +375,11 @@ def _fastgpt() -> FastGPT:
     return fastgpt
 
 
-def _require_session(session: Session, account: Account, session_id: UUID) -> None:
+def _require_session(
+    session: Session,
+    account: Account,
+    session_id: UUID,
+) -> ChatSession:
     found = session.scalar(
         select(ChatSession).where(
             ChatSession.id == session_id,
@@ -343,6 +388,7 @@ def _require_session(session: Session, account: Account, session_id: UUID) -> No
     )
     if not isinstance(found, ChatSession):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
+    return found
 
 
 def _login_admin(session: Session, password: str) -> tuple[LoginResponse, str]:

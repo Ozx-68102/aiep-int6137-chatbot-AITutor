@@ -8,6 +8,7 @@ from server.types.api import (
     ProfileResponse,
     ProfileUpdate,
     SessionItem,
+    SessionRename,
 )
 from server.types.env import Settings, empty_fastgpt_fields
 
@@ -21,6 +22,7 @@ __all__ = [
     "ProfileResponse",
     "ProfileUpdate",
     "SessionItem",
+    "SessionRename",
     "Settings",
     "empty_fastgpt_fields",
 ]

@@ -8,6 +8,7 @@ from uuid import UUID
 import httpx2
 
 from server.types import Settings, empty_fastgpt_fields
+from server.url import join_url
 
 logger = logging.getLogger("server.fastgpt")
 
@@ -39,7 +40,7 @@ class ChatRecordPage:
 class FastGPT:
     def __init__(self, client: httpx2.AsyncClient, base_url: str, app_id: str) -> None:
         self._client = client
-        self._base_url = base_url.rstrip("/")
+        self._base_url = base_url
         self._app_id = app_id
 
     async def aclose(self) -> None:
@@ -52,7 +53,7 @@ class FastGPT:
     ) -> AsyncIterator[str | StreamDone]:
         async with self._client.stream(
             "POST",
-            f"{self._base_url}/api/v1/chat/completions",
+            join_url(self._base_url, "v1/chat/completions"),
             json={
                 "appId": self._app_id,
                 "chatId": str(chat_id),
@@ -80,7 +81,7 @@ class FastGPT:
         page_size: int,
     ) -> ChatRecordPage:
         response = await self._client.post(
-            f"{self._base_url}/api/core/chat/record/getPaginationRecords",
+            join_url(self._base_url, "core/chat/record/getPaginationRecords"),
             json={
                 "appId": self._app_id,
                 "chatId": str(chat_id),
@@ -92,13 +93,19 @@ class FastGPT:
             logger.error("FastGPT 返回 %s", response.status_code)
             raise FastGPTError
 
-        try:
-            payload = response.json()
-        except json.JSONDecodeError:
-            logger.error("FastGPT 返回了无法解析的正文")
-            raise FastGPTError from None
+        return _record_page(_read_body(response))
 
-        return _record_page(payload)
+    async def delete_history(self, chat_id: UUID) -> None:
+        response = await self._client.delete(
+            join_url(self._base_url, "core/chat/history/delHistory"),
+            params={"appId": self._app_id, "chatId": str(chat_id)},
+        )
+        if response.status_code == 404:
+            return
+        if response.status_code != 200:
+            logger.error("FastGPT 返回 %s", response.status_code)
+            raise FastGPTError
+        _read_body(response)
 
 
 def open_fastgpt(settings: Settings) -> FastGPT | None:
@@ -159,7 +166,16 @@ def _content(payload: object) -> str | None:
     return content
 
 
-def _record_page(payload: object) -> ChatRecordPage:
+def _read_body(response: httpx2.Response) -> dict[str, object]:
+    try:
+        payload = response.json()
+    except json.JSONDecodeError:
+        logger.error("FastGPT 返回了无法解析的正文")
+        raise FastGPTError from None
+    return _ok_body(payload)
+
+
+def _ok_body(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise FastGPTError
 
@@ -170,7 +186,10 @@ def _record_page(payload: object) -> ChatRecordPage:
     if code != 200:
         logger.error("FastGPT 返回 code %s", code)
         raise FastGPTError
+    return payload
 
+
+def _record_page(payload: dict[str, object]) -> ChatRecordPage:
     data = payload.get("data")
     if not isinstance(data, dict):
         raise FastGPTError
