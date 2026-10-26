@@ -36,7 +36,7 @@ npm install -g pnpm
 命令在 `server/` 里用 `uv run`，不要直接用 `python` 或 `pip`。各库目前装上的版本：
 
 - 语言：Python 3.13。包管理：uv 0.12.13
-- Web：FastAPI 0.162.0，进程用 uvicorn 0.54.0 拉起，只听本机 3001。访问 FastGPT 只用 httpx2 2.16.0 的异步客户端
+- Web：FastAPI 0.162.0，进程用 uvicorn 0.54.0 拉起，只听本机 3001。访问 FastGPT 只用 httpx2 2.16.0 的异步客户端。地址用 furl 2.1.4 拼接
 - 数据库：PostgreSQL 18.6（Homebrew）。驱动 psycopg 3.3.6，ORM SQLAlchemy 2.1.6
 - 配置：Pydantic 2.14.1，pydantic-settings 2.16.1
 - 密码：argon2-cffi 25.1.0（Argon2id）
