@@ -1,18 +1,37 @@
 import hashlib
+import logging
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from fastapi import Cookie, FastAPI, HTTPException, Response, status
+from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from server.database import db_session
 from server.models import Account, ChatSession, LoginToken
+from server.settings import load_settings
+
+logger = logging.getLogger("server.app")
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    load_settings()
+    yield
+
 
 _ADMIN_USERNAME = "admin"
 _UNAUTHORIZED = "用户名或密码不正确"
@@ -37,7 +56,21 @@ class LoginResponse(BaseModel):
     sessions: list[SessionItem]
 
 
-app = FastAPI()
+app = FastAPI(lifespan=_lifespan)
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error(request: Request, exc: Exception) -> Response:
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await request_validation_exception_handler(request, exc)
+
+    logger.exception("请求失败 %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "服务器错误"},
+    )
 
 
 @app.post("/api/login")
