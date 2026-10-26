@@ -2,9 +2,9 @@ import type {Locale} from './locale.ts';
 
 export type Message = {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'error';
   text: string;
-  locale: Locale;
+  locale?: Locale;
 };
 
 export type Session = {
@@ -12,4 +12,5 @@ export type Session = {
   title: string | null;
   titleLocale: Locale | null;
   messages: Message[];
+  messagesKnown: boolean;
 };

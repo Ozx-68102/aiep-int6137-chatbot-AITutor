@@ -17,6 +17,10 @@ export const translations = {
     placeholder: '输入你的问题',
     send: '发送',
     empty: '还没有对话。在下方输入问题。',
+    username: '用户名',
+    password: '密码',
+    logIn: '登录',
+    connectionError: '无法连接到服务器',
   },
   'zh-TW': {
     sessions: '對話',
@@ -28,6 +32,10 @@ export const translations = {
     placeholder: '輸入你的問題',
     send: '發送',
     empty: '還沒有對話。在下方輸入問題。',
+    username: '使用者名稱',
+    password: '密碼',
+    logIn: '登入',
+    connectionError: '無法連接到伺服器',
   },
   'en': {
     sessions: 'Chats',
@@ -39,5 +47,9 @@ export const translations = {
     placeholder: 'Type your question',
     send: 'Send',
     empty: 'No messages yet. Type a question below.',
+    username: 'Username',
+    password: 'Password',
+    logIn: 'Log in',
+    connectionError: 'Unable to connect to the server',
   },
 } satisfies Record<Locale, Record<string, string>>;
