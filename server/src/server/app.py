@@ -223,6 +223,7 @@ def pin_session(
         account = _account_from_cookie(session, login_cookie)
         chat = _require_session(session, account, session_id)
         chat.pinned = body.pinned
+        chat.pinned_at = body.pinned_at
         return _session_item(chat)
 
 
@@ -493,6 +494,7 @@ def _session_item(item: ChatSession) -> SessionItem:
         title=item.title,
         title_locale=item.title_locale,
         pinned=item.pinned,
+        pinned_at=item.pinned_at,
         created_at=item.created_at,
     )
 

@@ -7,6 +7,7 @@ export type SessionItem = {
   title: string | null;
   title_locale: string | null;
   pinned: boolean;
+  pinned_at: string | null;
   created_at: string;
 };
 
@@ -45,10 +46,14 @@ export async function renameSession(sessionId: string, title: string): Promise<S
   return body;
 }
 
-export async function pinSession(sessionId: string, pinned: boolean): Promise<SessionItem> {
+export async function pinSession(
+  sessionId: string,
+  pinned: boolean,
+  pinnedAt: string | null,
+): Promise<SessionItem> {
   const body = await requestJson(`/api/sessions/${sessionId}/pin`, {
     method: 'PATCH',
-    body: JSON.stringify({pinned}),
+    body: JSON.stringify({pinned, pinned_at: pinnedAt}),
   });
   if (!isSessionItem(body)) {
     throw new ApiError(0, null);
@@ -82,6 +87,7 @@ function sessionFromItem(item: SessionItem, messagesKnown: boolean): Session {
     title: item.title,
     titleLocale: isLocale(item.title_locale) ? item.title_locale : null,
     pinned: item.pinned,
+    pinnedAt: item.pinned_at,
     messages: [],
     messagesKnown,
   };
@@ -103,5 +109,6 @@ function isSessionItem(value: unknown): value is SessionItem {
     && (value.title === null || typeof value.title === 'string')
     && (value.title_locale === null || typeof value.title_locale === 'string')
     && typeof value.pinned === 'boolean'
+    && (value.pinned_at === null || typeof value.pinned_at === 'string')
     && typeof value.created_at === 'string';
 }
