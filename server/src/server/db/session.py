@@ -4,7 +4,8 @@ from contextlib import contextmanager
 from sqlalchemy import URL, Engine, create_engine
 from sqlalchemy.orm import Session
 
-from server.settings import Settings, load_settings
+from server.settings import load_settings
+from server.types import Settings
 
 _engine: Engine | None = None
 
