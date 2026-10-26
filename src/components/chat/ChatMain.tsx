@@ -78,7 +78,7 @@ export function ChatMain({
             </p>
           ))
         ) : null}
-        {active && active.messagesKnown && active.messages.length === 0 ? (
+        {!active || (active.messagesKnown && active.messages.length === 0) ? (
           <p className="m-0 text-stone-500">{text.empty}</p>
         ) : null}
       </div>
