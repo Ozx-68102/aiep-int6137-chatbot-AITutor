@@ -1,5 +1,11 @@
 export type Locale = 'zh-CN' | 'zh-TW' | 'en';
 
+export const htmlLang: Record<Locale, string> = {
+  'zh-CN': 'zh-Hans',
+  'zh-TW': 'zh-Hant',
+  'en': 'en',
+};
+
 export function isLocale(value: string | null): value is Locale {
   return value === 'zh-CN' || value === 'zh-TW' || value === 'en';
 }
