@@ -5,20 +5,18 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
+from fastapi import Cookie, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -31,7 +29,17 @@ from server.reply_store import (
     mark_finished,
     read_partial,
 )
-from server.settings import empty_fastgpt_fields, load_settings
+from server.settings import load_settings
+from server.types import (
+    ChatRequest,
+    HistoryMessageResponse,
+    HistoryResponse,
+    LoginRequest,
+    LoginResponse,
+    PartialReplyResponse,
+    SessionItem,
+    empty_fastgpt_fields,
+)
 
 logger = logging.getLogger("server.app")
 
@@ -53,36 +61,6 @@ _LOGIN_REQUIRED = "未登录"
 _COOKIE_NAME = "login"
 _SERVER_ERROR = "服务器错误"
 _running: set[asyncio.Task[None]] = set()
-
-
-class LoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1)
-
-
-class SessionItem(BaseModel):
-    id: UUID
-    title: str | None
-    title_locale: str | None
-    created_at: datetime
-
-
-class LoginResponse(BaseModel):
-    locale: str
-    sessions: list[SessionItem]
-
-
-class PartialReplyResponse(BaseModel):
-    status: str | None
-    text: str
-
-
-class ChatRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    message: str = Field(min_length=1)
-    chat_id: UUID = Field(alias="chatId")
-    locale: str | None = None
 
 
 class _Relay:
@@ -165,20 +143,42 @@ def read_session_partial(
     return PartialReplyResponse(status=partial.status, text=partial.text)
 
 
+@app.get("/api/sessions/{session_id}/messages")
+async def read_session_messages(
+    session_id: UUID,
+    offset: Annotated[int, Query(ge=0)],
+    page_size: Annotated[int, Query(ge=1)],
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> HistoryResponse:
+    fastgpt = _fastgpt()
+
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        _require_session(session, account, session_id)
+
+    try:
+        page = await fastgpt.records(session_id, offset, page_size)
+    except FastGPTError:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            _SERVER_ERROR,
+        ) from None
+
+    return HistoryResponse(
+        total=page.total,
+        messages=[
+            HistoryMessageResponse(id=item.id, role=item.role, text=item.text)
+            for item in page.records
+        ],
+    )
+
+
 @app.post("/api/chat")
 async def chat(
     body: ChatRequest,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
-    missing = empty_fastgpt_fields(load_settings())
-    if missing:
-        logger.error("FastGPT 配置为空：%s", "、".join(missing))
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _SERVER_ERROR)
-
-    fastgpt = app.state.fastgpt
-    if not isinstance(fastgpt, FastGPT):
-        logger.error("FastGPT 客户端未建立")
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _SERVER_ERROR)
+    fastgpt = _fastgpt()
 
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
@@ -245,6 +245,19 @@ def _chunk(content: str) -> str:
         separators=(",", ":"),
     )
     return f"data: {payload}\n\n"
+
+
+def _fastgpt() -> FastGPT:
+    missing = empty_fastgpt_fields(load_settings())
+    if missing:
+        logger.error("FastGPT 配置为空：%s", "、".join(missing))
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _SERVER_ERROR)
+
+    fastgpt = app.state.fastgpt
+    if not isinstance(fastgpt, FastGPT):
+        logger.error("FastGPT 客户端未建立")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _SERVER_ERROR)
+    return fastgpt
 
 
 def _require_session(session: Session, account: Account, session_id: UUID) -> None:

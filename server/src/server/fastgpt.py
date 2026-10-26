@@ -1,11 +1,13 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 import httpx2
 
-from server.settings import Settings, empty_fastgpt_fields
+from server.types import Settings, empty_fastgpt_fields
 
 logger = logging.getLogger("server.fastgpt")
 
@@ -19,6 +21,19 @@ class StreamDone:
 
 
 STREAM_DONE = StreamDone()
+
+
+@dataclass(frozen=True)
+class ChatRecord:
+    id: str
+    role: Literal["user", "assistant"]
+    text: str
+
+
+@dataclass(frozen=True)
+class ChatRecordPage:
+    total: int
+    records: list[ChatRecord]
 
 
 class FastGPT:
@@ -57,6 +72,33 @@ class FastGPT:
                 yield piece
                 if piece is STREAM_DONE:
                     return
+
+    async def records(
+        self,
+        chat_id: UUID,
+        offset: int,
+        page_size: int,
+    ) -> ChatRecordPage:
+        response = await self._client.post(
+            f"{self._base_url}/api/core/chat/record/getPaginationRecords",
+            json={
+                "appId": self._app_id,
+                "chatId": str(chat_id),
+                "offset": offset,
+                "pageSize": page_size,
+            },
+        )
+        if response.status_code != 200:
+            logger.error("FastGPT 返回 %s", response.status_code)
+            raise FastGPTError
+
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            logger.error("FastGPT 返回了无法解析的正文")
+            raise FastGPTError from None
+
+        return _record_page(payload)
 
 
 def open_fastgpt(settings: Settings) -> FastGPT | None:
@@ -115,3 +157,81 @@ def _content(payload: object) -> str | None:
         return None
 
     return content
+
+
+def _record_page(payload: object) -> ChatRecordPage:
+    if not isinstance(payload, dict):
+        raise FastGPTError
+
+    code = payload.get("code")
+    if isinstance(code, bool) or not isinstance(code, int):
+        logger.error("FastGPT 返回 code 无效")
+        raise FastGPTError
+    if code != 200:
+        logger.error("FastGPT 返回 code %s", code)
+        raise FastGPTError
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise FastGPTError
+
+    total = data.get("total")
+    if isinstance(total, bool) or not isinstance(total, int):
+        raise FastGPTError
+
+    raw_list = data.get("list")
+    if not isinstance(raw_list, list):
+        raise FastGPTError
+
+    records: list[ChatRecord] = []
+    for item in raw_list:
+        record = _record(item)
+        if record is not None:
+            records.append(record)
+
+    return ChatRecordPage(total=total, records=records)
+
+
+def _record(item: object) -> ChatRecord | None:
+    if not isinstance(item, dict):
+        return None
+
+    obj = item.get("obj")
+    role: Literal["user", "assistant"]
+    if obj == "Human":
+        role = "user"
+    elif obj == "AI":
+        role = "assistant"
+    else:
+        return None
+
+    text = _record_text(item.get("value"))
+    if text is None:
+        return None
+
+    data_id = item.get("dataId")
+    if isinstance(data_id, str) and data_id != "":
+        record_id = data_id
+    else:
+        record_id = item.get("_id")
+
+    if not isinstance(record_id, str) or record_id == "":
+        return None
+
+    return ChatRecord(id=record_id, role=role, text=text)
+
+
+def _record_text(value: object) -> str | None:
+    items = value if isinstance(value, list) else [value]
+    parts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if not isinstance(text, dict):
+            continue
+        content = text.get("content")
+        if isinstance(content, str) and content != "":
+            parts.append(content)
+
+    return "".join(parts) if parts else None
