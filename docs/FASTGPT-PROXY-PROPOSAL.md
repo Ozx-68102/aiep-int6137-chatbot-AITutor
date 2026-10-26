@@ -106,6 +106,7 @@ FastGPT 侧具体字段与示例以维护者文档为准；可在代理实现旁
 | 本文提议                                       | 已记录                                         |
 | `server/` 读取配置、登录、会话列表与新建       | 已有。登录目前只接受 `admin`                   |
 | 流式转发、`POST /api/chat`、FastGPT 调用       | 已有。页面 `src/api/chat.ts` 仍是本地示例     |
+| 按会话读取已完成消息                           | 已有 `GET /api/sessions/{id}/messages`。页面未接 |
 | 修改语言、重命名、置顶、分享、删除、管理员页面 | 未开始                                         |
 | `src/api/chat.ts` 对接代理 + 流式              | 未开始                                         |
 | Vite 开发代理配置                              | 未开始                                         |
