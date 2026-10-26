@@ -1,7 +1,16 @@
 import type {Locale} from '../type/locale.ts';
-import {ApiError, isRecord, readDetail} from './http.ts';
+import {ApiError, isRecord, readDetail, withConnectionRetry} from './http.ts';
 
 export async function streamReply(
+  chatId: string,
+  message: string,
+  locale: Locale,
+  onDelta: (text: string) => void,
+): Promise<void> {
+  await withConnectionRetry(() => deliverReply(chatId, message, locale, onDelta));
+}
+
+async function deliverReply(
   chatId: string,
   message: string,
   locale: Locale,

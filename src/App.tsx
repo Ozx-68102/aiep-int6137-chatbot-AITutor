@@ -13,6 +13,7 @@ import {ConfirmLogout} from './components/settings/ConfirmLogout.tsx';
 import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
+import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
@@ -41,12 +42,21 @@ export default function App() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
   const sendingRef = useRef<Set<string>>(new Set());
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
-  const composerLocked = sendingNew || activePending || (!active && !composingNew);
+  const inputLocked = sendingNew || activePending;
+  const connectionToast = toast === null ? null : (
+    <ConnectionToast
+      key={toast.id}
+      message={toast.text}
+      lang={toast.lang}
+      onDismiss={() => setToast(null)}
+    />
+  );
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -107,12 +117,18 @@ export default function App() {
           return;
         }
         if (connectionFailure(error)) {
-          setLoginOffline(true);
-          setLoginDetail(null);
-        } else {
-          setLoginOffline(false);
-          setLoginDetail(explain(error, translations[localeFromSystem()].connectionError));
+          const initial = localeFromSystem();
+          setComposingNew(true);
+          setToast({
+            id: 1,
+            text: translations[initial].connectionRetry,
+            lang: htmlLang[initial],
+          });
+          setAuth('ready');
+          return;
         }
+        setLoginOffline(false);
+        setLoginDetail(explain(error, translations[localeFromSystem()].connectionError));
         setAuth('anonymous');
       },
     );
@@ -120,6 +136,14 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  function showConnectionToast() {
+    setToast((current) => ({
+      id: (current?.id ?? 0) + 1,
+      text: text.connectionRetry,
+      lang: htmlLang[locale],
+    }));
+  }
 
   function enterLogin(detail: string | null) {
     setAuth('anonymous');
@@ -133,6 +157,7 @@ export default function App() {
     setConfirmLogout(false);
     setProfileError(null);
     setPendingIds(new Set());
+    setToast(null);
     setLoginOffline(false);
     setLoginDetail(detail);
     setLoginSubmitting(false);
@@ -166,6 +191,7 @@ export default function App() {
       }
       if (connectionFailure(error)) {
         setLoginOffline(true);
+        showConnectionToast();
         return;
       }
       setLoginDetail(explain(error, text.connectionError));
@@ -238,6 +264,10 @@ export default function App() {
         enterLogin(error.detail);
         return;
       }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return;
+      }
       setProfileError(explain(error, text.connectionError));
     } finally {
       setSavingLocale(false);
@@ -258,16 +288,20 @@ export default function App() {
         enterLogin(null);
         return;
       }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return;
+      }
       setProfileError(explain(error, text.connectionError));
     } finally {
       setLoggingOut(false);
     }
   }
 
-  async function renameOpenSession(id: string, title: string) {
+  async function renameOpenSession(id: string, title: string): Promise<boolean> {
     const trimmed = title.trim();
     if (trimmed === '') {
-      return;
+      return false;
     }
     try {
       const item = await renameSession(id, trimmed, locale);
@@ -281,36 +315,47 @@ export default function App() {
           titleLocale: isLocale(item.title_locale) ? item.title_locale : null,
         };
       }));
+      return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
-        return;
+        return false;
+      }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return false;
       }
       setNotice(explain(error, text.connectionError));
+      return false;
     }
   }
 
-  async function removeSession(id: string) {
+  async function removeSession(id: string): Promise<boolean> {
     const wasCurrent = activeId === id;
     try {
       await deleteSession(id);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
-        return;
+        return false;
+      }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return false;
       }
       setNotice(explain(error, text.connectionError));
-      return;
+      return false;
     }
     setSessions((current) => current.filter((session) => session.id !== id));
     if (!wasCurrent) {
-      return;
+      return true;
     }
     setComposingNew(true);
     setActiveId(null);
     setDraft(readUnsent());
     setNotice(null);
     setView('chat');
+    return true;
   }
 
   function addSession() {
@@ -357,6 +402,10 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        showConnectionToast();
         return;
       }
       if (sessionId === '') {
@@ -437,6 +486,10 @@ export default function App() {
         enterLogin(error.detail);
         return;
       }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return;
+      }
       const detail = error instanceof ApiError ? error.detail : null;
       const errorMessage: Message = {
         id: crypto.randomUUID(),
@@ -460,21 +513,29 @@ export default function App() {
   }
 
   if (auth === 'checking') {
-    return <div className="h-full bg-stone-100"/>;
+    return (
+      <>
+        <div className="h-full bg-stone-100"/>
+        {connectionToast}
+      </>
+    );
   }
 
   if (auth === 'anonymous') {
     return (
-      <LoginScreen
-        locale={locale}
-        error={loginError}
-        offline={loginOffline}
-        submitting={loginSubmitting}
-        onLocale={setLocale}
-        onSubmit={(usernameValue, password) => {
-          void submitLogin(usernameValue, password);
-        }}
-      />
+      <>
+        <LoginScreen
+          locale={locale}
+          error={loginError}
+          offline={loginOffline}
+          submitting={loginSubmitting}
+          onLocale={setLocale}
+          onSubmit={(usernameValue, password) => {
+            void submitLogin(usernameValue, password);
+          }}
+        />
+        {connectionToast}
+      </>
     );
   }
 
@@ -491,12 +552,8 @@ export default function App() {
         onCreate={addSession}
         onClose={() => setSidebarOpen(false)}
         onOpenSession={openSession}
-        onRename={(id, title) => {
-          void renameOpenSession(id, title);
-        }}
-        onDelete={(id) => {
-          void removeSession(id);
-        }}
+        onRename={(id, title) => renameOpenSession(id, title)}
+        onDelete={(id) => removeSession(id)}
         onOpenSettings={() => {
           setConfirmLogout(false);
           setProfileError(null);
@@ -515,7 +572,8 @@ export default function App() {
         }}
         pending={activePending}
         draft={draft}
-        composerLocked={composerLocked}
+        inputLocked={inputLocked}
+        sendLocked={inputLocked}
         onDraft={setDraft}
         onSubmit={submitMessage}
       />
@@ -550,6 +608,7 @@ export default function App() {
           }}
         />
       ) : null}
+      {connectionToast}
     </div>
   );
 }

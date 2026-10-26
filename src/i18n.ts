@@ -32,6 +32,7 @@ export const translations = {
     password: '密码',
     logIn: '登录',
     connectionError: '无法连接到服务器',
+    connectionRetry: '无法连接到服务器，请稍后重试',
   },
   'zh-TW': {
     sessions: '對話',
@@ -58,6 +59,7 @@ export const translations = {
     password: '密碼',
     logIn: '登入',
     connectionError: '無法連接到伺服器',
+    connectionRetry: '無法連接到伺服器，請稍後重試',
   },
   'en': {
     sessions: 'Chats',
@@ -84,5 +86,6 @@ export const translations = {
     password: 'Password',
     logIn: 'Log in',
     connectionError: 'Unable to connect to the server',
+    connectionRetry: 'Unable to connect to the server. Please try again later.',
   },
 } satisfies Record<Locale, Record<string, string>>;

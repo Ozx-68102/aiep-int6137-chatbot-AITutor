@@ -12,12 +12,28 @@ export function RenameSession({
   locale: Locale;
   initialTitle: string;
   onCancel: () => void;
-  onConfirm: (title: string) => void;
+  onConfirm: (title: string) => Promise<boolean>;
 }) {
   const text = translations[locale];
   const [draft, setDraft] = useState(initialTitle);
+  const [pending, setPending] = useState(false);
   const trimmed = draft.trim();
   const unchanged = trimmed === '' || trimmed === initialTitle.trim();
+
+  async function confirm() {
+    if (pending || unchanged) {
+      return;
+    }
+    setPending(true);
+    try {
+      const saved = await onConfirm(trimmed);
+      if (!saved) {
+        setPending(false);
+      }
+    } catch {
+      setPending(false);
+    }
+  }
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -45,10 +61,7 @@ export function RenameSession({
         onClick={(event) => event.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault();
-          if (unchanged) {
-            return;
-          }
-          onConfirm(trimmed);
+          void confirm();
         }}
       >
         <CloseButton label={text.close} onClick={onCancel}/>
@@ -73,12 +86,13 @@ export function RenameSession({
             type="submit"
             className={
               unchanged
-                ? 'rounded-lg border border-stone-300 bg-white px-3 py-2.5 opacity-50'
-                : 'rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white'
+                ? 'inline-flex min-w-16 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2.5 opacity-50'
+                : 'inline-flex min-w-16 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white disabled:opacity-60'
             }
-            disabled={unchanged}
+            disabled={unchanged || pending}
+            aria-busy={pending}
           >
-            {text.renameSave}
+            {pending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true"/> : text.renameSave}
           </button>
         </div>
       </form>

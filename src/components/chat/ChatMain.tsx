@@ -16,7 +16,8 @@ export function ChatMain({
   onAnimationEnd,
   pending,
   draft,
-  composerLocked,
+  inputLocked,
+  sendLocked,
   onDraft,
   onSubmit,
 }: {
@@ -29,7 +30,8 @@ export function ChatMain({
   onAnimationEnd: (id: string) => void;
   pending: boolean;
   draft: string;
-  composerLocked: boolean;
+  inputLocked: boolean;
+  sendLocked: boolean;
   onDraft: (value: string) => void;
   onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
 }) {
@@ -85,26 +87,26 @@ export function ChatMain({
       <form className="flex items-center gap-2 border-t border-stone-300 px-4 pt-3 pb-4" onSubmit={onSubmit}>
         <input
           className={
-            composerLocked
+            inputLocked
               ? 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5 opacity-50'
               : 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5'
           }
           value={draft}
           placeholder={text.placeholder}
           aria-label={text.placeholder}
-          disabled={composerLocked}
+          disabled={inputLocked}
           onChange={(event) => onDraft(event.target.value)}
         />
         <button
           type="submit"
           className={
-            composerLocked || draft.trim() === ''
+            sendLocked || draft.trim() === ''
               ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
               : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white'
           }
           aria-label={text.send}
           title={text.send}
-          disabled={composerLocked || draft.trim() === ''}
+          disabled={sendLocked || draft.trim() === ''}
         >
           <Send aria-hidden="true"/>
         </button>

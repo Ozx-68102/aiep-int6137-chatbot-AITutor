@@ -1,4 +1,4 @@
-import {useEffect} from 'react';
+import {useEffect, useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
@@ -10,9 +10,25 @@ export function ConfirmDelete({
 }: {
   locale: Locale;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<boolean>;
 }) {
   const text = translations[locale];
+  const [pending, setPending] = useState(false);
+
+  async function confirm() {
+    if (pending) {
+      return;
+    }
+    setPending(true);
+    try {
+      const removed = await onConfirm();
+      if (!removed) {
+        setPending(false);
+      }
+    } catch {
+      setPending(false);
+    }
+  }
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -52,10 +68,14 @@ export function ConfirmDelete({
           </button>
           <button
             type="button"
-            className="rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600"
-            onClick={onConfirm}
+            className="inline-flex min-w-16 items-center justify-center rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 disabled:opacity-60"
+            disabled={pending}
+            aria-busy={pending}
+            onClick={() => {
+              void confirm();
+            }}
           >
-            {text.deleteSession}
+            {pending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true"/> : text.deleteSession}
           </button>
         </div>
       </div>

@@ -14,27 +14,55 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+const connectionAttempts = 4;
+const connectionRetryDelayMs = 300;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+export async function withConnectionRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < connectionAttempts; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      const retry = (!(error instanceof ApiError) || error.detail === null) && attempt < connectionAttempts - 1;
+      if (!retry) {
+        throw error;
+      }
+      await wait(connectionRetryDelayMs);
+    }
+  }
+  throw new ApiError(0, null);
+}
+
 export async function requestEmpty(path: string, init?: { method?: string }): Promise<void> {
-  const response = await request(path, init);
-  if (response.status === 204) {
-    return;
-  }
-  if (!response.ok) {
-    throw new ApiError(response.status, await readDetail(response));
-  }
+  await withConnectionRetry(async () => {
+    const response = await request(path, init);
+    if (response.status === 204) {
+      return;
+    }
+    if (!response.ok) {
+      throw new ApiError(response.status, await readDetail(response));
+    }
+  });
 }
 
 export async function requestJson(path: string, init?: { method?: string; body?: string }): Promise<unknown> {
-  const response = await request(path, init);
-  if (!response.ok) {
-    throw new ApiError(response.status, await readDetail(response));
-  }
+  return withConnectionRetry(async () => {
+    const response = await request(path, init);
+    if (!response.ok) {
+      throw new ApiError(response.status, await readDetail(response));
+    }
 
-  try {
-    return await response.json();
-  } catch {
-    throw new ApiError(0, null);
-  }
+    try {
+      return await response.json();
+    } catch {
+      throw new ApiError(0, null);
+    }
+  });
 }
 
 async function request(path: string, init?: { method?: string; body?: string }): Promise<Response> {
