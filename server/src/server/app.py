@@ -210,9 +210,9 @@ def rename_session(
 ) -> SessionItem:
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
-        chat = _require_session(session, account, session_id)
-        chat.title = body.title
-        return _session_item(chat)
+        chat_session = _require_session(session, account, session_id)
+        chat_session.title = body.title
+        return _session_item(chat_session)
 
 
 @app.patch("/api/sessions/{session_id}/pin")
@@ -223,10 +223,10 @@ def pin_session(
 ) -> SessionItem:
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
-        chat = _require_session(session, account, session_id)
-        chat.pinned = body.pinned
-        chat.pinned_at = body.pinned_at
-        return _session_item(chat)
+        chat_session = _require_session(session, account, session_id)
+        chat_session.pinned = body.pinned
+        chat_session.pinned_at = body.pinned_at
+        return _session_item(chat_session)
 
 
 @app.delete("/api/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -249,8 +249,8 @@ async def delete_session(
 
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
-        chat = _require_session(session, account, session_id)
-        session.delete(chat)
+        chat_session = _require_session(session, account, session_id)
+        session.delete(chat_session)
 
     discard_reply(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -304,6 +304,8 @@ async def chat(
     body: ChatRequest,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
+    # 排查流式输出用，确认后再收窄。这里只有对话正文，没有登录 cookie。
+    logger.info("对话请求 %s", body.model_dump_json(by_alias=True))
     fastgpt = _fastgpt()
 
     with db_session() as session:
@@ -330,12 +332,15 @@ async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -
         async for event in fastgpt.events(chat_id, message):
             if isinstance(event, str):
                 append_chunk(chat_id, event)
-                await relay.queue.put(_chunk(event))
+                outgoing = _chunk(event)
+                logger.info("发给页面 %s", outgoing.removesuffix("\n\n"))
+                await relay.queue.put(outgoing)
                 relay.sent = True
                 relay.started.set()
                 continue
 
             mark_finished(chat_id)
+            logger.info("发给页面 %s", "data: [DONE]")
             await relay.queue.put("data: [DONE]\n\n")
             relay.sent = True
             relay.started.set()
