@@ -51,22 +51,33 @@ class FastGPT:
         chat_id: UUID,
         message: str,
     ) -> AsyncIterator[str | StreamDone]:
+        payload = {
+            "appId": self._app_id,
+            "chatId": str(chat_id),
+            "stream": True,
+            "detail": False,
+            "messages": [{"role": "user", "content": message}],
+        }
+        # 排查流式输出用，确认后再收窄。密钥在请求头里，不写进这行。
+        logger.info("FastGPT 请求 %s", _json(payload))
         async with self._client.stream(
             "POST",
             join_url(self._base_url, "v1/chat/completions"),
-            json={
-                "appId": self._app_id,
-                "chatId": str(chat_id),
-                "stream": True,
-                "detail": False,
-                "messages": [{"role": "user", "content": message}],
-            },
+            json=payload,
         ) as response:
+            logger.info(
+                "FastGPT 响应状态 %s %s",
+                response.status_code,
+                response.headers.get("content-type", ""),
+            )
             if response.status_code != 200:
-                logger.error("FastGPT 返回 %s", response.status_code)
+                error_body = (await response.aread()).decode("utf-8", errors="replace")
+                logger.error("FastGPT 错误正文 %s", error_body)
                 raise FastGPTError
 
             async for line in response.aiter_lines():
+                if line.strip() != "":
+                    logger.info("FastGPT 上游 %s", line)
                 piece = _piece(line)
                 if piece is None:
                     continue
@@ -120,6 +131,10 @@ def open_fastgpt(settings: Settings) -> FastGPT | None:
         },
     )
     return FastGPT(client, settings.fastgpt_base_url, settings.fastgpt_app_id)
+
+
+def _json(payload: object) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _piece(line: str) -> str | StreamDone | None:
