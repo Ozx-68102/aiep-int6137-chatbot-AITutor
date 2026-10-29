@@ -9,6 +9,7 @@
 - 新人上手：[docs/开发手册/](docs/开发手册/)
 - 实测到的反直觉行为：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，
   也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
+- 后端特有的规矩和命令：[server/AGENTS.md](server/AGENTS.md)
 
 ## 守则
 - 信息不足先问：需求、接口、字段、配置不清楚时停下来问并说明理解，不猜、不臆造
@@ -20,15 +21,14 @@
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts`
   里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上
   `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
-- FastGPT 的地址、应用 id、变量名、登录方式和接口路径都不臆造，缺了就问
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
-- 格式交给工具：前端用 oxfmt，后端用 ruff format。写完跑对应的 fmt 命令，不要手动跟格式较劲
+- 格式交给工具：写完跑对应的 fmt 命令，不要手动跟格式较劲
 - 文档和对话都用平常话，不用自造词和行话
 
 ## 验收
 - 改完 `src/`：`pnpm check`（oxlint + oxfmt --check）和 `pnpm build`（build 里已经带类型检查，几秒就完，产物在 `dist/`）
 - 只想做类型检查、不产出 `dist/` 时：`pnpm exec tsc --noEmit`
-- 改完 `server/`：`bash scripts/check-server.sh`（ruff check + ruff format --check）
+- 改完 `server/` 里的代码：按 [server/AGENTS.md](server/AGENTS.md) 的验收一节做
 - 改完界面、跳转或页面状态：在浏览器里点一遍受影响的流程；没有浏览器工具就说明哪一步没验
 - 本仓库没有自动化测试，不要引入测试框架
 
@@ -56,14 +56,4 @@
 - 没有 `pnpm dev`：页面和接口是两个进程，要两个终端；接口没起来时页面会提示连不上
 - `pnpm test` 是占位脚本，会直接失败，不要用
 
-**后端（`server/` 里）**
-- `bash scripts/check-server.sh` — 后端两项检查：ruff check + ruff format --check（在仓库根目录执行）
-- `uv sync` — 按 uv.lock 装好依赖（Python 锁 3.13）
-- `uv lock --check` — 检查锁文件
-- `uv run ruff check .` — 后端检查
-- `uv run ruff format .` — 按 ruff 的规则改格式
-- `uv run ruff format --check .` — 只查格式，不改文件
-- `uv run server` — 起接口服务，等价于 `pnpm run dev:backend`
-- `uv run python -m server.db.init` — 只补缺的表和列，建初始账号，不改已有密码。
-  不要每次起服务都跑：只在项目维护者下令时，或改了数据库结构之后跑
-- 起接口服务前，本机 PostgreSQL 和 Redis 必须在运行
+后端的命令在 [server/AGENTS.md](server/AGENTS.md) 的「常用指令」一节。
