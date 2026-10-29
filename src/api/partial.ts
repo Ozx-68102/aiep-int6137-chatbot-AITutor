@@ -13,6 +13,14 @@ export async function readPartial(sessionId: string): Promise<PartialReply> {
   return body;
 }
 
+export async function readPartialSafe(sessionId: string): Promise<PartialReply> {
+  try {
+    return await readPartial(sessionId);
+  } catch {
+    return {status: null, text: ''};
+  }
+}
+
 function isPartialReply(value: unknown): value is PartialReply {
   return (
     isRecord(value) &&

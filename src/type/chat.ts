@@ -5,6 +5,7 @@ export type Message = {
   role: 'user' | 'assistant' | 'error';
   text: string;
   locale?: Locale;
+  waiting?: boolean;
 };
 
 export type Session = {

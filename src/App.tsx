@@ -3,6 +3,8 @@ import {useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {streamReply} from './api/chat.ts';
 import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
+import {readPartial} from './api/partial.ts';
+import type {PartialReply} from './api/partial.ts';
 import {logout, readProfile, updateProfile} from './api/profile.ts';
 import type {Profile} from './api/profile.ts';
 import {
@@ -28,6 +30,8 @@ import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
 import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
+import {startPartialPolling} from './session/poll.ts';
+import {visibleText} from './session/text.ts';
 import {pushSessionToUrl, readSessionFromUrl, replaceSessionToUrl} from './session/location.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
@@ -61,12 +65,16 @@ export default function App() {
   const [threadRetry, setThreadRetry] = useState(0);
   const sendingRef = useRef<Set<string>>(new Set());
   const titleSaves = useRef(new Map<string, Promise<void>>());
+  const pollers = useRef(new Map<string, () => void>());
   const sessionsRef = useRef(sessions);
   const draftRef = useRef(draft);
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
   const connectionToastRef = useRef<() => void>(() => undefined);
   const connectionCopyRef = useRef('');
+  const resumePartialRef = useRef<(sessionId: string, messages: Message[]) => void>(
+    () => undefined,
+  );
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
   const active = sessions.find((session) => session.id === activeId);
@@ -93,6 +101,7 @@ export default function App() {
     draftRef.current = draft;
     connectionToastRef.current = showConnectionToast;
     connectionCopyRef.current = text.connectionError;
+    resumePartialRef.current = resumePartial;
   });
 
   useEffect(() => {
@@ -113,7 +122,7 @@ export default function App() {
     flights.add(sessionId);
     setHistoryLoadingId(sessionId);
     void loadThread(sessionId)
-      .then((messages) => {
+      .then((thread) => {
         if (cancelled) {
           return;
         }
@@ -123,9 +132,12 @@ export default function App() {
             if (session.id !== sessionId || session.messages.length > 0) {
               return session;
             }
-            return {...session, messages, messagesKnown: true};
+            return {...session, messages: thread.messages, messagesKnown: true};
           }),
         );
+        if (thread.partial.status === 'streaming') {
+          resumePartialRef.current(sessionId, thread.messages);
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -248,6 +260,16 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  useEffect(() => {
+    const active = pollers.current;
+    return () => {
+      for (const stop of active.values()) {
+        stop();
+      }
+      active.clear();
+    };
+  }, []);
+
   function applyUrlSession(list: Session[]): void {
     const wanted = readSessionFromUrl();
     if (wanted === null) {
@@ -290,6 +312,10 @@ export default function App() {
     loadedThreads.current.clear();
     threadFlight.current.clear();
     titleSaves.current.clear();
+    for (const stop of pollers.current.values()) {
+      stop();
+    }
+    pollers.current.clear();
     setToast(null);
     setLoginOffline(false);
     setLoginDetail(detail);
@@ -527,6 +553,8 @@ export default function App() {
       return false;
     }
     setSessions((current) => current.filter((session) => session.id !== id));
+    stopPolling(id);
+    clearPending(id);
     if (!wasCurrent) {
       return true;
     }
@@ -668,32 +696,147 @@ export default function App() {
     void sendQuestion(sessionId, question);
   }
 
-  async function sendQuestion(sessionId: string, question: string) {
-    try {
-      let assistantId: string | null = null;
-      await streamReply(sessionId, question, locale, (chunk) => {
-        if (assistantId === null) {
-          assistantId = crypto.randomUUID();
-          const messageId = assistantId;
-          updateSession(sessionId, (session) => ({
-            ...session,
-            messages: [
-              ...session.messages,
-              {id: messageId, role: 'assistant', text: chunk, locale},
-            ],
-          }));
-          markEntering(messageId);
-          return;
+  function addWaitingMessage(sessionId: string, messageId: string) {
+    const message: Message = {id: messageId, role: 'assistant', text: '', locale, waiting: true};
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: [...session.messages, message],
+    }));
+    markEntering(messageId);
+  }
+
+  function applyStreamText(sessionId: string, messageId: string, chunk: string) {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: session.messages.map((message) => {
+        if (message.id !== messageId) {
+          return message;
         }
-        const messageId = assistantId;
-        updateSession(sessionId, (session) => ({
-          ...session,
-          messages: session.messages.map((message) =>
-            message.id === messageId ? {...message, text: message.text + chunk} : message,
-          ),
-        }));
+        const text = message.text + chunk;
+        return {...message, text, waiting: visibleText(message.role, text) === ''};
+      }),
+    }));
+  }
+
+  function applyPartialText(sessionId: string, messageId: string, partial: PartialReply) {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: session.messages.map((message) => {
+        if (message.id !== messageId) {
+          return message;
+        }
+        if (!partial.text.startsWith(message.text)) {
+          return message;
+        }
+        const waiting =
+          partial.status === 'streaming' && visibleText(message.role, partial.text) === '';
+        return {...message, text: partial.text, waiting};
+      }),
+    }));
+  }
+
+  function removeMessage(sessionId: string, messageId: string) {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: session.messages.filter((message) => message.id !== messageId),
+    }));
+  }
+
+  function addErrorMessage(sessionId: string, content: string, messageLocale: Locale) {
+    const message: Message = {
+      id: crypto.randomUUID(),
+      role: 'error',
+      text: content,
+      locale: messageLocale,
+    };
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: [...session.messages, message],
+    }));
+    markEntering(message.id);
+  }
+
+  function clearPending(sessionId: string) {
+    setPendingIds((current) => {
+      const next = new Set(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }
+
+  function stopPolling(sessionId: string) {
+    const stop = pollers.current.get(sessionId);
+    if (stop === undefined) {
+      return;
+    }
+    stop();
+    pollers.current.delete(sessionId);
+  }
+
+  function startPolling(sessionId: string, messageId: string) {
+    stopPolling(sessionId);
+    const stop = startPartialPolling(sessionId, (partial) => {
+      applyPartialText(sessionId, messageId, partial);
+      if (partial.status === 'streaming') {
+        return;
+      }
+      stopPolling(sessionId);
+      clearPending(sessionId);
+      if (partial.status === 'failed') {
+        addErrorMessage(sessionId, text.replyInterrupted, locale);
+      }
+    });
+    pollers.current.set(sessionId, stop);
+  }
+
+  function resumePartial(sessionId: string, messages: Message[]) {
+    const waiting = messages.find((message) => message.waiting === true);
+    if (waiting === undefined) {
+      return;
+    }
+    setPendingIds((current) => new Set(current).add(sessionId));
+    startPolling(sessionId, waiting.id);
+  }
+
+  async function recoverReply(sessionId: string, messageId: string) {
+    let partial: PartialReply;
+    try {
+      partial = await readPartial(sessionId);
+    } catch {
+      removeMessage(sessionId, messageId);
+      addErrorMessage(sessionId, text.replyInterrupted, locale);
+      return;
+    }
+    if (partial.status === 'streaming') {
+      applyPartialText(sessionId, messageId, partial);
+      startPolling(sessionId, messageId);
+      return;
+    }
+    if (partial.status === 'finished') {
+      applyPartialText(sessionId, messageId, partial);
+      return;
+    }
+    applyPartialText(sessionId, messageId, partial);
+    if (partial.status === 'failed') {
+      addErrorMessage(sessionId, text.replyInterrupted, locale);
+      return;
+    }
+    removeMessage(sessionId, messageId);
+    addErrorMessage(sessionId, text.replyInterrupted, locale);
+  }
+
+  async function sendQuestion(sessionId: string, question: string) {
+    const assistantId = crypto.randomUUID();
+    try {
+      addWaitingMessage(sessionId, assistantId);
+      const completed = await streamReply(sessionId, question, locale, (chunk) => {
+        applyStreamText(sessionId, assistantId, chunk);
       });
+      if (!completed) {
+        await recoverReply(sessionId, assistantId);
+      }
     } catch (error) {
+      removeMessage(sessionId, assistantId);
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
         return;
@@ -703,24 +846,12 @@ export default function App() {
         return;
       }
       const detail = error instanceof ApiError ? error.detail : null;
-      const errorMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'error',
-        text: detail ?? text.connectionError,
-        locale: detail ? 'zh-CN' : locale,
-      };
-      updateSession(sessionId, (session) => ({
-        ...session,
-        messages: [...session.messages, errorMessage],
-      }));
-      markEntering(errorMessage.id);
+      addErrorMessage(sessionId, detail ?? text.connectionError, detail ? 'zh-CN' : locale);
     } finally {
       sendingRef.current.delete(sessionId);
-      setPendingIds((current) => {
-        const next = new Set(current);
-        next.delete(sessionId);
-        return next;
-      });
+      if (!pollers.current.has(sessionId)) {
+        clearPending(sessionId);
+      }
     }
   }
 
