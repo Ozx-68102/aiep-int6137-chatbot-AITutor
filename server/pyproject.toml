@@ -48,3 +48,8 @@ select = [
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Use native Python 3.13 typing; do not import annotations from __future__."
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
