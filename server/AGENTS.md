@@ -21,6 +21,7 @@
 - 改完后端代码：`uv run ruff check .` 和 `uv run ruff format --check .`
 
 ## 边界
+- 默认只讨论，不动手：收到需求或信息后先分析、给方案、问清楚，等我明确许可了再开始改
 - FastGPT 的地址、应用 id、变量名、登录方式和接口路径都不臆造，缺了就问
 - 密钥只放仓库根目录 `.env`（已忽略），由 `server/src/server/settings.py` 读取。
   不写进代码，也不写进日志
