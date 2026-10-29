@@ -27,7 +27,6 @@ import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
-import {markEmptySessions} from './session/emptiness.ts';
 import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
 import {startPartialPolling} from './session/poll.ts';
@@ -190,17 +189,6 @@ export default function App() {
           return;
         }
         let next = sessionsFromList(items);
-        try {
-          next = await markEmptySessions(next);
-        } catch (error) {
-          if (cancelled) {
-            return;
-          }
-          if (error instanceof ApiError && error.status === 401) {
-            setAuth('anonymous');
-            return;
-          }
-        }
         if (cancelled) {
           return;
         }
@@ -366,14 +354,6 @@ export default function App() {
       setLocale(result.locale);
     }
     let next = sessionsFromList(result.sessions);
-    try {
-      next = await markEmptySessions(next);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return;
-      }
-    }
     setSessions(next);
     applyUrlSession(next);
     setDraft('');
