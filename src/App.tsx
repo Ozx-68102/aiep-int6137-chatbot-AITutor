@@ -28,6 +28,7 @@ import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
 import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
+import {pushSessionToUrl, readSessionFromUrl, replaceSessionToUrl} from './session/location.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
@@ -61,6 +62,7 @@ export default function App() {
   const sendingRef = useRef<Set<string>>(new Set());
   const titleSaves = useRef(new Map<string, Promise<void>>());
   const sessionsRef = useRef(sessions);
+  const draftRef = useRef(draft);
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
   const connectionToastRef = useRef<() => void>(() => undefined);
@@ -88,6 +90,7 @@ export default function App() {
 
   useEffect(() => {
     sessionsRef.current = sessions;
+    draftRef.current = draft;
     connectionToastRef.current = showConnectionToast;
     connectionCopyRef.current = text.connectionError;
   });
@@ -190,7 +193,7 @@ export default function App() {
           return;
         }
         setSessions(next);
-        setActiveId(next[0]?.id ?? null);
+        applyUrlSession(next);
         if (profile) {
           setUsername(profile.username);
           setLocale(profile.locale);
@@ -225,6 +228,43 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    function onPopState() {
+      const wanted = readSessionFromUrl();
+      if (wanted === null) {
+        showNewChat();
+        return;
+      }
+      const found = sessionsRef.current.find((session) => session.id === wanted);
+      if (found === undefined) {
+        replaceSessionToUrl(null);
+        showNewChat();
+        return;
+      }
+      showSession(found.id);
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  function applyUrlSession(list: Session[]): void {
+    const wanted = readSessionFromUrl();
+    if (wanted === null) {
+      setComposingNew(true);
+      setActiveId(null);
+      return;
+    }
+    const found = list.find((session) => session.id === wanted);
+    if (found === undefined) {
+      replaceSessionToUrl(null);
+      setComposingNew(true);
+      setActiveId(null);
+      return;
+    }
+    setComposingNew(false);
+    setActiveId(found.id);
+  }
 
   function showConnectionToast() {
     setToast((current) => ({
@@ -309,7 +349,7 @@ export default function App() {
       }
     }
     setSessions(next);
-    setActiveId(next[0]?.id ?? null);
+    applyUrlSession(next);
     setDraft('');
     setNotice(null);
     setView('chat');
@@ -327,10 +367,28 @@ export default function App() {
   }
 
   function rememberDraft() {
-    const typed = draft.trim();
+    const typed = draftRef.current.trim();
     if (typed !== '') {
       saveUnsent(typed);
     }
+  }
+
+  function showSession(id: string) {
+    rememberDraft();
+    setComposingNew(false);
+    setActiveId(id);
+    setDraft('');
+    setNotice(null);
+    setView('chat');
+  }
+
+  function showNewChat() {
+    rememberDraft();
+    setComposingNew(true);
+    setActiveId(null);
+    setDraft(readUnsent());
+    setNotice(null);
+    setView('chat');
   }
 
   function openSession(id: string) {
@@ -341,12 +399,8 @@ export default function App() {
       }
       return;
     }
-    rememberDraft();
-    setComposingNew(false);
-    setActiveId(id);
-    setDraft('');
-    setNotice(null);
-    setView('chat');
+    showSession(id);
+    pushSessionToUrl(id);
   }
 
   async function changeLocale(next: Locale) {
@@ -476,11 +530,8 @@ export default function App() {
     if (!wasCurrent) {
       return true;
     }
-    setComposingNew(true);
-    setActiveId(null);
-    setDraft(readUnsent());
-    setNotice(null);
-    setView('chat');
+    showNewChat();
+    replaceSessionToUrl(null);
     return true;
   }
 
@@ -510,12 +561,8 @@ export default function App() {
       setView('chat');
       return;
     }
-    rememberDraft();
-    setComposingNew(true);
-    setActiveId(null);
-    setDraft(readUnsent());
-    setNotice(null);
-    setView('chat');
+    showNewChat();
+    pushSessionToUrl(null);
   }
 
   async function sendFirstMessage(question: string) {
@@ -526,6 +573,7 @@ export default function App() {
       const title = titleFromQuestion(question);
       const created = emptySession(await createSession(title));
       sessionId = created.id;
+      replaceSessionToUrl(created.id);
       loadedThreads.current.add(sessionId);
       const userMessage: Message = {
         id: crypto.randomUUID(),
