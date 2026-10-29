@@ -200,7 +200,6 @@ def create_session(
         created = ChatSession(account=account)
         if body is not None:
             created.title = body.title
-            created.title_locale = body.title_locale
         session.add(created)
         session.flush()
         session.refresh(created)
@@ -217,8 +216,6 @@ def rename_session(
         account = _account_from_cookie(session, login_cookie)
         chat_session = _require_session(session, account, session_id)
         chat_session.title = body.title
-        if "title_locale" in body.model_fields_set:
-            chat_session.title_locale = body.title_locale
         return _session_item(chat_session)
 
 
@@ -525,7 +522,6 @@ def _session_item(item: ChatSession) -> SessionItem:
     return SessionItem(
         id=item.id,
         title=item.title,
-        title_locale=item.title_locale,
         pinned=item.pinned,
         pinned_at=item.pinned_at,
         created_at=item.created_at,

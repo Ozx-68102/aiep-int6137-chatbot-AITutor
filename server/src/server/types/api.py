@@ -13,7 +13,6 @@ class LoginRequest(BaseModel):
 class SessionItem(BaseModel):
     id: UUID
     title: str | None
-    title_locale: str | None
     pinned: bool
     pinned_at: datetime | None
     created_at: datetime
@@ -21,12 +20,10 @@ class SessionItem(BaseModel):
 
 class SessionCreate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
-    title_locale: Literal["zh-CN", "zh-TW", "en"] | None = None
 
 
 class SessionRename(BaseModel):
     title: str = Field(min_length=1, max_length=500)
-    title_locale: Literal["zh-CN", "zh-TW", "en"] | None = None
 
 
 class SessionPin(BaseModel):
