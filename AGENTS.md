@@ -21,12 +21,13 @@
   `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
 - FastGPT 的地址、应用 id、变量名、登录方式和接口路径都不臆造，缺了就问
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
+- 格式交给工具：前端用 oxfmt，后端用 ruff format。写完跑对应的 fmt 命令，不要手动跟格式较劲
 - 文档和对话都用平常话，不用自造词和行话
 
 ## 验收
-- 改完 `src/`：`pnpm lint` 和 `pnpm build`（build 里已经带类型检查，几秒就完，产物在 `dist/`）
+- 改完 `src/`：`pnpm check`（oxlint + oxfmt --check）和 `pnpm build`（build 里已经带类型检查，几秒就完，产物在 `dist/`）
 - 只想做类型检查、不产出 `dist/` 时：`pnpm exec tsc --noEmit`
-- 改完 `server/`：在 `server/` 里 `uv run ruff check .`
+- 改完 `server/`：`bash scripts/check-server.sh`（ruff check + ruff format --check）
 - 改完界面、跳转或页面状态：在浏览器里点一遍受影响的流程；没有浏览器工具就说明哪一步没验
 - 本仓库没有自动化测试，不要引入测试框架
 
@@ -44,6 +45,9 @@
 - `pnpm run dev:frontend` — 起页面
 - `pnpm run dev:backend` — 起接口服务（127.0.0.1:3001）
 - `pnpm lint` — oxlint，含类型相关规则
+- `pnpm fmt` — 按 `.oxfmtrc.json` 改格式
+- `pnpm fmt:check` — 只查格式，不改文件
+- `pnpm check` — oxlint + oxfmt --check
 - `pnpm build` — 类型检查 + 打包到 `dist/`
 - `pnpm exec tsc --noEmit` — 只做类型检查，不产出 `dist/`
 - `pnpm preview` — 预览 `dist/`
@@ -52,9 +56,12 @@
 - `pnpm test` 是占位脚本，会直接失败，不要用
 
 **后端（`server/` 里）**
+- `bash scripts/check-server.sh` — 后端两项检查：ruff check + ruff format --check（在仓库根目录执行）
 - `uv sync` — 按 uv.lock 装好依赖（Python 锁 3.13）
 - `uv lock --check` — 检查锁文件
 - `uv run ruff check .` — 后端检查
+- `uv run ruff format .` — 按 ruff 的规则改格式
+- `uv run ruff format --check .` — 只查格式，不改文件
 - `uv run server` — 起接口服务，等价于 `pnpm run dev:backend`
 - `uv run python -m server.db.init` — 只补缺的表和列，建初始账号，不改已有密码。
   不要每次起服务都跑：只在项目维护者下令时，或改了数据库结构之后跑
