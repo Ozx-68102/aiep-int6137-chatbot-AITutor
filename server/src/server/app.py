@@ -42,6 +42,7 @@ from server.types import (
     PartialReplyResponse,
     ProfileResponse,
     ProfileUpdate,
+    SessionCreate,
     SessionItem,
     SessionPin,
     SessionRename,
@@ -191,11 +192,15 @@ def list_sessions(
 
 @app.post("/api/sessions")
 def create_session(
+    body: SessionCreate | None = None,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> SessionItem:
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
         created = ChatSession(account=account)
+        if body is not None:
+            created.title = body.title
+            created.title_locale = body.title_locale
         session.add(created)
         session.flush()
         session.refresh(created)
@@ -212,6 +217,8 @@ def rename_session(
         account = _account_from_cookie(session, login_cookie)
         chat_session = _require_session(session, account, session_id)
         chat_session.title = body.title
+        if "title_locale" in body.model_fields_set:
+            chat_session.title_locale = body.title_locale
         return _session_item(chat_session)
 
 

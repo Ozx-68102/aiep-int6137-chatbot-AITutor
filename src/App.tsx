@@ -17,6 +17,7 @@ import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {markEmptySessions} from './session/emptiness.ts';
+import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
@@ -47,6 +48,7 @@ export default function App() {
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
   const sendingRef = useRef<Set<string>>(new Set());
+  const titleSaves = useRef(new Map<string, Promise<void>>());
   const sessionsRef = useRef(sessions);
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
@@ -230,6 +232,7 @@ export default function App() {
     setHistoryLoadingId(null);
     loadedThreads.current.clear();
     threadFlight.current.clear();
+    titleSaves.current.clear();
     setToast(null);
     setLoginOffline(false);
     setLoginDetail(detail);
@@ -379,8 +382,12 @@ export default function App() {
     if (trimmed === '') {
       return false;
     }
+    const pendingTitle = titleSaves.current.get(id);
+    if (pendingTitle) {
+      await pendingTitle;
+    }
     try {
-      const item = await renameSession(id, trimmed);
+      const item = await renameSession(id, trimmed, locale);
       setSessions((current) => current.map((session) => {
         if (session.id !== id) {
           return session;
@@ -403,6 +410,25 @@ export default function App() {
       }
       setNotice(explain(error, text.connectionError));
       return false;
+    }
+  }
+
+  async function saveTitle(sessionId: string, title: string, titleLocale: Locale): Promise<void> {
+    try {
+      await renameSession(sessionId, title, titleLocale);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return;
+      }
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        showConnectionToast();
+        return;
+      }
+      setNotice(explain(error, text.connectionError));
     }
   }
 
@@ -473,7 +499,8 @@ export default function App() {
     setNotice(null);
     let sessionId = '';
     try {
-      const created = emptySession(await createSession());
+      const title = titleFromQuestion(question);
+      const created = emptySession(await createSession(title, locale));
       sessionId = created.id;
       loadedThreads.current.add(sessionId);
       const userMessage: Message = {
@@ -485,8 +512,8 @@ export default function App() {
       setComposingNew(false);
       setSessions((current) => [{
         ...created,
-        title: question,
-        titleLocale: locale,
+        title: created.title ?? title,
+        titleLocale: created.titleLocale ?? locale,
         messages: [userMessage],
         messagesKnown: true,
       }, ...current]);
@@ -533,6 +560,8 @@ export default function App() {
       return;
     }
     const sessionId = active.id;
+    const title = titleFromQuestion(question);
+    const missingTitle = active.title === null;
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -546,11 +575,17 @@ export default function App() {
     setDraft('');
     updateSession(sessionId, (session) => ({
       ...session,
-      title: session.title ?? question,
+      title: session.title ?? title,
       titleLocale: session.titleLocale ?? locale,
       messages: [...session.messages, userMessage],
     }));
     markEntering(userMessage.id);
+    if (missingTitle) {
+      const saving = saveTitle(sessionId, title, locale).finally(() => {
+        titleSaves.current.delete(sessionId);
+      });
+      titleSaves.current.set(sessionId, saving);
+    }
     void sendQuestion(sessionId, question);
   }
 

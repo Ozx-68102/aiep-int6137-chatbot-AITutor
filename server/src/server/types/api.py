@@ -19,8 +19,14 @@ class SessionItem(BaseModel):
     created_at: datetime
 
 
+class SessionCreate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    title_locale: Literal["zh-CN", "zh-TW", "en"] | None = None
+
+
 class SessionRename(BaseModel):
     title: str = Field(min_length=1, max_length=500)
+    title_locale: Literal["zh-CN", "zh-TW", "en"] | None = None
 
 
 class SessionPin(BaseModel):

@@ -1,5 +1,5 @@
 import type {Session} from '../type/chat.ts';
-import {isLocale} from '../type/locale.ts';
+import {isLocale, type Locale} from '../type/locale.ts';
 import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
 
 export type SessionItem = {
@@ -35,10 +35,14 @@ export async function listSessions(): Promise<SessionItem[]> {
   return body;
 }
 
-export async function renameSession(sessionId: string, title: string): Promise<SessionItem> {
+export async function renameSession(
+  sessionId: string,
+  title: string,
+  titleLocale: Locale | null = null,
+): Promise<SessionItem> {
   const body = await requestJson(`/api/sessions/${sessionId}`, {
     method: 'PATCH',
-    body: JSON.stringify({title}),
+    body: JSON.stringify({title, title_locale: titleLocale}),
   });
   if (!isSessionItem(body)) {
     throw new ApiError(0, null);
@@ -65,8 +69,14 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await requestEmpty(`/api/sessions/${sessionId}`, {method: 'DELETE'});
 }
 
-export async function createSession(): Promise<SessionItem> {
-  const body = await requestJson('/api/sessions', {method: 'POST'});
+export async function createSession(
+  title: string | null = null,
+  titleLocale: Locale | null = null,
+): Promise<SessionItem> {
+  const body = await requestJson('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({title, title_locale: titleLocale}),
+  });
   if (!isSessionItem(body)) {
     throw new ApiError(0, null);
   }
