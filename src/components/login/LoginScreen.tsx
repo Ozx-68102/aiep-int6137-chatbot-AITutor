@@ -37,13 +37,15 @@ export function LoginScreen({
         }}
       >
         <div className="flex items-center gap-2">
-          <img src={logoUrl} alt="" className="h-12 w-auto"/>
+          <img src={logoUrl} alt="" className="h-12 w-auto" />
           <p lang="en" className="min-w-0 text-xs leading-tight text-stone-600">
             Help × Higher Understanding
           </p>
-          <LanguageMenu locale={locale} onChange={onLocale}/>
+          <LanguageMenu locale={locale} onChange={onLocale} />
         </div>
-        <h1 className="m-0 text-lg" lang={htmlLang[locale]}>{text.logIn}</h1>
+        <h1 className="m-0 text-lg" lang={htmlLang[locale]}>
+          {text.logIn}
+        </h1>
         <label className="flex flex-col gap-1">
           {text.username}
           <input

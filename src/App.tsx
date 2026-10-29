@@ -5,7 +5,16 @@ import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {logout, readProfile, updateProfile} from './api/profile.ts';
 import type {Profile} from './api/profile.ts';
-import {createSession, deleteSession, emptySession, listSessions, login, pinSession, renameSession, sessionsFromList} from './api/session.ts';
+import {
+  createSession,
+  deleteSession,
+  emptySession,
+  listSessions,
+  login,
+  pinSession,
+  renameSession,
+  sessionsFromList,
+} from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
@@ -28,7 +37,9 @@ export default function App() {
   const [loginOffline, setLoginOffline] = useState(false);
   const [loginDetail, setLoginDetail] = useState<string | null>(null);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(() => !window.matchMedia('(max-width: 767px)').matches);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => !window.matchMedia('(max-width: 767px)').matches,
+  );
   const narrow = useNarrowScreen(() => setSidebarOpen(false));
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -60,14 +71,15 @@ export default function App() {
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
   const historyLocked = historyLoadingId === active?.id && active.messages.length === 0;
-  const connectionToast = toast === null ? null : (
-    <ConnectionToast
-      key={toast.id}
-      message={toast.text}
-      lang={toast.lang}
-      onDismiss={() => setToast(null)}
-    />
-  );
+  const connectionToast =
+    toast === null ? null : (
+      <ConnectionToast
+        key={toast.id}
+        message={toast.text}
+        lang={toast.lang}
+        onDismiss={() => setToast(null)}
+      />
+    );
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -97,41 +109,46 @@ export default function App() {
     let cancelled = false;
     flights.add(sessionId);
     setHistoryLoadingId(sessionId);
-    void loadThread(sessionId).then((messages) => {
-      if (cancelled) {
-        return;
-      }
-      loadedThreads.current.add(sessionId);
-      setSessions((current) => current.map((session) => {
-        if (session.id !== sessionId || session.messages.length > 0) {
-          return session;
+    void loadThread(sessionId)
+      .then((messages) => {
+        if (cancelled) {
+          return;
         }
-        return {...session, messages, messagesKnown: true};
-      }));
-    }).catch((error: unknown) => {
-      if (cancelled) {
-        return;
-      }
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return;
-      }
-      if (connectionFailure(error)) {
-        connectionToastRef.current();
-        return;
-      }
-      setNotice(explain(error, connectionCopyRef.current));
-    }).finally(() => {
-      if (cancelled) {
-        return;
-      }
-      flights.delete(sessionId);
-      setHistoryLoadingId((current) => current === sessionId ? null : current);
-    });
+        loadedThreads.current.add(sessionId);
+        setSessions((current) =>
+          current.map((session) => {
+            if (session.id !== sessionId || session.messages.length > 0) {
+              return session;
+            }
+            return {...session, messages, messagesKnown: true};
+          }),
+        );
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        if (error instanceof ApiError && error.status === 401) {
+          enterLogin(error.detail);
+          return;
+        }
+        if (connectionFailure(error)) {
+          connectionToastRef.current();
+          return;
+        }
+        setNotice(explain(error, connectionCopyRef.current));
+      })
+      .finally(() => {
+        if (cancelled) {
+          return;
+        }
+        flights.delete(sessionId);
+        setHistoryLoadingId((current) => (current === sessionId ? null : current));
+      });
     return () => {
       cancelled = true;
       flights.delete(sessionId);
-      setHistoryLoadingId((current) => current === sessionId ? null : current);
+      setHistoryLoadingId((current) => (current === sessionId ? null : current));
     };
   }, [activeId, auth, composingNew, threadRetry]);
 
@@ -240,7 +257,9 @@ export default function App() {
   }
 
   function updateSession(sessionId: string, change: (session: Session) => Session) {
-    setSessions((current) => current.map((session) => (session.id === sessionId ? change(session) : session)));
+    setSessions((current) =>
+      current.map((session) => (session.id === sessionId ? change(session) : session)),
+    );
   }
 
   function markEntering(id: string) {
@@ -295,14 +314,16 @@ export default function App() {
     setNotice(null);
     setView('chat');
     setAuth('ready');
-    void readProfile().then((profile) => {
-      setUsername(profile.username);
-      setLocale(profile.locale);
-    }).catch((error: unknown) => {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-      }
-    });
+    void readProfile()
+      .then((profile) => {
+        setUsername(profile.username);
+        setLocale(profile.locale);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) {
+          enterLogin(error.detail);
+        }
+      });
   }
 
   function rememberDraft() {
@@ -388,15 +409,17 @@ export default function App() {
     }
     try {
       const item = await renameSession(id, trimmed);
-      setSessions((current) => current.map((session) => {
-        if (session.id !== id) {
-          return session;
-        }
-        return {
-          ...session,
-          title: item.title,
-        };
-      }));
+      setSessions((current) =>
+        current.map((session) => {
+          if (session.id !== id) {
+            return session;
+          }
+          return {
+            ...session,
+            title: item.title,
+          };
+        }),
+      );
       return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -464,11 +487,11 @@ export default function App() {
   async function pinOpenSession(id: string, pinned: boolean) {
     try {
       const item = await pinSession(id, pinned, pinned ? new Date().toISOString() : null);
-      setSessions((current) => current.map((session) => (
-        session.id === id
-          ? {...session, pinned: item.pinned, pinnedAt: item.pinned_at}
-          : session
-      )));
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === id ? {...session, pinned: item.pinned, pinnedAt: item.pinned_at} : session,
+        ),
+      );
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
@@ -511,12 +534,15 @@ export default function App() {
         locale,
       };
       setComposingNew(false);
-      setSessions((current) => [{
-        ...created,
-        title: created.title ?? title,
-        messages: [userMessage],
-        messagesKnown: true,
-      }, ...current]);
+      setSessions((current) => [
+        {
+          ...created,
+          title: created.title ?? title,
+          messages: [userMessage],
+          messagesKnown: true,
+        },
+        ...current,
+      ]);
       setActiveId(created.id);
       clearUnsent();
       setDraft('');
@@ -580,13 +606,15 @@ export default function App() {
     }));
     markEntering(userMessage.id);
     if (missingTitle) {
-      const saving = saveTitle(sessionId, title).then((saved) => {
-        if (!saved) {
-          updateSession(sessionId, (session) => ({...session, title: null}));
-        }
-      }).finally(() => {
-        titleSaves.current.delete(sessionId);
-      });
+      const saving = saveTitle(sessionId, title)
+        .then((saved) => {
+          if (!saved) {
+            updateSession(sessionId, (session) => ({...session, title: null}));
+          }
+        })
+        .finally(() => {
+          titleSaves.current.delete(sessionId);
+        });
       titleSaves.current.set(sessionId, saving);
     }
     void sendQuestion(sessionId, question);
@@ -612,9 +640,9 @@ export default function App() {
         const messageId = assistantId;
         updateSession(sessionId, (session) => ({
           ...session,
-          messages: session.messages.map((message) => (
-            message.id === messageId ? {...message, text: message.text + chunk} : message
-          )),
+          messages: session.messages.map((message) =>
+            message.id === messageId ? {...message, text: message.text + chunk} : message,
+          ),
         }));
       });
     } catch (error) {
@@ -651,7 +679,7 @@ export default function App() {
   if (auth === 'checking') {
     return (
       <>
-        <div className="h-full bg-stone-100"/>
+        <div className="h-full bg-stone-100" />
         {connectionToast}
       </>
     );

@@ -43,9 +43,13 @@ export function ConfirmLogout({
         aria-labelledby="logout-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <CloseButton label={text.close} onClick={onCancel}/>
-        <h2 id="logout-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>{text.logOut}</h2>
-        <p className="m-0" lang={htmlLang[locale]}>{text.logOutConfirm}</p>
+        <CloseButton label={text.close} onClick={onCancel} />
+        <h2 id="logout-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>
+          {text.logOut}
+        </h2>
+        <p className="m-0" lang={htmlLang[locale]}>
+          {text.logOutConfirm}
+        </p>
         {error ? (
           <p
             className="m-0 text-red-600"

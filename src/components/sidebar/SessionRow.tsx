@@ -20,7 +20,12 @@ function menuOrigin(node: HTMLElement): {top: number; right: number} {
   let current = node.parentElement;
   while (current) {
     const style = getComputedStyle(current);
-    if (style.translate !== 'none' || style.transform !== 'none' || style.scale !== 'none' || style.rotate !== 'none') {
+    if (
+      style.translate !== 'none' ||
+      style.transform !== 'none' ||
+      style.scale !== 'none' ||
+      style.rotate !== 'none'
+    ) {
       const box = current.getBoundingClientRect();
       return {
         top: box.top + (Number.parseFloat(style.borderTopWidth) || 0),
@@ -128,7 +133,7 @@ export function SessionRow({
       >
         {sessionTitle(session, fallbackTitle)}
       </button>
-      {session.pinned ? <Pin aria-hidden="true" className="mr-1 size-3.5 shrink-0"/> : null}
+      {session.pinned ? <Pin aria-hidden="true" className="mr-1 size-3.5 shrink-0" /> : null}
       <div className={actionClass} ref={menuRef}>
         <button
           type="button"
@@ -139,7 +144,7 @@ export function SessionRow({
           aria-haspopup="menu"
           onClick={openMenu}
         >
-          <Ellipsis aria-hidden="true" className="size-4"/>
+          <Ellipsis aria-hidden="true" className="size-4" />
         </button>
         <div
           className={

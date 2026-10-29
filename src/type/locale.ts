@@ -3,7 +3,7 @@ export type Locale = 'zh-CN' | 'zh-TW' | 'en';
 export const htmlLang: Record<Locale, string> = {
   'zh-CN': 'zh-Hans',
   'zh-TW': 'zh-Hant',
-  'en': 'en',
+  en: 'en',
 };
 
 export function isLocale(value: string | null): value is Locale {
@@ -37,7 +37,12 @@ function localeFromTag(tag: string): Locale | null {
   if (parsed.language !== 'zh') {
     return null;
   }
-  if (parsed.script === 'Hant' || parsed.region === 'TW' || parsed.region === 'HK' || parsed.region === 'MO') {
+  if (
+    parsed.script === 'Hant' ||
+    parsed.region === 'TW' ||
+    parsed.region === 'HK' ||
+    parsed.region === 'MO'
+  ) {
     return 'zh-TW';
   }
   return 'zh-CN';

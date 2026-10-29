@@ -94,9 +94,7 @@ function sessionFromItem(item: SessionItem, messagesKnown: boolean): Session {
 }
 
 function isLoginResult(value: unknown): value is LoginResult {
-  return isRecord(value)
-    && typeof value.locale === 'string'
-    && isSessionList(value.sessions);
+  return isRecord(value) && typeof value.locale === 'string' && isSessionList(value.sessions);
 }
 
 function isSessionList(value: unknown): value is SessionItem[] {
@@ -104,10 +102,12 @@ function isSessionList(value: unknown): value is SessionItem[] {
 }
 
 function isSessionItem(value: unknown): value is SessionItem {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && (value.title === null || typeof value.title === 'string')
-    && typeof value.pinned === 'boolean'
-    && (value.pinned_at === null || typeof value.pinned_at === 'string')
-    && typeof value.created_at === 'string';
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    (value.title === null || typeof value.title === 'string') &&
+    typeof value.pinned === 'boolean' &&
+    (value.pinned_at === null || typeof value.pinned_at === 'string') &&
+    typeof value.created_at === 'string'
+  );
 }

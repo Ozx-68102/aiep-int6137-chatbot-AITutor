@@ -9,7 +9,11 @@ export type HistoryPage = {
   }[];
 };
 
-export async function readMessages(sessionId: string, offset: number, pageSize: number): Promise<HistoryPage> {
+export async function readMessages(
+  sessionId: string,
+  offset: number,
+  pageSize: number,
+): Promise<HistoryPage> {
   const query = new URLSearchParams({
     offset: String(offset),
     page_size: String(pageSize),
@@ -22,15 +26,19 @@ export async function readMessages(sessionId: string, offset: number, pageSize: 
 }
 
 function isHistoryPage(value: unknown): value is HistoryPage {
-  return isRecord(value)
-    && typeof value.total === 'number'
-    && Array.isArray(value.messages)
-    && value.messages.every(isHistoryMessage);
+  return (
+    isRecord(value) &&
+    typeof value.total === 'number' &&
+    Array.isArray(value.messages) &&
+    value.messages.every(isHistoryMessage)
+  );
 }
 
 function isHistoryMessage(value: unknown): boolean {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && (value.role === 'user' || value.role === 'assistant')
-    && typeof value.text === 'string';
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    (value.role === 'user' || value.role === 'assistant') &&
+    typeof value.text === 'string'
+  );
 }

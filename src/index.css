@@ -1,5 +1,5 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
 
 html,
 body,
@@ -14,13 +14,13 @@ body {
 }
 
 :lang(en) {
-  font-family: ui-sans-serif, "Segoe UI", sans-serif;
+  font-family: ui-sans-serif, 'Segoe UI', sans-serif;
 }
 
 :lang(zh-Hans) {
-  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
 }
 
 :lang(zh-Hant) {
-  font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+  font-family: 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
 }

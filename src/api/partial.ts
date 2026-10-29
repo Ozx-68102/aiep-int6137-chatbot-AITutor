@@ -14,7 +14,9 @@ export async function readPartial(sessionId: string): Promise<PartialReply> {
 }
 
 function isPartialReply(value: unknown): value is PartialReply {
-  return isRecord(value)
-    && (value.status === null || typeof value.status === 'string')
-    && typeof value.text === 'string';
+  return (
+    isRecord(value) &&
+    (value.status === null || typeof value.status === 'string') &&
+    typeof value.text === 'string'
+  );
 }

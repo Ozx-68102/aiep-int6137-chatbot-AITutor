@@ -56,9 +56,13 @@ export function ConfirmDelete({
         aria-labelledby="delete-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <CloseButton label={text.close} onClick={onCancel}/>
-        <h2 id="delete-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>{text.deleteSession}</h2>
-        <p className="m-0" lang={htmlLang[locale]}>{text.deleteConfirm}</p>
+        <CloseButton label={text.close} onClick={onCancel} />
+        <h2 id="delete-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>
+          {text.deleteSession}
+        </h2>
+        <p className="m-0" lang={htmlLang[locale]}>
+          {text.deleteConfirm}
+        </p>
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -76,7 +80,14 @@ export function ConfirmDelete({
               void confirm();
             }}
           >
-            {pending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true"/> : text.deleteSession}
+            {pending ? (
+              <span
+                className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent"
+                aria-hidden="true"
+              />
+            ) : (
+              text.deleteSession
+            )}
           </button>
         </div>
       </div>

@@ -4,7 +4,7 @@ export const locales = [
   {id: 'zh-CN', label: '简体中文'},
   {id: 'zh-TW', label: '繁體中文'},
   {id: 'en', label: 'English'},
-] as const satisfies readonly { id: Locale; label: string }[];
+] as const satisfies readonly {id: Locale; label: string}[];
 
 export const translations = {
   'zh-CN': {
@@ -65,7 +65,7 @@ export const translations = {
     connectionError: '無法連接到伺服器',
     connectionRetry: '無法連接到伺服器，請稍後重試',
   },
-  'en': {
+  en: {
     sessions: 'Chats',
     newChat: 'New chat',
     createSession: 'Create new chat',

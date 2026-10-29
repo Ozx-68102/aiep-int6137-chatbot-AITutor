@@ -45,9 +45,12 @@ function withPartial(records: HistoryPage['messages'], partial: PartialReply): M
       return [...messages.slice(0, -1), {...last, text: partial.text}];
     }
   }
-  return [...messages, {
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    text: partial.text,
-  }];
+  return [
+    ...messages,
+    {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      text: partial.text,
+    },
+  ];
 }
