@@ -413,22 +413,24 @@ export default function App() {
     }
   }
 
-  async function saveTitle(sessionId: string, title: string, titleLocale: Locale): Promise<void> {
+  async function saveTitle(sessionId: string, title: string, titleLocale: Locale): Promise<boolean> {
     try {
       await renameSession(sessionId, title, titleLocale);
+      return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
-        return;
+        return false;
       }
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
-        return;
+        return false;
       }
       if (connectionFailure(error)) {
         showConnectionToast();
-        return;
+        return false;
       }
       setNotice(explain(error, text.connectionError));
+      return false;
     }
   }
 
@@ -581,7 +583,11 @@ export default function App() {
     }));
     markEntering(userMessage.id);
     if (missingTitle) {
-      const saving = saveTitle(sessionId, title, locale).finally(() => {
+      const saving = saveTitle(sessionId, title, locale).then((saved) => {
+        if (!saved) {
+          updateSession(sessionId, (session) => ({...session, title: null, titleLocale: null}));
+        }
+      }).finally(() => {
         titleSaves.current.delete(sessionId);
       });
       titleSaves.current.set(sessionId, saving);
