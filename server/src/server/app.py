@@ -29,6 +29,7 @@ from server.reply_store import (
     append_chunk,
     begin_reply,
     discard_reply,
+    mark_failed,
     mark_finished,
     read_partial,
 )
@@ -360,9 +361,14 @@ async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -
         relay.failed = True
         relay.started.set()
     finally:
-        if relay.failed and not relay.sent:
-            discard_reply(chat_id)
-        await relay.queue.put(None)
+        try:
+            if relay.failed:
+                if relay.sent:
+                    mark_failed(chat_id)
+                else:
+                    discard_reply(chat_id)
+        finally:
+            await relay.queue.put(None)
 
 
 async def _sse(relay: _Relay) -> AsyncIterator[str]:

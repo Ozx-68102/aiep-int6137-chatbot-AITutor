@@ -7,6 +7,7 @@ from server.settings import load_settings
 
 _STREAMING = "streaming"
 _FINISHED = "finished"
+_FAILED = "failed"
 
 _client: Redis | None = None
 
@@ -45,6 +46,14 @@ def mark_finished(chat_id: UUID) -> None:
     ttl = load_settings().redis_key_ttl_seconds
     pipe = _redis().pipeline(transaction=False)
     pipe.set(_status_key(chat_id), _FINISHED, ex=ttl)
+    pipe.expire(_text_key(chat_id), ttl)
+    pipe.execute()
+
+
+def mark_failed(chat_id: UUID) -> None:
+    ttl = load_settings().redis_key_ttl_seconds
+    pipe = _redis().pipeline(transaction=False)
+    pipe.set(_status_key(chat_id), _FAILED, ex=ttl)
     pipe.expire(_text_key(chat_id), ttl)
     pipe.execute()
 
