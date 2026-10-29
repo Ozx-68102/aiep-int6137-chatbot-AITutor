@@ -32,7 +32,8 @@ target-version = "py313"
 exclude = [
     ".agents",
     ".cursor",
-    ".venv"
+    ".venv",
+    "*.md",
 ]
 
 [tool.ruff.lint]
