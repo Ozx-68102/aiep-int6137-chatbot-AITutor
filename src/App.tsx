@@ -387,7 +387,7 @@ export default function App() {
       await pendingTitle;
     }
     try {
-      const item = await renameSession(id, trimmed, locale);
+      const item = await renameSession(id, trimmed);
       setSessions((current) => current.map((session) => {
         if (session.id !== id) {
           return session;
@@ -395,7 +395,6 @@ export default function App() {
         return {
           ...session,
           title: item.title,
-          titleLocale: isLocale(item.title_locale) ? item.title_locale : null,
         };
       }));
       return true;
@@ -413,9 +412,9 @@ export default function App() {
     }
   }
 
-  async function saveTitle(sessionId: string, title: string, titleLocale: Locale): Promise<boolean> {
+  async function saveTitle(sessionId: string, title: string): Promise<boolean> {
     try {
-      await renameSession(sessionId, title, titleLocale);
+      await renameSession(sessionId, title);
       return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
@@ -502,7 +501,7 @@ export default function App() {
     let sessionId = '';
     try {
       const title = titleFromQuestion(question);
-      const created = emptySession(await createSession(title, locale));
+      const created = emptySession(await createSession(title));
       sessionId = created.id;
       loadedThreads.current.add(sessionId);
       const userMessage: Message = {
@@ -515,7 +514,6 @@ export default function App() {
       setSessions((current) => [{
         ...created,
         title: created.title ?? title,
-        titleLocale: created.titleLocale ?? locale,
         messages: [userMessage],
         messagesKnown: true,
       }, ...current]);
@@ -578,14 +576,13 @@ export default function App() {
     updateSession(sessionId, (session) => ({
       ...session,
       title: session.title ?? title,
-      titleLocale: session.titleLocale ?? locale,
       messages: [...session.messages, userMessage],
     }));
     markEntering(userMessage.id);
     if (missingTitle) {
-      const saving = saveTitle(sessionId, title, locale).then((saved) => {
+      const saving = saveTitle(sessionId, title).then((saved) => {
         if (!saved) {
-          updateSession(sessionId, (session) => ({...session, title: null, titleLocale: null}));
+          updateSession(sessionId, (session) => ({...session, title: null}));
         }
       }).finally(() => {
         titleSaves.current.delete(sessionId);

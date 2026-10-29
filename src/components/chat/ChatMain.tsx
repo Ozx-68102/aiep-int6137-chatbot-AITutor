@@ -58,10 +58,7 @@ export function ChatMain({
             <PanelLeftOpen aria-hidden="true"/>
           </button>
         )}
-        <h1
-          lang={active?.titleLocale ? htmlLang[active.titleLocale] : undefined}
-          className="m-0 min-w-0 flex-1 truncate text-lg"
-        >
+        <h1 className="m-0 min-w-0 flex-1 truncate text-lg">
           {active ? sessionTitle(active, text.newChat) : text.newChat}
         </h1>
       </header>

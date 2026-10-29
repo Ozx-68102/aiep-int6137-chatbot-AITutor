@@ -10,7 +10,6 @@ export type Message = {
 export type Session = {
   id: string;
   title: string | null;
-  titleLocale: Locale | null;
   pinned: boolean;
   pinnedAt: string | null;
   messages: Message[];

@@ -3,7 +3,7 @@ import {type MouseEvent, useEffect, useRef, useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
 import type {Session} from '../../type/chat.ts';
-import {htmlLang, type Locale} from '../../type/locale.ts';
+import {type Locale} from '../../type/locale.ts';
 import {ConfirmDelete} from './ConfirmDelete.tsx';
 import {RenameSession} from './RenameSession.tsx';
 
@@ -123,7 +123,6 @@ export function SessionRow({
       <button
         type="button"
         className="min-w-0 flex-1 truncate border-0 bg-transparent px-3 py-2 text-left"
-        lang={session.titleLocale ? htmlLang[session.titleLocale] : undefined}
         aria-current={active ? 'true' : undefined}
         onClick={onOpen}
       >
