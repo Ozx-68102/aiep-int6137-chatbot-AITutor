@@ -12,10 +12,12 @@ export async function readProfile(): Promise<Profile> {
 }
 
 export async function updateProfile(locale: Locale): Promise<Profile> {
-  return parseProfile(await requestJson('/api/profile', {
-    method: 'PATCH',
-    body: JSON.stringify({locale}),
-  }));
+  return parseProfile(
+    await requestJson('/api/profile', {
+      method: 'PATCH',
+      body: JSON.stringify({locale}),
+    }),
+  );
 }
 
 export async function logout(): Promise<void> {
@@ -23,7 +25,13 @@ export async function logout(): Promise<void> {
 }
 
 function parseProfile(value: unknown): Profile {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.username !== 'string' || typeof value.locale !== 'string' || !isLocale(value.locale)) {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.username !== 'string' ||
+    typeof value.locale !== 'string' ||
+    !isLocale(value.locale)
+  ) {
     throw new ApiError(0, null);
   }
   return {id: value.id, username: value.username, locale: value.locale};

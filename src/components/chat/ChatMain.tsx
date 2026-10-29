@@ -55,7 +55,7 @@ export function ChatMain({
             title={text.showSidebar}
             onClick={onShowSidebar}
           >
-            <PanelLeftOpen aria-hidden="true"/>
+            <PanelLeftOpen aria-hidden="true" />
           </button>
         )}
         <h1 className="m-0 min-w-0 flex-1 truncate text-lg">
@@ -72,29 +72,32 @@ export function ChatMain({
             {notice}
           </p>
         ) : null}
-        {active && active.messages.length > 0 ? (
-          active.messages.map((message) => {
-            const textShown = visibleText(message.role, message.text);
-            if (textShown === '') {
-              return null;
-            }
-            return (
-              <p
-                key={message.id}
-                lang={message.locale ? htmlLang[message.locale] : undefined}
-                className={bubbleClass(message.role, enteringIds.includes(message.id))}
-                onAnimationEnd={() => onAnimationEnd(message.id)}
-              >
-                {textShown}
-              </p>
-            );
-          })
-        ) : null}
+        {active && active.messages.length > 0
+          ? active.messages.map((message) => {
+              const textShown = visibleText(message.role, message.text);
+              if (textShown === '') {
+                return null;
+              }
+              return (
+                <p
+                  key={message.id}
+                  lang={message.locale ? htmlLang[message.locale] : undefined}
+                  className={bubbleClass(message.role, enteringIds.includes(message.id))}
+                  onAnimationEnd={() => onAnimationEnd(message.id)}
+                >
+                  {textShown}
+                </p>
+              );
+            })
+          : null}
         {!active || (active.messagesKnown && active.messages.length === 0) ? (
           <p className="m-0 text-stone-500">{text.empty}</p>
         ) : null}
       </div>
-      <form className="flex items-center gap-2 border-t border-stone-300 px-4 pt-3 pb-4" onSubmit={onSubmit}>
+      <form
+        className="flex items-center gap-2 border-t border-stone-300 px-4 pt-3 pb-4"
+        onSubmit={onSubmit}
+      >
         <input
           className={
             inputLocked
@@ -118,7 +121,7 @@ export function ChatMain({
           title={text.send}
           disabled={sendLocked || draft.trim() === ''}
         >
-          <Send aria-hidden="true"/>
+          <Send aria-hidden="true" />
         </button>
       </form>
     </main>

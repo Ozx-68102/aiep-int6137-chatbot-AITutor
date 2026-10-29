@@ -65,8 +65,10 @@ export function RenameSession({
           void confirm();
         }}
       >
-        <CloseButton label={text.close} onClick={onCancel}/>
-        <h2 id="rename-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>{text.rename}</h2>
+        <CloseButton label={text.close} onClick={onCancel} />
+        <h2 id="rename-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>
+          {text.rename}
+        </h2>
         <input
           className="rounded-lg border border-stone-300 px-3 py-2.5"
           value={draft}
@@ -93,7 +95,14 @@ export function RenameSession({
             disabled={unchanged || pending}
             aria-busy={pending}
           >
-            {pending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true"/> : text.renameSave}
+            {pending ? (
+              <span
+                className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent"
+                aria-hidden="true"
+              />
+            ) : (
+              text.renameSave
+            )}
           </button>
         </div>
       </form>

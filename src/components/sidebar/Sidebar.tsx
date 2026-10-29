@@ -51,7 +51,11 @@ export function Sidebar({
     previousOrder.current = orderKey;
     if (!orderChanged) {
       for (const [id, row] of rowRefs.current) {
-        if (row.style.transform === '' || row.style.transform === 'none' || row.style.transform === 'translateY(0)') {
+        if (
+          row.style.transform === '' ||
+          row.style.transform === 'none' ||
+          row.style.transform === 'translateY(0)'
+        ) {
           rowTops.current.set(id, row.getBoundingClientRect().top);
         }
       }
@@ -112,7 +116,7 @@ export function Sidebar({
               title={text.createSession}
               onClick={onCreate}
             >
-              <img src={logoUrl} alt="" className="h-12 w-auto"/>
+              <img src={logoUrl} alt="" className="h-12 w-auto" />
             </button>
             <p lang="en" className="min-w-0 text-xs leading-tight text-stone-600">
               Help × Higher Understanding
@@ -125,7 +129,7 @@ export function Sidebar({
             title={text.hideSidebar}
             onClick={onClose}
           >
-            <PanelLeftClose aria-hidden="true"/>
+            <PanelLeftClose aria-hidden="true" />
           </button>
         </div>
         <button
@@ -133,7 +137,7 @@ export function Sidebar({
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
           onClick={onCreate}
         >
-          <SquarePlus aria-hidden="true" className="size-4 shrink-0"/>
+          <SquarePlus aria-hidden="true" className="size-4 shrink-0" />
           {text.createSession}
         </button>
         <ul className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
@@ -168,7 +172,7 @@ export function Sidebar({
           aria-current={settingsOpen ? 'page' : undefined}
           onClick={onOpenSettings}
         >
-          <User aria-hidden="true" className="size-4 shrink-0"/>
+          <User aria-hidden="true" className="size-4 shrink-0" />
           <span className="truncate">{username ?? text.profile}</span>
         </button>
       </aside>

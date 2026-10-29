@@ -62,9 +62,11 @@ export function LanguageMenu({
         {variant === 'current' ? (
           <span lang={htmlLang[locale]}>{current?.label}</span>
         ) : (
-          <Languages aria-hidden="true"/>
+          <Languages aria-hidden="true" />
         )}
-        {variant === 'current' ? <ChevronDown aria-hidden="true" className="size-4 shrink-0"/> : null}
+        {variant === 'current' ? (
+          <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+        ) : null}
       </button>
       <div
         className={

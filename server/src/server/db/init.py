@@ -26,9 +26,9 @@ def _ensure_pinned_column(engine: Engine) -> None:
     if "pinned" in columns:
         return
     with engine.begin() as connection:
-        connection.execute(text(
-            "ALTER TABLE session ADD COLUMN pinned boolean NOT NULL DEFAULT false"
-        ))
+        connection.execute(
+            text("ALTER TABLE session ADD COLUMN pinned boolean NOT NULL DEFAULT false")
+        )
 
 
 def _ensure_pinned_at_column(engine: Engine) -> None:
@@ -36,9 +36,9 @@ def _ensure_pinned_at_column(engine: Engine) -> None:
     if "pinned_at" in columns:
         return
     with engine.begin() as connection:
-        connection.execute(text(
-            "ALTER TABLE session ADD COLUMN pinned_at timestamp with time zone"
-        ))
+        connection.execute(
+            text("ALTER TABLE session ADD COLUMN pinned_at timestamp with time zone")
+        )
 
 
 def _ensure_login_token_expiry(engine: Engine) -> None:
@@ -46,16 +46,20 @@ def _ensure_login_token_expiry(engine: Engine) -> None:
     if "expires_at" in columns:
         return
     with engine.begin() as connection:
-        connection.execute(text(
-            "ALTER TABLE login_token ADD COLUMN expires_at timestamp with time zone"
-        ))
-        connection.execute(text(
-            "UPDATE login_token SET expires_at = created_at + interval '7 days' "
-            "WHERE expires_at IS NULL"
-        ))
-        connection.execute(text(
-            "ALTER TABLE login_token ALTER COLUMN expires_at SET NOT NULL"
-        ))
+        connection.execute(
+            text(
+                "ALTER TABLE login_token ADD COLUMN expires_at timestamp with time zone"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE login_token SET expires_at = created_at + interval '7 days' "
+                "WHERE expires_at IS NULL"
+            )
+        )
+        connection.execute(
+            text("ALTER TABLE login_token ALTER COLUMN expires_at SET NOT NULL")
+        )
 
 
 def _ensure_admin(session: Session) -> None:

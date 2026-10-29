@@ -432,11 +432,13 @@ def _login_account(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
 
     token = secrets.token_urlsafe(32)
-    session.add(LoginToken(
-        account=account,
-        token_hash=_token_hash(token),
-        expires_at=_login_deadline(),
-    ))
+    session.add(
+        LoginToken(
+            account=account,
+            token_hash=_token_hash(token),
+            expires_at=_login_deadline(),
+        )
+    )
     result = LoginResponse(
         locale=language.locale,
         sessions=_session_items(account),

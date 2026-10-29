@@ -28,7 +28,8 @@ export async function withConnectionRetry<T>(run: () => Promise<T>): Promise<T> 
     try {
       return await run();
     } catch (error) {
-      const retry = (!(error instanceof ApiError) || error.detail === null) && attempt < connectionAttempts - 1;
+      const retry =
+        (!(error instanceof ApiError) || error.detail === null) && attempt < connectionAttempts - 1;
       if (!retry) {
         throw error;
       }
@@ -38,7 +39,7 @@ export async function withConnectionRetry<T>(run: () => Promise<T>): Promise<T> 
   throw new ApiError(0, null);
 }
 
-export async function requestEmpty(path: string, init?: { method?: string }): Promise<void> {
+export async function requestEmpty(path: string, init?: {method?: string}): Promise<void> {
   await withConnectionRetry(async () => {
     const response = await request(path, init);
     if (response.status === 204) {
@@ -50,7 +51,10 @@ export async function requestEmpty(path: string, init?: { method?: string }): Pr
   });
 }
 
-export async function requestJson(path: string, init?: { method?: string; body?: string }): Promise<unknown> {
+export async function requestJson(
+  path: string,
+  init?: {method?: string; body?: string},
+): Promise<unknown> {
   return withConnectionRetry(async () => {
     const response = await request(path, init);
     if (!response.ok) {
@@ -65,7 +69,7 @@ export async function requestJson(path: string, init?: { method?: string; body?:
   });
 }
 
-async function request(path: string, init?: { method?: string; body?: string }): Promise<Response> {
+async function request(path: string, init?: {method?: string; body?: string}): Promise<Response> {
   try {
     return await fetch(path, {
       method: init?.method ?? 'GET',
