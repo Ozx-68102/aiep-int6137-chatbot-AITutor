@@ -35,6 +35,8 @@ export const translations = {
     logIn: '登录',
     connectionError: '无法连接到服务器',
     connectionRetry: '无法连接到服务器，请稍后重试',
+    thinking: '正在思考…',
+    replyInterrupted: '回答中断了',
   },
   'zh-TW': {
     sessions: '對話',
@@ -64,6 +66,8 @@ export const translations = {
     logIn: '登入',
     connectionError: '無法連接到伺服器',
     connectionRetry: '無法連接到伺服器，請稍後重試',
+    thinking: '正在思考…',
+    replyInterrupted: '回答中斷了',
   },
   en: {
     sessions: 'Chats',
@@ -93,5 +97,7 @@ export const translations = {
     logIn: 'Log in',
     connectionError: 'Unable to connect to the server',
     connectionRetry: 'Unable to connect to the server. Please try again later.',
+    thinking: 'Thinking…',
+    replyInterrupted: 'The reply was interrupted',
   },
 } satisfies Record<Locale, Record<string, string>>;

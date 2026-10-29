@@ -2,16 +2,11 @@ import {PanelLeftOpen, Send} from 'lucide-react';
 import type {SubmitEvent} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
+import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
-
-function visibleText(role: 'user' | 'assistant' | 'error', text: string): string {
-  if (role !== 'assistant') {
-    return text;
-  }
-  return text.replace(/^\n+/, '');
-}
+import {ThinkingBubble} from './ThinkingBubble.tsx';
 
 export function ChatMain({
   locale,
@@ -76,7 +71,17 @@ export function ChatMain({
           ? active.messages.map((message) => {
               const textShown = visibleText(message.role, message.text);
               if (textShown === '') {
-                return null;
+                if (!waitingForText(message)) {
+                  return null;
+                }
+                return (
+                  <ThinkingBubble
+                    key={message.id}
+                    entering={enteringIds.includes(message.id)}
+                    label={text.thinking}
+                    onAnimationEnd={() => onAnimationEnd(message.id)}
+                  />
+                );
               }
               return (
                 <p

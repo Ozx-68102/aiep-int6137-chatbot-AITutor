@@ -6,8 +6,8 @@ export async function streamReply(
   message: string,
   locale: Locale,
   onDelta: (text: string) => void,
-): Promise<void> {
-  await withConnectionRetry(() => deliverReply(chatId, message, locale, onDelta));
+): Promise<boolean> {
+  return withConnectionRetry(() => deliverReply(chatId, message, locale, onDelta));
 }
 
 async function deliverReply(
@@ -15,7 +15,7 @@ async function deliverReply(
   message: string,
   locale: Locale,
   onDelta: (text: string) => void,
-): Promise<void> {
+): Promise<boolean> {
   let response: Response;
   try {
     response = await fetch('/api/chat', {
@@ -34,22 +34,22 @@ async function deliverReply(
 
   let delivered = false;
   try {
-    await readStream(response, (text) => {
+    return await readStream(response, (text) => {
       delivered = true;
       onDelta(text);
     });
   } catch {
     if (delivered) {
-      return;
+      return false;
     }
     throw new ApiError(0, null);
   }
 }
 
-async function readStream(response: Response, onDelta: (text: string) => void): Promise<void> {
+async function readStream(response: Response, onDelta: (text: string) => void): Promise<boolean> {
   const body = response.body;
   if (!body) {
-    return;
+    return false;
   }
 
   const reader = body.getReader();
@@ -68,14 +68,14 @@ async function readStream(response: Response, onDelta: (text: string) => void): 
       for (const part of parts) {
         const piece = pieceFromEvent(part);
         if (piece?.kind === 'done') {
-          return;
+          return true;
         }
         if (piece?.kind === 'text') {
           onDelta(piece.text);
         }
       }
       if (done) {
-        return;
+        return false;
       }
     }
   } finally {
