@@ -1,40 +1,61 @@
 # Agent Guidelines
 
-## General Policy
-- **No Direct Push**: Never run `git push`. Always ask the maintainer to push.
-- **Human Review Required**: Pause and request review after implementation; commit only after explicit approval.
-- **No Speculation**: Never guess missing specs, knobs, or business logic. Pause and ask when in doubt.
-- **Scope Boundary**: Stay strictly focused on in-repo code, specs, and architecture. Refuse off-topic requests.
-- **Frontend Only**: The chat UI stays in `src/`. The thin proxy stays in `server/` and is reached only over HTTP. Do not implement or modify FastGPT, its workflows, or its knowledge base.
-- **Destructive Operations**: Pause and wait for explicit permission before performing any negative or destructive operation (e.g., deletions, force overwrites, history rewrites, service disruption).
-- **Discuss Before Doing**: Do not start hands-on work immediately after receiving information or a request. The default mode is discussion only — analyze, propose approaches, and ask questions first. Only begin implementation after the user has explicitly agreed to the plan or to a specific action.
-- **Ask When Unsure**: When encountering anything unclear, ambiguous, or unfamiliar — specs, requirements, code behavior, tooling, etc. — do NOT default to executing or guessing. Pause, ask clarifying questions, and explain your understanding or reasoning so the user can confirm or correct before any action is taken. Prefer over-asking over over-assuming.
-- **Plain Language**: In project documents and when talking to the user, use words a person can understand without insider slang or coined jargon, such as 「xx门」 ("xx-gate"), 「xx电池」 ("xx battery"), or 「入史」 ("make history"). Layout and content must be easy to read. If a specialized term is necessary, use it at most once or twice and make the meaning clear.
+本仓库是 H^2 Bot：聊天页面在 `src/`，接口服务在 `server/`。
+本文件只写"从代码里读不出来、猜错代价高"的事。
 
-## Environment & Tooling
-- **No Stack Until Named**: Do not initialize a project, add dependencies, or pick a framework, package manager, or directory layout until the user names them.
-- **No Secrets in the Client**: Never put API keys, tokens, or `.env` values in frontend code or commits. Do not call FastGPT directly from browser code. Do not prefix FastGPT variables with `VITE_`. Vite copies `VITE_` variables into the browser bundle.
-- **No Invented Contract**: Do not invent Base URL, appId, `variables`, auth, or endpoints. Stop and ask when they are missing. Workflow `variables` arrive with the maintainer's API notes; do not require or invent them beforehand.
-- **Strict Runner**: For work in `server/`, never run bare `python`, `pip`, or `pytest`. Always use `uv run ...` from `server/`.
-- **Environment Check**: Ensure `server/.venv` exists before executing Python tasks. If it is missing, create it with `uv sync` in `server/`. Do not create a virtual environment at the repo root.
-- **Version Pinning**: Keep `server/.python-version` at `3.13` and `requires-python` at `==3.13.*`.
+## 去哪儿找什么
+- 产品与本地运行：[README.md](README.md)
+- 工具版本、环境变量、本地启动、Git 钩子：[docs/TECH.md](docs/TECH.md)
+- 新人上手：[docs/开发手册/](docs/开发手册/)
+- 实测到的反直觉行为：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，
+  也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
 
-## Code Style
-- **Semicolons Required**: In TypeScript (`.ts` and `.tsx`), end every statement with a semicolon. Do not omit semicolons. End type and interface members with a semicolon as well. Use a comma only where the syntax requires a separator, such as object and array literals, parameter lists, import and export specifiers, and enum members. This rule must NOT be skipped.
-- **Modern Syntax**: In Python, use native 3.13 features. Do not import `annotations` from `__future__`.
-- **Early Return**: Handle invalid or aborting cases first: raise or return immediately. Leave the rest of the function as the valid path at a single indentation level. When both branches are normal logic, keep them side by side.
+## 守则
+- 信息不足先问：需求、接口、字段、配置不清楚时停下来问并说明理解，不猜、不臆造
+- 动手前先给方案：先讲做法，等确认后再改
+- 不直接推送、未经确认不提交；改写历史、强推、删文件等破坏性操作一律先要许可
+- 聊天页面在 `src/`，接口服务在 `server/`。浏览器只访问本仓库的接口，不直连 FastGPT。
+  FastGPT 的工作流和知识库不在本仓库改，那边的事找 FastGPT 的维护者
+- 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts`
+  里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上
+  `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
+- FastGPT 的地址、应用 id、变量名、登录方式和接口路径都不臆造，缺了就问
+- 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
+- 文档和对话都用平常话，不用自造词和行话
 
-## Git & Commits
-- **History Preservation**: Never rewrite pushed or non-HEAD git history. Make new commits instead.
-- **Remote Blocks Force Push**: Remote Restrict Deletions and Block Force Pushes stay on. Before push, fix with a new commit, `git revert`, or `git commit-tree`. After push, do not force-push; ask the maintainer if those rules must be lifted.
-- **No Secret Commits**: Never stage `.env` or credential files.
-- **No Virtualenv Commits**: Never stage `server/.venv` or any other virtual environment.
-- **One Change, One Commit**: One logical change maps to one commit. Keep related files together; do not split one change thinly or mix unrelated changes.
+## 验收
+- 改完 `src/`：`pnpm lint` 和 `pnpm build`（build 里已经带类型检查，几秒就完，产物在 `dist/`）
+- 只想做类型检查、不产出 `dist/` 时：`pnpm exec tsc --noEmit`
+- 改完 `server/`：在 `server/` 里 `uv run ruff check .`
+- 改完界面、跳转或页面状态：在浏览器里点一遍受影响的流程；没有浏览器工具就说明哪一步没验
+- 本仓库没有自动化测试，不要引入测试框架
 
-## Verification
-- **Lint Before Done**: After any TypeScript or React change, run `pnpm lint` before declaring the work complete. This command includes type-aware rules. `pnpm build` still runs `tsc --noEmit` separately.
-- **Python Lint**: After any edit under `server/`, run `uv run ruff check .` from `server/`. Fix all issues before requesting review.
-- **Browser Before Done**: After any UI, layout, routing, or client-state change, verify the affected flow in the browser before declaring it complete. If browser tools are unavailable, say what was not verified.
+## Git
+- 一次逻辑改动一个提交；不改写已推送的历史，不强推
+- 提交说明用英文写成 `feat: add session pinning` 这种样子：类型、冒号、一句话；
+  类型后面不要加括号（`feat(server): ...` 会被钩子拒绝）
+- 新克隆后执行一次 `bash scripts/setup-hooks.sh`
+- 不提交 `.env`、`server/.venv`、`logs/`
 
-## Findings
-Observed behavior that is not obvious from the code or the upstream docs goes in [docs/FINDINGS.md](docs/FINDINGS.md). Add new findings there. Do not write secrets, passwords, or cookies into that file.
+## 常用指令
+
+**前端（仓库根目录）**
+- `pnpm install` — 装依赖；只用 pnpm
+- `pnpm run dev:frontend` — 起页面
+- `pnpm run dev:backend` — 起接口服务（127.0.0.1:3001）
+- `pnpm lint` — oxlint，含类型相关规则
+- `pnpm build` — 类型检查 + 打包到 `dist/`
+- `pnpm exec tsc --noEmit` — 只做类型检查，不产出 `dist/`
+- `pnpm preview` — 预览 `dist/`
+- 页面开发服务器会把 `/api/...` 转给 3001 端口的接口服务，所以前端只写相对路径
+- 没有 `pnpm dev`：页面和接口是两个进程，要两个终端；接口没起来时页面会提示连不上
+- `pnpm test` 是占位脚本，会直接失败，不要用
+
+**后端（`server/` 里）**
+- `uv sync` — 按 uv.lock 装好依赖（Python 锁 3.13）
+- `uv lock --check` — 检查锁文件
+- `uv run ruff check .` — 后端检查
+- `uv run server` — 起接口服务，等价于 `pnpm run dev:backend`
+- `uv run python -m server.db.init` — 只补缺的表和列，建初始账号，不改已有密码。
+  不要每次起服务都跑：只在项目维护者下令时，或改了数据库结构之后跑
+- 起接口服务前，本机 PostgreSQL 和 Redis 必须在运行
