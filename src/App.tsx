@@ -660,11 +660,13 @@ export default function App() {
       sessionId = created.id;
       replaceSessionToUrl(created.id);
       loadedThreads.current.add(sessionId);
+      const turnId = crypto.randomUUID();
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
         text: question,
         locale,
+        turnId,
       };
       setComposingNew(false);
       setSessions((current) => [
@@ -682,7 +684,7 @@ export default function App() {
       markEntering(userMessage.id);
       sendingRef.current.add(sessionId);
       setPendingIds((current) => new Set(current).add(sessionId));
-      await sendQuestion(sessionId, question);
+      await sendQuestion(sessionId, question, turnId);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
@@ -721,11 +723,13 @@ export default function App() {
     const sessionId = active.id;
     const title = titleFromQuestion(question);
     const missingTitle = active.title === null;
+    const turnId = crypto.randomUUID();
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       text: question,
       locale,
+      turnId,
     };
     sendingRef.current.add(sessionId);
     setPendingIds((current) => new Set(current).add(sessionId));
@@ -750,11 +754,18 @@ export default function App() {
         });
       titleSaves.current.set(sessionId, saving);
     }
-    void sendQuestion(sessionId, question);
+    void sendQuestion(sessionId, question, turnId);
   }
 
-  function addWaitingMessage(sessionId: string, messageId: string) {
-    const message: Message = {id: messageId, role: 'assistant', text: '', locale, waiting: true};
+  function addWaitingMessage(sessionId: string, messageId: string, turnId: string) {
+    const message: Message = {
+      id: messageId,
+      role: 'assistant',
+      text: '',
+      locale,
+      waiting: true,
+      turnId,
+    };
     updateSession(sessionId, (session) => ({
       ...session,
       messages: [...session.messages, message],
@@ -775,27 +786,51 @@ export default function App() {
     }));
   }
 
-  function applyPartialText(sessionId: string, messageId: string, partial: PartialReply) {
+  function applyPartialText(sessionId: string, turnId: string, partial: PartialReply) {
+    if (turnId === '') {
+      return;
+    }
+    updateSession(sessionId, (session) => {
+      const index = session.messages.findIndex((message) => message.turnId === turnId);
+      if (index === -1) {
+        // 这一轮还没进到页面里（比如刚刷新完），先补一个气泡。
+        const message: Message = {
+          id: turnId,
+          role: 'assistant',
+          text: partial.text,
+          locale,
+          turnId,
+          waiting: partial.status === 'streaming',
+        };
+        return {...session, messages: [...session.messages, message]};
+      }
+      const message = session.messages[index];
+      if (!partial.text.startsWith(message.text)) {
+        return session;
+      }
+      const waiting =
+        partial.status === 'streaming' && visibleText(message.role, partial.text) === '';
+      const messages = [...session.messages];
+      messages[index] = {...message, text: partial.text, waiting};
+      return {...session, messages};
+    });
+  }
+
+  /** 把这一轮的回答气泡去掉，提问留着。 */
+  function removeTurnAnswer(sessionId: string, turnId: string) {
     updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.map((message) => {
-        if (message.id !== messageId) {
-          return message;
-        }
-        if (!partial.text.startsWith(message.text)) {
-          return message;
-        }
-        const waiting =
-          partial.status === 'streaming' && visibleText(message.role, partial.text) === '';
-        return {...message, text: partial.text, waiting};
-      }),
+      messages: session.messages.filter(
+        (message) => !(message.turnId === turnId && message.role === 'assistant'),
+      ),
     }));
   }
 
-  function removeMessage(sessionId: string, messageId: string) {
+  /** 把这一轮的提问和气泡一起去掉（这一轮根本没发出去）。 */
+  function removeTurn(sessionId: string, turnId: string) {
     updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.filter((message) => message.id !== messageId),
+      messages: session.messages.filter((message) => message.turnId !== turnId),
     }));
   }
 
@@ -844,10 +879,10 @@ export default function App() {
     pollers.current.delete(sessionId);
   }
 
-  function startPolling(sessionId: string, messageId: string) {
+  function startPolling(sessionId: string, turnId: string) {
     stopPolling(sessionId);
     const stop = startPartialPolling(sessionId, (partial) => {
-      applyPartialText(sessionId, messageId, partial);
+      applyPartialText(sessionId, turnId, partial);
       if (partial.status === 'streaming') {
         return;
       }
@@ -869,45 +904,51 @@ export default function App() {
       return;
     }
     setPendingIds((current) => new Set(current).add(sessionId));
-    startPolling(sessionId, waiting.id);
+    startPolling(sessionId, waiting.turnId ?? '');
   }
 
-  async function recoverReply(sessionId: string, messageId: string) {
+  async function recoverReply(sessionId: string, turnId: string) {
     let partial: PartialReply;
     try {
       partial = await readPartial(sessionId);
     } catch {
       // 问不到服务器：不知道这一轮到底怎么样，只能报连不上。
-      removeMessage(sessionId, messageId);
+      removeTurnAnswer(sessionId, turnId);
+      addErrorMessage(sessionId, text.connectionError, locale);
+      return;
+    }
+    if (partial.turnId !== null && partial.turnId !== turnId) {
+      // Redis 里留着的是别的轮次，这一轮其实没写出来。
+      removeTurnAnswer(sessionId, turnId);
       addErrorMessage(sessionId, text.connectionError, locale);
       return;
     }
     if (partial.status === 'streaming') {
-      applyPartialText(sessionId, messageId, partial);
-      startPolling(sessionId, messageId);
+      applyPartialText(sessionId, turnId, partial);
+      startPolling(sessionId, turnId);
       return;
     }
     if (partial.status === 'failed') {
-      applyPartialText(sessionId, messageId, partial);
+      applyPartialText(sessionId, turnId, partial);
       addErrorMessage(sessionId, text.replyInterrupted, locale);
       return;
     }
     if (partial.status === 'aborted') {
-      applyPartialText(sessionId, messageId, partial);
+      applyPartialText(sessionId, turnId, partial);
       addNoticeMessage(sessionId, text.replyStopped, locale);
       return;
     }
     if (partial.status === 'finished') {
-      if (partial.text.trim() === lastAssistantText(sessionId)?.trim()) {
-        // Redis 里留着的是上一轮的收尾，这一轮其实没开始。
-        removeMessage(sessionId, messageId);
+      if (partial.turnId === null && partial.text.trim() === lastAssistantText(sessionId)?.trim()) {
+        // Redis 里没有编号，只能靠文字分辨：留着的是上一轮的收尾，这一轮其实没开始。
+        removeTurnAnswer(sessionId, turnId);
         addErrorMessage(sessionId, text.connectionError, locale);
         return;
       }
-      applyPartialText(sessionId, messageId, partial);
+      applyPartialText(sessionId, turnId, partial);
       return;
     }
-    removeMessage(sessionId, messageId);
+    removeTurnAnswer(sessionId, turnId);
     addErrorMessage(sessionId, text.replyInterrupted, locale);
   }
 
@@ -924,41 +965,51 @@ export default function App() {
     return null;
   }
 
-  async function sendQuestion(sessionId: string, question: string) {
+  async function sendQuestion(sessionId: string, question: string, turnId: string) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
     aborters.current.set(sessionId, controller);
     let received = '';
     try {
-      addWaitingMessage(sessionId, assistantId);
+      addWaitingMessage(sessionId, assistantId, turnId);
       const outcome = await streamReply(
         sessionId,
         question,
         locale,
+        turnId,
         (chunk) => {
           received += chunk;
           applyStreamText(sessionId, assistantId, chunk);
         },
         controller.signal,
       );
+      if (outcome === 'busy') {
+        // 这场会话已经有一轮在写，这一次没发出去。把问题放回输入框，等答完再发。
+        removeTurn(sessionId, turnId);
+        setDraft(question);
+        saveUnsent(question);
+        addNoticeMessage(sessionId, text.roundBusy, locale);
+        await refreshThread(sessionId);
+        return;
+      }
       if (outcome === 'aborted') {
         // 用户按了停止。已经写出来的半截留着，一个字都没写出来就把气泡去掉。
         if (received.trim() === '') {
-          removeMessage(sessionId, assistantId);
+          removeTurnAnswer(sessionId, turnId);
         }
         addNoticeMessage(sessionId, text.replyStopped, locale);
         return;
       }
       if (outcome === 'interrupted') {
-        await recoverReply(sessionId, assistantId);
+        await recoverReply(sessionId, turnId);
         return;
       }
       if (outcome === 'not-started') {
-        removeMessage(sessionId, assistantId);
+        removeTurnAnswer(sessionId, turnId);
         addErrorMessage(sessionId, text.connectionError, locale);
       }
     } catch (error) {
-      removeMessage(sessionId, assistantId);
+      removeTurnAnswer(sessionId, turnId);
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
         return;
@@ -975,6 +1026,23 @@ export default function App() {
       if (!pollers.current.has(sessionId)) {
         clearPending(sessionId);
       }
+    }
+  }
+
+  /** 重新读一次线程：这一轮是在别的页面发出去的，本页还不知道。 */
+  async function refreshThread(sessionId: string) {
+    try {
+      const thread = await loadThread(sessionId);
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: thread.messages,
+        messagesKnown: true,
+      }));
+      if (thread.partial.status === 'streaming') {
+        resumePartial(sessionId, thread.messages);
+      }
+    } catch {
+      // 读不到就算了，页面照常用。
     }
   }
 

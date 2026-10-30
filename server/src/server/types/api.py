@@ -58,6 +58,8 @@ class ProfileUpdate(BaseModel):
 class PartialReplyResponse(BaseModel):
     status: str | None
     text: str
+    turn_id: str | None = None
+    question: str | None = None
 
 
 class StatusResponse(BaseModel):
@@ -69,6 +71,8 @@ class HistoryMessageResponse(BaseModel):
     id: str
     role: Literal["user", "assistant"]
     text: str
+    turn_id: str | None = None
+    waiting: bool = False
 
 
 class HistoryResponse(BaseModel):
@@ -81,4 +85,5 @@ class ChatRequest(BaseModel):
 
     message: str = Field(min_length=1)
     chat_id: UUID = Field(alias="chatId")
+    turn_id: UUID = Field(alias="turnId")
     locale: str | None = None

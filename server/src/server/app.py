@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import secrets
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -11,7 +12,7 @@ from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from fastapi import Cookie, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
@@ -25,8 +26,10 @@ from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from server.db import Account, ChatSession, LoginToken, db_session
-from server.fastgpt import FastGPT, FastGPTError, open_fastgpt
+from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
 from server.reply_store import (
+    STREAMING,
+    PartialReply,
     append_chunk,
     begin_reply,
     discard_reply,
@@ -34,6 +37,7 @@ from server.reply_store import (
     mark_failed,
     mark_finished,
     read_partial,
+    round_in_flight,
     store_available,
 )
 from server.settings import load_settings
@@ -75,7 +79,12 @@ _COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 _STATUS_PATH = "/api/status"
 _SERVER_ERROR = "服务器错误"
 _NO_LANGUAGE = "账号没有语言设置"
-_running: dict[UUID, asyncio.Task[None]] = {}
+_ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
+_UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
+_running: dict[UUID, set[asyncio.Task[None]]] = {}
+_records_cache: dict[UUID, tuple[float, list[ChatRecord]]] = {}
+_RECORDS_CACHE_SECONDS = 5.0
+_RECORDS_PAGE_SIZE = 100
 
 
 class _Relay:
@@ -132,7 +141,8 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
     if isinstance(exc, RequestValidationError):
         return await request_validation_exception_handler(request, exc)
 
-    logger.exception("请求失败 %s %s", request.method, request.url.path)
+    # 这里只记一行。栈由 uvicorn 打一遍就够，打两遍会把日志撑爆。
+    logger.error("请求失败 %s %s：%s", request.method, request.url.path, exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": _SERVER_ERROR},
@@ -300,11 +310,12 @@ async def abort_session_reply(
         _require_session(session, account, session_id)
 
     task = _running.get(session_id)
-    if task is None:
+    if not task:
         # 这一轮已经结束了，或者还没开始。不用改状态。
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    task.cancel()
+    for running in task:
+        running.cancel()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -318,16 +329,20 @@ def read_session_partial(
         _require_session(session, account, session_id)
 
     partial = read_partial(session_id)
-    return PartialReplyResponse(status=partial.status, text=partial.text)
+    return PartialReplyResponse(
+        status=partial.status,
+        text=partial.text,
+        turn_id=partial.turn_id,
+        question=partial.question,
+    )
 
 
 @app.get("/api/sessions/{session_id}/messages")
 async def read_session_messages(
     session_id: UUID,
-    offset: Annotated[int, Query(ge=0)],
-    page_size: Annotated[int, Query(ge=1)],
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> HistoryResponse:
+    """一场会话的完整线程：FastGPT 的历史，加上正在写的这一轮。"""
     fastgpt = _fastgpt()
 
     with db_session() as session:
@@ -335,20 +350,97 @@ async def read_session_messages(
         _require_session(session, account, session_id)
 
     try:
-        page = await fastgpt.records(session_id, offset, page_size)
+        records = await _session_records(session_id, fastgpt)
     except FastGPTError:
         raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            _SERVER_ERROR,
+            status.HTTP_502_BAD_GATEWAY,
+            _UPSTREAM_ERROR,
         ) from None
 
-    return HistoryResponse(
-        total=page.total,
-        messages=[
-            HistoryMessageResponse(id=item.id, role=item.role, text=item.text)
-            for item in page.records
-        ],
+    messages = _merge_current_turn(records, read_partial(session_id))
+    return HistoryResponse(total=len(messages), messages=messages)
+
+
+async def _session_records(session_id: UUID, fastgpt: FastGPT) -> list[ChatRecord]:
+    """一场会话的全部历史。
+
+    刷新一次页面就要读一次历史，刷新得急了会把上游打垮（实测：上游连不上了，
+    每次失败在日志里留下两百多行）。这里留几秒的缓存：刷新多少次，
+    上游就只被问一次。
+    """
+    now = time.monotonic()
+    cached = _records_cache.get(session_id)
+    if cached is not None and now - cached[0] < _RECORDS_CACHE_SECONDS:
+        return cached[1]
+
+    records: list[ChatRecord] = []
+    offset = 0
+    while True:
+        page = await fastgpt.records(session_id, offset, _RECORDS_PAGE_SIZE)
+        records.extend(page.records)
+        offset += _RECORDS_PAGE_SIZE
+        if offset >= page.total:
+            break
+
+    _records_cache[session_id] = (now, records)
+    _drop_stale_records(now)
+    return records
+
+
+def _drop_stale_records(now: float) -> None:
+    for key in [
+        key
+        for key, (stamp, _) in _records_cache.items()
+        if now - stamp > _RECORDS_CACHE_SECONDS * 20
+    ]:
+        del _records_cache[key]
+
+
+def _merge_current_turn(
+    records: list[ChatRecord],
+    partial: PartialReply,
+) -> list[HistoryMessageResponse]:
+    """把 Redis 里当前这一轮接在历史后面。
+
+    历史来自 FastGPT：写完的轮次都在里面。正在写的那一轮还没落库，
+    刷新以后要靠 Redis 里这份把它补回来，这样用户提问和三个点都还在。
+    """
+    messages = [
+        HistoryMessageResponse(id=item.id, role=item.role, text=item.text)
+        for item in records
+    ]
+    if partial.turn_id is None:
+        return messages
+
+    # 这一轮已经落在 FastGPT 的历史里了（回答的编号就是我们的编号），不用再补。
+    if any(item.id == partial.turn_id for item in messages):
+        return messages
+
+    last = messages[-1] if messages else None
+    if partial.question is not None and not (
+        last is not None
+        and last.role == "user"
+        and last.text.strip() == partial.question.strip()
+    ):
+        messages.append(
+            HistoryMessageResponse(
+                id=f"{partial.turn_id}-q",
+                role="user",
+                text=partial.question,
+                turn_id=partial.turn_id,
+            )
+        )
+
+    messages.append(
+        HistoryMessageResponse(
+            id=partial.turn_id,
+            role="assistant",
+            text=partial.text,
+            turn_id=partial.turn_id,
+            waiting=partial.status == STREAMING,
+        )
     )
+    return messages
 
 
 @app.post("/api/chat")
@@ -364,20 +456,34 @@ async def chat(
         account = _account_from_cookie(session, login_cookie)
         _require_session(session, account, body.chat_id)
 
+    # 同一场会话同时只跑一轮。上一轮还在写的时候再发一次，
+    # FastGPT 那边会多出一轮，Redis 里的半截文字也会被清掉重来，两轮的片段交错着写。
+    if round_in_flight(body.chat_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
+
+    turn_id = str(body.turn_id)
     # 先登记这一轮，页面断流之后才知道请求有没有落地。
-    begin_reply(body.chat_id)
+    begin_reply(body.chat_id, turn_id, body.message)
     relay = _Relay()
-    task = asyncio.create_task(_relay(body.chat_id, body.message, relay, fastgpt))
-    _running[body.chat_id] = task
+    task = asyncio.create_task(
+        _relay(body.chat_id, body.message, turn_id, relay, fastgpt)
+    )
+    _running.setdefault(body.chat_id, set()).add(task)
     task.add_done_callback(lambda done: _forget(body.chat_id, done))
     # 先把响应头发出去，页面的等待气泡立刻就转起来。
     # 上游出问题时流会直接结束（没有 [DONE]），页面据此判断这一轮没写完。
     return StreamingResponse(_sse(relay), media_type="text/event-stream")
 
 
-async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -> None:
+async def _relay(
+    chat_id: UUID,
+    message: str,
+    turn_id: str,
+    relay: _Relay,
+    fastgpt: FastGPT,
+) -> None:
     try:
-        async for event in fastgpt.events(chat_id, message):
+        async for event in fastgpt.events(chat_id, message, turn_id):
             if isinstance(event, str):
                 append_chunk(chat_id, event)
                 outgoing = _chunk(event)
@@ -417,7 +523,11 @@ async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -
 
 
 def _forget(chat_id: UUID, task: asyncio.Task[None]) -> None:
-    if _running.get(chat_id) is task:
+    tasks = _running.get(chat_id)
+    if tasks is None:
+        return
+    tasks.discard(task)
+    if not tasks:
         del _running[chat_id]
 
 

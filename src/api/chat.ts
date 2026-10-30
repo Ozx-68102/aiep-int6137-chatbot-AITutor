@@ -10,27 +10,31 @@ export type ReplyOutcome =
   /** 请求没有落地，服务器那边根本没有这一轮，可以安全重发。 */
   | 'not-started'
   /** 用户按了停止，这一轮就此打住。 */
-  | 'aborted';
+  | 'aborted'
+  /** 这场会话已经有一轮在写，这一次没发出去。 */
+  | 'busy';
 
 export async function streamReply(
   chatId: string,
   message: string,
   locale: Locale,
+  turnId: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<ReplyOutcome> {
-  const outcome = await deliverReply(chatId, message, locale, onDelta, signal);
+  const outcome = await deliverReply(chatId, message, locale, turnId, onDelta, signal);
   if (outcome !== 'not-started') {
     return outcome;
   }
   // 服务器说没有这一轮，说明请求没落地，重发一次不会生成两遍。
-  return deliverReply(chatId, message, locale, onDelta, signal);
+  return deliverReply(chatId, message, locale, turnId, onDelta, signal);
 }
 
 async function deliverReply(
   chatId: string,
   message: string,
   locale: Locale,
+  turnId: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<ReplyOutcome> {
@@ -40,7 +44,7 @@ async function deliverReply(
       method: 'POST',
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message, chatId, locale}),
+      body: JSON.stringify({message, chatId, locale, turnId}),
       signal,
     });
   } catch {
@@ -50,6 +54,10 @@ async function deliverReply(
     return await outcomeAfterFailure(chatId);
   }
 
+  if (response.status === 409) {
+    // 同一场会话已经有一轮在写。这一次没发出去，页面把问题放回输入框。
+    return 'busy';
+  }
   if (!response.ok) {
     throw new ApiError(response.status, await readDetail(response));
   }

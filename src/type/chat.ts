@@ -6,6 +6,8 @@ export type Message = {
   text: string;
   locale?: Locale;
   waiting?: boolean;
+  /** 这一轮的编号。同一轮的提问和回答共用一个。 */
+  turnId?: string;
 };
 
 export type Session = {
