@@ -37,6 +37,8 @@ export const translations = {
     connectionRetry: '无法连接到服务器，请稍后重试',
     thinking: '正在思考…',
     replyInterrupted: '响应中断',
+    serviceUnavailable: '服务暂时不可用，请稍后重试',
+    replyStoreUnavailable: '半截回答功能不可用，刷新后接不上上一轮',
   },
   'zh-TW': {
     sessions: '對話',
@@ -68,6 +70,8 @@ export const translations = {
     connectionRetry: '無法連接到伺服器，請稍後重試',
     thinking: '正在思考…',
     replyInterrupted: '響應中斷',
+    serviceUnavailable: '服務暫時不可用，請稍後重試',
+    replyStoreUnavailable: '半截回答功能不可用，重新整理後接不上一輪',
   },
   en: {
     sessions: 'Chats',
@@ -99,5 +103,7 @@ export const translations = {
     connectionRetry: 'Unable to connect to the server. Please try again later.',
     thinking: 'Thinking…',
     replyInterrupted: 'The response was interrupted',
+    serviceUnavailable: 'The service is temporarily unavailable, please try again later',
+    replyStoreUnavailable: 'Resuming an interrupted reply is unavailable right now',
   },
 } satisfies Record<Locale, Record<string, string>>;

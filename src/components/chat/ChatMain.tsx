@@ -6,6 +6,7 @@ import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
+import {ServiceNotice} from './ServiceNotice.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
 
 export function ChatMain({
@@ -14,6 +15,7 @@ export function ChatMain({
   onShowSidebar,
   active,
   notice,
+  serviceNotice,
   enteringIds,
   onAnimationEnd,
   pending,
@@ -28,6 +30,7 @@ export function ChatMain({
   onShowSidebar: () => void;
   active: Session | undefined;
   notice: string | null;
+  serviceNotice: string | null;
   enteringIds: string[];
   onAnimationEnd: (id: string) => void;
   pending: boolean;
@@ -67,6 +70,7 @@ export function ChatMain({
             {notice}
           </p>
         ) : null}
+        {serviceNotice ? <ServiceNotice text={serviceNotice} /> : null}
         {active && active.messages.length > 0
           ? active.messages.map((message) => {
               const textShown = visibleText(message.role, message.text);
