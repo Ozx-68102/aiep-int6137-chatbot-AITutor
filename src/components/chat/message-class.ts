@@ -13,5 +13,5 @@ export function bubbleClass(role: Message['role'], entering: boolean): string {
   }
   return entering
     ? 'mb-3 w-fit max-w-[600px] animate-in rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap break-words fade-in slide-in-from-bottom-2 duration-200'
-    : 'mb-3 w-fit max-w-[600px] rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap break-words';
+    : 'mb-3 w-fit max-w-[600px] animate-in rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap break-words fade-in duration-300 motion-reduce:animate-none';
 }
