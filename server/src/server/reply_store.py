@@ -16,6 +16,7 @@ logger = logging.getLogger("server.reply_store")
 _STREAMING = "streaming"
 _FINISHED = "finished"
 _FAILED = "failed"
+_ABORTED = "aborted"
 
 _client: Redis | None = None
 
@@ -76,6 +77,16 @@ def mark_failed(chat_id: UUID) -> None:
         ttl = load_settings().redis_key_ttl_seconds
         pipe = _redis().pipeline(transaction=False)
         pipe.set(_status_key(chat_id), _FAILED, ex=ttl)
+        pipe.expire(_text_key(chat_id), ttl)
+        pipe.execute()
+
+
+def mark_aborted(chat_id: UUID) -> None:
+    """用户按了停止。已经写出来的文字留着，状态改成 aborted。"""
+    with _tolerate("mark_aborted", chat_id):
+        ttl = load_settings().redis_key_ttl_seconds
+        pipe = _redis().pipeline(transaction=False)
+        pipe.set(_status_key(chat_id), _ABORTED, ex=ttl)
         pipe.expire(_text_key(chat_id), ttl)
         pipe.execute()
 

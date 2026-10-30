@@ -9,6 +9,7 @@ import {readStatus} from './api/status.ts';
 import {logout, readProfile, updateProfile} from './api/profile.ts';
 import type {Profile} from './api/profile.ts';
 import {
+  abortReply,
   createSession,
   deleteSession,
   emptySession,
@@ -85,6 +86,7 @@ export default function App() {
   const [threadRetry, setThreadRetry] = useState(0);
   const [serviceState, setServiceState] = useState<ServiceState>('ok');
   const sendingRef = useRef<Set<string>>(new Set());
+  const aborters = useRef(new Map<string, AbortController>());
   const titleSaves = useRef(new Map<string, Promise<void>>());
   const pollers = useRef(new Map<string, () => void>());
   const sessionsRef = useRef(sessions);
@@ -811,6 +813,20 @@ export default function App() {
     markEntering(message.id);
   }
 
+  function addNoticeMessage(sessionId: string, content: string, messageLocale: Locale) {
+    const message: Message = {
+      id: crypto.randomUUID(),
+      role: 'notice',
+      text: content,
+      locale: messageLocale,
+    };
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: [...session.messages, message],
+    }));
+    markEntering(message.id);
+  }
+
   function clearPending(sessionId: string) {
     setPendingIds((current) => {
       const next = new Set(current);
@@ -839,6 +855,9 @@ export default function App() {
       clearPending(sessionId);
       if (partial.status === 'failed') {
         addErrorMessage(sessionId, text.replyInterrupted, locale);
+      }
+      if (partial.status === 'aborted') {
+        addNoticeMessage(sessionId, text.replyStopped, locale);
       }
     });
     pollers.current.set(sessionId, stop);
@@ -873,6 +892,11 @@ export default function App() {
       addErrorMessage(sessionId, text.replyInterrupted, locale);
       return;
     }
+    if (partial.status === 'aborted') {
+      applyPartialText(sessionId, messageId, partial);
+      addNoticeMessage(sessionId, text.replyStopped, locale);
+      return;
+    }
     if (partial.status === 'finished') {
       if (partial.text.trim() === lastAssistantText(sessionId)?.trim()) {
         // Redis 里留着的是上一轮的收尾，这一轮其实没开始。
@@ -902,11 +926,29 @@ export default function App() {
 
   async function sendQuestion(sessionId: string, question: string) {
     const assistantId = crypto.randomUUID();
+    const controller = new AbortController();
+    aborters.current.set(sessionId, controller);
+    let received = '';
     try {
       addWaitingMessage(sessionId, assistantId);
-      const outcome = await streamReply(sessionId, question, locale, (chunk) => {
-        applyStreamText(sessionId, assistantId, chunk);
-      });
+      const outcome = await streamReply(
+        sessionId,
+        question,
+        locale,
+        (chunk) => {
+          received += chunk;
+          applyStreamText(sessionId, assistantId, chunk);
+        },
+        controller.signal,
+      );
+      if (outcome === 'aborted') {
+        // 用户按了停止。已经写出来的半截留着，一个字都没写出来就把气泡去掉。
+        if (received.trim() === '') {
+          removeMessage(sessionId, assistantId);
+        }
+        addNoticeMessage(sessionId, text.replyStopped, locale);
+        return;
+      }
       if (outcome === 'interrupted') {
         await recoverReply(sessionId, assistantId);
         return;
@@ -928,10 +970,21 @@ export default function App() {
       const detail = error instanceof ApiError ? error.detail : null;
       addErrorMessage(sessionId, detail ?? text.connectionError, detail ? 'zh-CN' : locale);
     } finally {
+      aborters.current.delete(sessionId);
       sendingRef.current.delete(sessionId);
       if (!pollers.current.has(sessionId)) {
         clearPending(sessionId);
       }
+    }
+  }
+
+  async function stopSending(sessionId: string) {
+    const controller = aborters.current.get(sessionId);
+    controller?.abort();
+    try {
+      await abortReply(sessionId);
+    } catch {
+      // 服务器那边收不到也不碍事：页面已经不等这一轮了。
     }
   }
 
@@ -1003,6 +1056,11 @@ export default function App() {
         sendLocked={inputLocked || historyLocked}
         onDraft={setDraft}
         onSubmit={submitMessage}
+        onStop={() => {
+          if (active) {
+            void stopSending(active.id);
+          }
+        }}
       />
       {view === 'profile' ? (
         <SettingsModal

@@ -30,6 +30,7 @@ from server.reply_store import (
     append_chunk,
     begin_reply,
     discard_reply,
+    mark_aborted,
     mark_failed,
     mark_finished,
     read_partial,
@@ -74,7 +75,7 @@ _COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 _STATUS_PATH = "/api/status"
 _SERVER_ERROR = "服务器错误"
 _NO_LANGUAGE = "账号没有语言设置"
-_running: set[asyncio.Task[None]] = set()
+_running: dict[UUID, asyncio.Task[None]] = {}
 
 
 class _Relay:
@@ -288,6 +289,25 @@ async def delete_session(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.post("/api/sessions/{session_id}/abort", status_code=status.HTTP_204_NO_CONTENT)
+async def abort_session_reply(
+    session_id: UUID,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> Response:
+    """用户按了停止：掐掉这一轮的上游任务。已经写出来的半截文字留着。"""
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        _require_session(session, account, session_id)
+
+    task = _running.get(session_id)
+    if task is None:
+        # 这一轮已经结束了，或者还没开始。不用改状态。
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    task.cancel()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/api/sessions/{session_id}/partial")
 def read_session_partial(
     session_id: UUID,
@@ -348,8 +368,8 @@ async def chat(
     begin_reply(body.chat_id)
     relay = _Relay()
     task = asyncio.create_task(_relay(body.chat_id, body.message, relay, fastgpt))
-    _running.add(task)
-    task.add_done_callback(_running.discard)
+    _running[body.chat_id] = task
+    task.add_done_callback(lambda done: _forget(body.chat_id, done))
     # 先把响应头发出去，页面的等待气泡立刻就转起来。
     # 上游出问题时流会直接结束（没有 [DONE]），页面据此判断这一轮没写完。
     return StreamingResponse(_sse(relay), media_type="text/event-stream")
@@ -373,6 +393,12 @@ async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -
             break
         else:
             relay.failed = True
+    except asyncio.CancelledError:
+        # 用户按了停止。状态在这里写：任务被掐掉时它确实还在写，
+        # 页面轮询 /partial 时就能看到 aborted。
+        logger.info("这一轮被停止 %s", chat_id)
+        mark_aborted(chat_id)
+        raise
     except FastGPTError:
         relay.failed = True
     except Exception as exc:
@@ -386,7 +412,13 @@ async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -
                 else:
                     discard_reply(chat_id)
         finally:
-            await relay.queue.put(None)
+            # 不能 await：任务被取消时再 await 会把取消吞掉。
+            relay.queue.put_nowait(None)
+
+
+def _forget(chat_id: UUID, task: asyncio.Task[None]) -> None:
+    if _running.get(chat_id) is task:
+        del _running[chat_id]
 
 
 async def _sse(relay: _Relay) -> AsyncIterator[str]:
