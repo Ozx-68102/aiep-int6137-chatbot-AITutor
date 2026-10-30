@@ -123,9 +123,10 @@ def open_fastgpt(settings: Settings) -> FastGPT | None:
     if empty_fastgpt_fields(settings):
         return None
 
-    # 两块文字之间可能停很久，不限制读等待。
+    # 连接超时 10 秒。读超时 30 秒，同时管着「等上游第一个字节」和「两块字之间」：
+    # 上游实测 0.3 到 5.2 秒，30 秒够用，又不会在上游不吭声时一直挂着。
     client = httpx2.AsyncClient(
-        timeout=httpx2.Timeout(10.0, read=None),
+        timeout=httpx2.Timeout(10.0, read=30.0),
         headers={
             "Authorization": f"Bearer {settings.fastgpt_api_key.get_secret_value()}",
         },
