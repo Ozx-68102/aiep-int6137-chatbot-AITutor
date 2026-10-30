@@ -60,6 +60,11 @@ class PartialReplyResponse(BaseModel):
     text: str
 
 
+class StatusResponse(BaseModel):
+    database: Literal["ok", "unavailable"]
+    reply_store: Literal["ok", "unavailable"]
+
+
 class HistoryMessageResponse(BaseModel):
     id: str
     role: Literal["user", "assistant"]

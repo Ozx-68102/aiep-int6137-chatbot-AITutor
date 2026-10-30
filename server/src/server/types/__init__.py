@@ -11,6 +11,7 @@ from server.types.api import (
     SessionItem,
     SessionPin,
     SessionRename,
+    StatusResponse,
 )
 from server.types.env import Settings, empty_fastgpt_fields
 
@@ -28,5 +29,6 @@ __all__ = [
     "SessionPin",
     "SessionRename",
     "Settings",
+    "StatusResponse",
     "empty_fastgpt_fields",
 ]

@@ -19,6 +19,7 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -32,6 +33,7 @@ from server.reply_store import (
     mark_failed,
     mark_finished,
     read_partial,
+    store_available,
 )
 from server.settings import load_settings
 from server.types import (
@@ -47,6 +49,7 @@ from server.types import (
     SessionItem,
     SessionPin,
     SessionRename,
+    StatusResponse,
     empty_fastgpt_fields,
 )
 
@@ -68,6 +71,7 @@ _UNAUTHORIZED = "用户名或密码不正确"
 _LOGIN_REQUIRED = "未登录"
 _COOKIE_NAME = "login"
 _COOKIE_MAX_AGE = 7 * 24 * 60 * 60
+_STATUS_PATH = "/api/status"
 _SERVER_ERROR = "服务器错误"
 _NO_LANGUAGE = "账号没有语言设置"
 _running: set[asyncio.Task[None]] = set()
@@ -93,7 +97,12 @@ class _RefreshLoginCookie:
             return
 
         cookie = Request(scope).cookies.get(_COOKIE_NAME)
-        refresh = cookie is not None and _cookie_is_valid(cookie)
+        # 状态检查是心跳，不该把登录有效期往后推。
+        refresh = (
+            scope.get("path") != _STATUS_PATH
+            and cookie is not None
+            and _cookie_is_valid(cookie)
+        )
 
         async def send_with_refresh(message: Message) -> None:
             starting = message["type"] == "http.response.start"
@@ -179,6 +188,25 @@ def update_profile(
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
         language.locale = body.locale
         return _profile(account)
+
+
+@app.get("/api/status")
+def read_status() -> StatusResponse:
+    """页面用它做常驻提示。只报状态，不带任何内容，也不需要登录。"""
+    return StatusResponse(
+        database="ok" if _database_available() else "unavailable",
+        reply_store="ok" if store_available() else "unavailable",
+    )
+
+
+def _database_available() -> bool:
+    try:
+        with db_session() as session:
+            session.execute(select(1))
+        return True
+    except SQLAlchemyError:
+        logger.warning("数据库不可用", exc_info=True)
+        return False
 
 
 @app.get("/api/sessions")
