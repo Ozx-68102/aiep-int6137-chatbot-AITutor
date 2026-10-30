@@ -5,6 +5,7 @@ import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {readPartial} from './api/partial.ts';
 import type {PartialReply} from './api/partial.ts';
+import {readStatus} from './api/status.ts';
 import {logout, readProfile, updateProfile} from './api/profile.ts';
 import type {Profile} from './api/profile.ts';
 import {
@@ -35,6 +36,26 @@ import {pushSessionToUrl, readSessionFromUrl, replaceSessionToUrl} from './sessi
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
+const statusIntervalMs = 30000;
+
+type ServiceState = 'ok' | 'unreachable' | 'database' | 'store';
+
+function serviceNoticeText(
+  state: ServiceState,
+  copy: (typeof translations)[Locale],
+): string | null {
+  if (state === 'unreachable') {
+    return copy.connectionError;
+  }
+  if (state === 'database') {
+    return copy.serviceUnavailable;
+  }
+  if (state === 'store') {
+    return copy.replyStoreUnavailable;
+  }
+  return null;
+}
+
 export default function App() {
   const [locale, setLocale] = useState<Locale>(localeFromSystem);
   const [auth, setAuth] = useState<'checking' | 'anonymous' | 'ready'>('checking');
@@ -62,6 +83,7 @@ export default function App() {
   const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
+  const [serviceState, setServiceState] = useState<ServiceState>('ok');
   const sendingRef = useRef<Set<string>>(new Set());
   const titleSaves = useRef(new Map<string, Promise<void>>());
   const pollers = useRef(new Map<string, () => void>());
@@ -76,6 +98,7 @@ export default function App() {
   );
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
+  const serviceNotice = serviceNoticeText(serviceState, text);
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
@@ -228,6 +251,58 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (auth !== 'ready') {
+      return;
+    }
+    let stopped = false;
+    let timer = 0;
+
+    const check = async () => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      try {
+        const status = await readStatus();
+        if (stopped) {
+          return;
+        }
+        if (status.reply_store === 'unavailable') {
+          setServiceState('store');
+        } else if (status.database === 'unavailable') {
+          setServiceState('database');
+        } else {
+          setServiceState('ok');
+        }
+      } catch {
+        if (!stopped) {
+          setServiceState('unreachable');
+        }
+      }
+    };
+
+    const tick = async () => {
+      await check();
+      if (!stopped) {
+        timer = window.setTimeout(tick, statusIntervalMs);
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void check();
+      }
+    };
+
+    void tick();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [auth]);
 
   useEffect(() => {
     function onPopState() {
@@ -917,6 +992,7 @@ export default function App() {
         onShowSidebar={() => setSidebarOpen(true)}
         active={active}
         notice={notice}
+        serviceNotice={serviceNotice}
         enteringIds={enteringIds}
         onAnimationEnd={(id) => {
           setEnteringIds((current) => current.filter((item) => item !== id));
