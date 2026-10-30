@@ -76,7 +76,6 @@ _running: set[asyncio.Task[None]] = set()
 class _Relay:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[str | None] = asyncio.Queue()
-        self.started = asyncio.Event()
         self.failed = False
         self.sent = False
 
@@ -323,13 +322,8 @@ async def chat(
     task = asyncio.create_task(_relay(body.chat_id, body.message, relay, fastgpt))
     _running.add(task)
     task.add_done_callback(_running.discard)
-    await relay.started.wait()
-    if relay.failed and not relay.sent:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": _SERVER_ERROR},
-        )
-
+    # 先把响应头发出去，页面的等待气泡立刻就转起来。
+    # 上游出问题时流会直接结束（没有 [DONE]），页面据此判断这一轮没写完。
     return StreamingResponse(_sse(relay), media_type="text/event-stream")
 
 
@@ -342,25 +336,20 @@ async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -
                 logger.info("发给页面 %s", outgoing.removesuffix("\n\n"))
                 await relay.queue.put(outgoing)
                 relay.sent = True
-                relay.started.set()
                 continue
 
             mark_finished(chat_id)
             logger.info("发给页面 %s", "data: [DONE]")
             await relay.queue.put("data: [DONE]\n\n")
             relay.sent = True
-            relay.started.set()
             break
         else:
             relay.failed = True
-            relay.started.set()
     except FastGPTError:
         relay.failed = True
-        relay.started.set()
     except Exception as exc:
         logger.error("FastGPT 读取失败 %s", chat_id, exc_info=exc)
         relay.failed = True
-        relay.started.set()
     finally:
         try:
             if relay.failed:
