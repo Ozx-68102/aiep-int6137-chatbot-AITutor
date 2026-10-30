@@ -1,4 +1,4 @@
-import {PanelLeftOpen, Send} from 'lucide-react';
+import {CircleStop, PanelLeftOpen, Send} from 'lucide-react';
 import type {SubmitEvent} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
@@ -24,6 +24,7 @@ export function ChatMain({
   sendLocked,
   onDraft,
   onSubmit,
+  onStop,
 }: {
   locale: Locale;
   sidebarOpen: boolean;
@@ -39,6 +40,7 @@ export function ChatMain({
   sendLocked: boolean;
   onDraft: (value: string) => void;
   onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
+  onStop: () => void;
 }) {
   const text = translations[locale];
 
@@ -119,19 +121,31 @@ export function ChatMain({
           disabled={inputLocked}
           onChange={(event) => onDraft(event.target.value)}
         />
-        <button
-          type="submit"
-          className={
-            sendLocked || draft.trim() === ''
-              ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
-              : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
-          }
-          aria-label={text.send}
-          title={text.send}
-          disabled={sendLocked || draft.trim() === ''}
-        >
-          <Send aria-hidden="true" />
-        </button>
+        {pending ? (
+          <button
+            type="button"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+            aria-label={text.stop}
+            title={text.stop}
+            onClick={onStop}
+          >
+            <CircleStop aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className={
+              sendLocked || draft.trim() === ''
+                ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
+                : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
+            }
+            aria-label={text.send}
+            title={text.send}
+            disabled={sendLocked || draft.trim() === ''}
+          >
+            <Send aria-hidden="true" />
+          </button>
+        )}
       </form>
     </main>
   );

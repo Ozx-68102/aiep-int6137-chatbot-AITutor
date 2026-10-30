@@ -63,6 +63,11 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await requestEmpty(`/api/sessions/${sessionId}`, {method: 'DELETE'});
 }
 
+/** 让服务器停掉这一轮的上游任务。已经写出来的半截文字留在 Redis 里。 */
+export async function abortReply(sessionId: string): Promise<void> {
+  await requestEmpty(`/api/sessions/${sessionId}/abort`, {method: 'POST'});
+}
+
 export async function createSession(title: string | null = null): Promise<SessionItem> {
   const body = await requestJson('/api/sessions', {
     method: 'POST',

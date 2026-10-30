@@ -8,20 +8,23 @@ export type ReplyOutcome =
   /** 连接断了，服务器那边可能还在写，页面要接着等。 */
   | 'interrupted'
   /** 请求没有落地，服务器那边根本没有这一轮，可以安全重发。 */
-  | 'not-started';
+  | 'not-started'
+  /** 用户按了停止，这一轮就此打住。 */
+  | 'aborted';
 
 export async function streamReply(
   chatId: string,
   message: string,
   locale: Locale,
   onDelta: (text: string) => void,
+  signal?: AbortSignal,
 ): Promise<ReplyOutcome> {
-  const outcome = await deliverReply(chatId, message, locale, onDelta);
+  const outcome = await deliverReply(chatId, message, locale, onDelta, signal);
   if (outcome !== 'not-started') {
     return outcome;
   }
   // 服务器说没有这一轮，说明请求没落地，重发一次不会生成两遍。
-  return deliverReply(chatId, message, locale, onDelta);
+  return deliverReply(chatId, message, locale, onDelta, signal);
 }
 
 async function deliverReply(
@@ -29,6 +32,7 @@ async function deliverReply(
   message: string,
   locale: Locale,
   onDelta: (text: string) => void,
+  signal?: AbortSignal,
 ): Promise<ReplyOutcome> {
   let response: Response;
   try {
@@ -37,8 +41,12 @@ async function deliverReply(
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({message, chatId, locale}),
+      signal,
     });
   } catch {
+    if (signal?.aborted) {
+      return 'aborted';
+    }
     return await outcomeAfterFailure(chatId);
   }
 
@@ -54,6 +62,9 @@ async function deliverReply(
     });
     return completed ? 'completed' : 'interrupted';
   } catch {
+    if (signal?.aborted) {
+      return 'aborted';
+    }
     if (delivered) {
       return 'interrupted';
     }
@@ -71,6 +82,9 @@ async function outcomeAfterFailure(chatId: string): Promise<ReplyOutcome> {
     const partial = await readPartial(chatId);
     if (partial.status === null) {
       return 'not-started';
+    }
+    if (partial.status === 'aborted') {
+      return 'aborted';
     }
   } catch {
     return 'interrupted';
