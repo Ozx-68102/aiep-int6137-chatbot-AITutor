@@ -317,6 +317,8 @@ async def chat(
         account = _account_from_cookie(session, login_cookie)
         _require_session(session, account, body.chat_id)
 
+    # 先登记这一轮，页面断流之后才知道请求有没有落地。
+    begin_reply(body.chat_id)
     relay = _Relay()
     task = asyncio.create_task(_relay(body.chat_id, body.message, relay, fastgpt))
     _running.add(task)
@@ -333,7 +335,6 @@ async def chat(
 
 async def _relay(chat_id: UUID, message: str, relay: _Relay, fastgpt: FastGPT) -> None:
     try:
-        begin_reply(chat_id)
         async for event in fastgpt.events(chat_id, message):
             if isinstance(event, str):
                 append_chunk(chat_id, event)
