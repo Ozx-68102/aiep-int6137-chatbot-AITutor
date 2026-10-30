@@ -783,8 +783,9 @@ export default function App() {
     try {
       partial = await readPartial(sessionId);
     } catch {
+      // 问不到服务器：不知道这一轮到底怎么样，只能报连不上。
       removeMessage(sessionId, messageId);
-      addErrorMessage(sessionId, text.replyInterrupted, locale);
+      addErrorMessage(sessionId, text.connectionError, locale);
       return;
     }
     if (partial.status === 'streaming') {
@@ -792,28 +793,52 @@ export default function App() {
       startPolling(sessionId, messageId);
       return;
     }
-    if (partial.status === 'finished') {
+    if (partial.status === 'failed') {
       applyPartialText(sessionId, messageId, partial);
+      addErrorMessage(sessionId, text.replyInterrupted, locale);
       return;
     }
-    applyPartialText(sessionId, messageId, partial);
-    if (partial.status === 'failed') {
-      addErrorMessage(sessionId, text.replyInterrupted, locale);
+    if (partial.status === 'finished') {
+      if (partial.text.trim() === lastAssistantText(sessionId)?.trim()) {
+        // Redis 里留着的是上一轮的收尾，这一轮其实没开始。
+        removeMessage(sessionId, messageId);
+        addErrorMessage(sessionId, text.connectionError, locale);
+        return;
+      }
+      applyPartialText(sessionId, messageId, partial);
       return;
     }
     removeMessage(sessionId, messageId);
     addErrorMessage(sessionId, text.replyInterrupted, locale);
   }
 
+  /** 这一场会话里最后一条助手回答，用来分辨 Redis 里那份是上一轮留下的还是这一轮的。 */
+  function lastAssistantText(sessionId: string): string | null {
+    const session = sessionsRef.current.find((item) => item.id === sessionId);
+    const messages = session?.messages ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === 'assistant') {
+        return message.text;
+      }
+    }
+    return null;
+  }
+
   async function sendQuestion(sessionId: string, question: string) {
     const assistantId = crypto.randomUUID();
     try {
       addWaitingMessage(sessionId, assistantId);
-      const completed = await streamReply(sessionId, question, locale, (chunk) => {
+      const outcome = await streamReply(sessionId, question, locale, (chunk) => {
         applyStreamText(sessionId, assistantId, chunk);
       });
-      if (!completed) {
+      if (outcome === 'interrupted') {
         await recoverReply(sessionId, assistantId);
+        return;
+      }
+      if (outcome === 'not-started') {
+        removeMessage(sessionId, assistantId);
+        addErrorMessage(sessionId, text.connectionError, locale);
       }
     } catch (error) {
       removeMessage(sessionId, assistantId);
