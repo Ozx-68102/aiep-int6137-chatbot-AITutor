@@ -74,3 +74,48 @@
 这种情况。页面靠 `/api/sessions/{会话id}/partial` 的 status 判断：`streaming` 是还在写，
 `finished` 是写完了，`failed` 是中途断了（上游报错或者连接断了）。上游失败时后端把状态写成
 `failed` 并保留已写出的文字，页面据此显示半截回答和一个红色提示。
+
+## 2026-10-30 刷新页面时，用户提问和「…」会一起消失
+
+原因不在 Redis，在前端的归位逻辑。
+
+`src/session/thread.ts` 的 `withPartial` 靠「线程里最后一条助手消息的文字是不是以 Redis 里那份
+文字开头」来判断当前这一轮对应哪条消息。刷新发生在第一块字到达之前，Redis 里的文字是空串，
+`startsWith('')` 恒成立，于是把**上一轮**的回答标成了「正在写」：
+
+- 上一轮回答有文字，「…」就不会出现（`waitingForText` 要求文字为空）；
+- 接着 `resumePartial` 找到的也是上一轮那条，轮询时新文字拼不进去（`partial.text` 不是上一轮
+  文字的开头），这一轮的回答在刷新后的页面上永远不出现；
+- 用户的提问本来就没地方存：后端只把它转发给 FastGPT，Redis 只存助手那半截文字，
+  我们自己的库里没有消息表。FastGPT 又是这一轮结束之后才把记录写进它的库。
+
+所以刷新那一刻，「你问了什么」在服务器上哪儿都没有，页面自然就空了。等到模型答完再刷新，
+FastGPT 的历史里才有这一轮，页面才恢复。
+
+日志能对上：20:15:33 发出提问，20:15:34、20:15:35、20:15:36 连续三次刷新，每次都是先读
+`/partial` 再读 `/messages`，而那一刻 `/messages` 拿不到这一轮；20:15:40 上游整段到达，
+20:15:41 `[DONE]`；20:15:42 再刷新，页面才完整。
+
+## 2026-10-30 FastGPT 的三个接口事实
+
+对着[官方对话接口文档](https://doc.fastgpt.io/zh-CN/openapi/chat)和 FastGPT 源码核过：
+
+- `DELETE {访问地址}/core/chat/history/delHistory` 的注释是 "delete single chat history (soft delete)"，
+  它把**整场会话**标记成删除，也就是清空整场上下文，没有「删一轮」这个选项。
+- 源码里另有 `core/chat/record/delete`，参数 `sourceType`、`sourceId`、`chatId`、`contentId`，
+  删的是单条聊天记录。官方文档没有列它。
+- `responseChatItemId` 会把客户端给的值当作本次回答的 ID 存进 FastGPT 的数据库（同一 chatId 下要唯一）。
+  「这一轮自己编号」这件事有位置放了。
+- chatId 传非空时，FastGPT 只把 messages 数组最后一条当用户问题，其余全部忽略；
+  chatId 不传时，它不用自己的上下文，完全靠我们传入的 messages 构造上下文。
+
+## 2026-10-30 Safari 的网站图标
+
+SVG favicon 在 Safari 26 之前一直不支持（[caniuse](https://caniuse.com/link-icon-svg)：
+Safari 3.1–18.7 不支持，26 起支持；Chrome 80 起就支持）。所以老 Safari 上 tab 里显示不出图标，
+要准备一份 PNG。
+
+另外 Safari 的 favicon 缓存是按**页面地址**记的：某个地址缓存成「没有图标」之后，
+重新加载同一个地址它也不会再取一次，换成带查询参数的地址（新的缓存键）才会重新取。
+这就是「根目录没有图标，带上 ?session=xxx 刷新才有」这种现象的来源。
+
