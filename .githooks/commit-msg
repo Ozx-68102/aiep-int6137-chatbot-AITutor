@@ -2,6 +2,7 @@
 # Conventional Commits (no scope): type: subject
 # Types: feat fix chore docs refactor test ci build perf style revert
 # Optional ! before : for breaking changes. Merge/fixup/squash/revert subjects skipped.
+# Language: the whole message must be free of Chinese characters.
 
 set -euo pipefail
 
@@ -33,6 +34,18 @@ case "$subject" in
     exit 0
     ;;
 esac
+
+# Language check: no Chinese characters anywhere in the message.
+# Git strips "#" comment lines, so they are ignored here.
+cjk_lines="$(perl -CSD -ne 'next if /^\s*#/; print "  line $.: $_" if /[\x{2E80}-\x{2EFF}\x{3000}-\x{303F}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FE30}-\x{FE4F}\x{FF00}-\x{FFEF}]/' "$msg_file" || true)"
+if [[ -n "$cjk_lines" ]]; then
+  {
+    echo "commit-msg: commit message must not contain Chinese characters:"
+    echo "$cjk_lines"
+    echo "Write the message in English."
+  } >&2
+  exit 1
+fi
 
 pattern='^(feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert)!?: .+'
 if [[ ! "$subject" =~ $pattern ]]; then
