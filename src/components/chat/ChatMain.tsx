@@ -6,16 +6,15 @@ import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
-import {ServiceNotice} from './ServiceNotice.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
+import {WarningBox, type WarningItem} from './WarningBox.tsx';
 
 export function ChatMain({
   locale,
   sidebarOpen,
   onShowSidebar,
   active,
-  notice,
-  serviceNotice,
+  warnings,
   enteringIds,
   onAnimationEnd,
   pending,
@@ -30,8 +29,7 @@ export function ChatMain({
   sidebarOpen: boolean;
   onShowSidebar: () => void;
   active: Session | undefined;
-  notice: string | null;
-  serviceNotice: string | null;
+  warnings: WarningItem[];
   enteringIds: string[];
   onAnimationEnd: (id: string) => void;
   pending: boolean;
@@ -63,16 +61,6 @@ export function ChatMain({
         </h1>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4" aria-live="polite" aria-busy={pending}>
-        {notice ? (
-          <p
-            className="mb-3 text-red-600"
-            role="alert"
-            lang={notice === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
-          >
-            {notice}
-          </p>
-        ) : null}
-        {serviceNotice ? <ServiceNotice text={serviceNotice} /> : null}
         {active && active.messages.length > 0
           ? active.messages.map((message) => {
               const textShown = visibleText(message.role, message.text);
@@ -105,48 +93,56 @@ export function ChatMain({
           <p className="m-0 text-stone-500">{text.empty}</p>
         ) : null}
       </div>
-      <form
-        className="flex items-center gap-2 border-t border-stone-300 px-4 pt-3 pb-4"
-        onSubmit={onSubmit}
-      >
-        <input
-          className={
-            inputLocked
-              ? 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5 opacity-50'
-              : 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5'
-          }
-          value={draft}
-          placeholder={text.placeholder}
-          aria-label={text.placeholder}
-          disabled={inputLocked}
-          onChange={(event) => onDraft(event.target.value)}
-        />
-        {pending ? (
-          <button
-            type="button"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            aria-label={text.stop}
-            title={text.stop}
-            onClick={onStop}
-          >
-            <CircleStop aria-hidden="true" />
-          </button>
-        ) : (
-          <button
-            type="submit"
+      <div className="border-t border-stone-300 px-4 pt-3 pb-4">
+        {warnings.map((warning) => (
+          <WarningBox
+            key={warning.id}
+            tone={warning.tone}
+            text={warning.text}
+            dismissLabel={text.close}
+            onDismiss={warning.onDismiss}
+          />
+        ))}
+        <form className="flex items-center gap-2" onSubmit={onSubmit}>
+          <input
             className={
-              sendLocked || draft.trim() === ''
-                ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
-                : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
+              inputLocked
+                ? 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5 opacity-50'
+                : 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5'
             }
-            aria-label={text.send}
-            title={text.send}
-            disabled={sendLocked || draft.trim() === ''}
-          >
-            <Send aria-hidden="true" />
-          </button>
-        )}
-      </form>
+            value={draft}
+            placeholder={text.placeholder}
+            aria-label={text.placeholder}
+            disabled={inputLocked}
+            onChange={(event) => onDraft(event.target.value)}
+          />
+          {pending ? (
+            <button
+              type="button"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+              aria-label={text.stop}
+              title={text.stop}
+              onClick={onStop}
+            >
+              <CircleStop aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className={
+                sendLocked || draft.trim() === ''
+                  ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
+                  : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
+              }
+              aria-label={text.send}
+              title={text.send}
+              disabled={sendLocked || draft.trim() === ''}
+            >
+              <Send aria-hidden="true" />
+            </button>
+          )}
+        </form>
+      </div>
     </main>
   );
 }

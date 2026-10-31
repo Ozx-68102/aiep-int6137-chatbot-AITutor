@@ -63,6 +63,7 @@ export function SessionRow({
   const [menuPoint, setMenuPoint] = useState<{top: number; right: number} | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -196,11 +197,18 @@ export function SessionRow({
         <RenameSession
           locale={locale}
           initialTitle={session.title ?? ''}
-          onCancel={() => setRenameOpen(false)}
+          error={dialogError}
+          onCancel={() => {
+            setDialogError(null);
+            setRenameOpen(false);
+          }}
           onConfirm={async (title) => {
             const saved = await onRename(title);
             if (saved) {
               setRenameOpen(false);
+            } else {
+              // 没成功：弹窗留着，错误就写在弹窗里，别让用户什么都看不到。
+              setDialogError(text.actionFailed);
             }
             return saved;
           }}
@@ -209,11 +217,17 @@ export function SessionRow({
       {deleteOpen ? (
         <ConfirmDelete
           locale={locale}
-          onCancel={() => setDeleteOpen(false)}
+          error={dialogError}
+          onCancel={() => {
+            setDialogError(null);
+            setDeleteOpen(false);
+          }}
           onConfirm={async () => {
             const removed = await onDelete();
             if (removed) {
               setDeleteOpen(false);
+            } else {
+              setDialogError(text.actionFailed);
             }
             return removed;
           }}
