@@ -179,6 +179,8 @@ v1 的路由 `projects/app/src/pages/api/v1/chat/completions.ts` 传的就是 `a
 
 对 v1 有效的停止信号只有一个：我们自己断开到上游的连接 —— 也就是我们 cancel 掉 httpx 请求时发生的事。FastGPT 在下一个节点边界停下（判据就是客户端断开），已经在跑的那个节点会跑完。
 
+（2026-10-31 更新：我们已经改走 v2，见下面「我们改用 v2/chat/completions」那条。）
+
 ## 2026-10-31 停止请求和对话请求谁先到，决定这一轮停不停得住
 
 按停止时，页面发两条请求：一条是它自己那条流的中止（浏览器本地），一条是 `POST /api/sessions/{会话id}/abort`。服务器那边只有第二种能停住上游。
@@ -250,4 +252,55 @@ FastAPI 里 `def`（同步）的接口跑在线程池里，不占事件循环；
 要开连接）；Redis 一次写入中位 **0.09 毫秒**。所以 Redis 那几处（每轮状态、半截文字）留在
 事件循环里没问题，数据库那几处值得挪走。改完之后：停止请求从发出到返回 17 毫秒，
 `/partial` 读到 `aborted`，流里没有 `[DONE]` —— 停止照旧灵。
+
+## 2026-10-31 我们改用 v2/chat/completions
+
+FastGPT 的 v1、v2 两个接口（`projects/app/src/pages/api/{v1,v2}/chat/completions.ts`）几乎
+是同一个文件：逐行 diff 下来，实质差异只有两处 —— 传给调度器的 `apiVersion`，以及节点级
+数据是运行中就写还是结束时一次写。请求体、消息解析、历史合并（最后一条当提问，其余和库里
+的历史拼接）、`responseChatItemId`→`dataId`、SSE 帧格式，全都一样。两个接口也都要求 app
+发布为 version v2（`app.version !== 'v2'` 就拒绝："您的工作流版本过低"）。
+
+`apiVersion` 只决定工作流怎么知道自己该停（`packages/service/core/workflow/dispatch/index.ts`）：
+
+- `v2`：看 Redis 标记 `agent_runtime_stopping:{appId}:{chatId}`（TTL 60 秒，每 100 毫秒轮询
+  一次），标记由 `POST {访问地址}/v2/chat/stop` 写；
+- `v1`：只看客户端连接断没断（`res.closed || res.errored`）。
+
+**v1 那套在 v2 上不管用**：v2 的判停函数根本不看连接状态。所以切到 v2 的同时必须改成
+主动叫上游停，否则停止会静默失效。
+
+实测（2026-10-31，对着真部署，同一句「写一篇 800 字左右的短文」，第 2 秒按停止）：
+
+|                            | FastGPT 那边存下来的这一轮                |
+|----------------------------|-------------------------------------------|
+| 带 `v2/chat/stop`          | 问 22 字，答 **1 字**（答案节点没跑起来） |
+| 不带（对照，把那行注释掉） | 问 22 字，答 **684 字**（整篇跑完了）     |
+
+也就是说：不主动叫停，光断连接，上游会把整篇写完 —— token 白花。
+
+另外量到的几件事：
+
+- `detail: false` 时 v1、v2 的帧一模一样（换行、整块答案、换行、收尾、`[DONE]`，共 5 帧），
+  我们前端的解析一行都不用改。
+- `detail: true` 时 v2 会多出一整套结构化事件：`flowNodeStatus`（节点名，比如
+  「準備動畫和動手活動」）、`flowNodeResponse`（每个节点的输出和耗时）、`updateVariables`、
+  `workflowDuration`、`fastAnswer`。**我们的部署已经开着运行状态**（实测这些事件现在就在发）。
+  这是后面做「图片/视频生成要等几分钟」的进度显示能用上的东西 —— 后端挑着转给页面就行，
+  不用 WebSocket。
+- 停止接口自己会等工作流收尾，最多五秒（`waitForWorkflowComplete`）。所以我们的中止接口
+  不能等它的返回：发出去就不管，页面等的是我们自己的状态。实测我们的中止接口 9～17 毫秒返回。
+- 停止接口的返回体是 FastGPT 自己的壳：`{"code":200,...,"data":{"success":true}}`，
+  成功要看 `data.success`。
+- 切到 v2 之后，历史记录变胖：v2 把节点输出一起存进记录，而
+  `core/chat/record/getPaginationRecords` 的字段是写死的（没有 `field` 参数可挑），
+  返回里会带 `responseData`。我们只解析 `value[].text.content`，用不上但要传。
+- 每轮**开始**时调度器会先删掉停止标记（"Remove stopping sign"），所以「停止信号早于上游
+  开工」那几百毫秒的窗口里标记会被抹掉、这一轮照跑。v1 没这个问题（连接断开是持续状态）。
+  那个窗口很小（上游从收到请求到开始跑工作流约 100 毫秒），而且我们的本地停止标记能兜住
+  顺序问题，页面也已经有「没能停掉」那条路。
+
+顺带看见的：工作流里已经有「有沒有上載題目圖／檔案？」和「Append validated visual after
+teacher reply」这类节点 —— 上传和出图的工作流基础可能已经有了，缺的更可能在我们这边
+（上传入口、把答案里的 markdown 变成真的图片）。
 

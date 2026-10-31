@@ -42,6 +42,15 @@ FastGPT 是内部部署的，当前基线是 **v4.14.5**（内部可能改过，
 curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
 ```
 
+## 我们走的接口
+
+- 聊天走 `POST {访问地址}/v2/chat/completions`（**v2**）。v1、v2 的请求和响应几乎一样，
+  差别在工作流怎么判停：v2 看 Redis 里的运行态标记，v1 只看客户端连接断没断。
+- 停止上游要另外调 `POST {访问地址}/v2/chat/stop`，body 是 `{appId, chatId}`。**光断连接
+  在 v2 上停不住上游**（实测：不叫停的话，上游会把整篇答案写完）。这个接口自己最多等五秒，
+  所以调用方不要等它的返回。
+- 依据和实测见 [docs/FINDINGS.md](../docs/FINDINGS.md) 的「我们改用 v2/chat/completions」。
+
 ## 边界
 - 没有我的明确许可，不要动手实现：我回答你的问题、给你补充信息，都不算许可；只有我明确表示可以动手了，
   才动手。在那之前只做只读的事，不写文件、不改代码、不跑会改动仓库的命令
