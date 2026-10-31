@@ -6,6 +6,7 @@ import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
+import {FailedReply} from './FailedReply.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
 import {WarningBox, type WarningItem} from './WarningBox.tsx';
 
@@ -24,6 +25,7 @@ export function ChatMain({
   onDraft,
   onSubmit,
   onStop,
+  onRetry,
 }: {
   locale: Locale;
   sidebarOpen: boolean;
@@ -39,6 +41,7 @@ export function ChatMain({
   onDraft: (value: string) => void;
   onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
   onStop: () => void;
+  onRetry: (turnId: string) => void;
 }) {
   const text = translations[locale];
 
@@ -73,6 +76,20 @@ export function ChatMain({
                     key={message.id}
                     entering={enteringIds.includes(message.id)}
                     label={text.thinking}
+                    onAnimationEnd={() => onAnimationEnd(message.id)}
+                  />
+                );
+              }
+              if (message.role === 'error' && message.turnId !== undefined) {
+                return (
+                  <FailedReply
+                    key={message.id}
+                    text={textShown}
+                    retryLabel={text.retry}
+                    entering={enteringIds.includes(message.id)}
+                    onRetry={() => {
+                      onRetry(message.turnId ?? '');
+                    }}
                     onAnimationEnd={() => onAnimationEnd(message.id)}
                   />
                 );

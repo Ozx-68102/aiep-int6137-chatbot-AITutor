@@ -73,6 +73,8 @@ class HistoryMessageResponse(BaseModel):
     text: str
     turn_id: str | None = None
     waiting: bool = False
+    # 这一轮写到一半断了。页面靠它显示「消息生成失败」和重试按钮。
+    failed: bool = False
 
 
 class HistoryResponse(BaseModel):
@@ -87,6 +89,8 @@ class ChatRequest(BaseModel):
     chat_id: UUID = Field(alias="chatId")
     turn_id: UUID = Field(alias="turnId")
     locale: str | None = None
+    # 重发哪一轮：带着它就是把上一轮删掉，重新答一遍同一句提问。
+    retry_of: UUID | None = Field(default=None, alias="retryOf")
 
 
 class AbortRequest(BaseModel):

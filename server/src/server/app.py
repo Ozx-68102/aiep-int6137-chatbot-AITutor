@@ -28,6 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from server.db import Account, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
 from server.reply_store import (
+    FAILED,
     STREAMING,
     PartialReply,
     append_chunk,
@@ -374,17 +375,25 @@ async def read_session_messages(
     return HistoryResponse(total=len(messages), messages=messages)
 
 
-async def _session_records(session_id: UUID, fastgpt: FastGPT) -> list[ChatRecord]:
+async def _session_records(
+    session_id: UUID,
+    fastgpt: FastGPT,
+    cached: bool = True,
+) -> list[ChatRecord]:
     """一场会话的全部历史。
 
     刷新一次页面就要读一次历史，刷新得急了会把上游打垮（实测：上游连不上了，
     每次失败在日志里留下两百多行）。这里留几秒的缓存：刷新多少次，
     上游就只被问一次。
+
+    找记录要删的时候不能读缓存：缓存里可能是这一轮之前的那份，
+    少了刚写上去的那条。
     """
     now = time.monotonic()
-    cached = _records_cache.get(session_id)
-    if cached is not None and now - cached[0] < _RECORDS_CACHE_SECONDS:
-        return cached[1]
+    if cached:
+        stored = _records_cache.get(session_id)
+        if stored is not None and now - stored[0] < _RECORDS_CACHE_SECONDS:
+            return stored[1]
 
     records: list[ChatRecord] = []
     offset = 0
@@ -451,9 +460,60 @@ def _merge_current_turn(
             text=partial.text,
             turn_id=partial.turn_id,
             waiting=partial.status == STREAMING,
+            failed=partial.status == FAILED,
         )
     )
     return messages
+
+
+async def _clear_failed_turn(
+    chat_id: UUID,
+    turn_id: UUID,
+    question: str,
+    fastgpt: FastGPT,
+) -> None:
+    """删掉上一轮在上游留下的记录。
+
+    重发的是同一句提问，上游会再记一遍。不删的话，历史里就有两遍问答。
+    回答那一条的编号是我们给的（responseChatItemId），提问那一条要从记录里找。
+    """
+    try:
+        records = await _session_records(chat_id, fastgpt, cached=False)
+    except FastGPTError:
+        logger.warning("读不到上游记录，重发的这一轮删不掉旧的 %s", chat_id)
+        return
+
+    content_ids = _failed_turn_content_ids(records, str(turn_id), question)
+    for content_id in content_ids:
+        if not await fastgpt.delete_item(chat_id, content_id):
+            logger.warning("删不掉上游记录 %s", content_id)
+    if content_ids:
+        _records_cache.pop(chat_id, None)
+
+
+def _failed_turn_content_ids(
+    records: list[ChatRecord],
+    turn_id: str,
+    question: str,
+) -> list[str]:
+    """要删的记录：回答（我们的编号）和它前面那条提问。"""
+    for index, record in enumerate(records):
+        if record.role != "assistant" or record.id != turn_id:
+            continue
+        ids = [record.id]
+        if index > 0 and records[index - 1].role == "user":
+            ids.append(records[index - 1].id)
+        return ids
+
+    # 回答没写下来（上游在写之前就断了）：提问那条还在。
+    # 只有它就是最后一条记录时才删：这一轮是最近的一轮，
+    # 失败以后用户又问了别的，那条记录就不是我们的，不能删。
+    if not records:
+        return []
+    last = records[-1]
+    if last.role == "user" and last.text.strip() == question.strip():
+        return [last.id]
+    return []
 
 
 @app.post("/api/chat")
@@ -467,12 +527,21 @@ async def chat(
 
     await asyncio.to_thread(_authorize_session, body.chat_id, login_cookie)
 
+    turn_id = str(body.turn_id)
+
+    # 同一个请求又来了（重复点击、页面重发）：这一轮已经登记过了，
+    # 不能再开一轮，不然上游会生成两遍。
+    if current_turn_id(body.chat_id) == turn_id:
+        if round_in_flight(body.chat_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
+        logger.info("这一轮已经登记过 %s，不再重开", body.chat_id)
+        return StreamingResponse(_empty_sse(), media_type="text/event-stream")
+
     # 同一场会话同时只跑一轮。上一轮还在写的时候再发一次，
     # FastGPT 那边会多出一轮，Redis 里的半截文字也会被清掉重来，两轮的片段交错着写。
     if round_in_flight(body.chat_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
 
-    turn_id = str(body.turn_id)
     if stop_requested(body.chat_id, turn_id):
         # 用户在对话请求到达之前就按了停止：这一轮不开。
         # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」。
@@ -480,6 +549,10 @@ async def chat(
         mark_aborted(body.chat_id)
         logger.info("这一轮发出之前就被停止 %s", body.chat_id)
         return StreamingResponse(_empty_sse(), media_type="text/event-stream")
+
+    # 重发：把上一轮在上游留下的记录删掉，历史里才不会出现两遍问答。
+    if body.retry_of is not None:
+        await _clear_failed_turn(body.chat_id, body.retry_of, body.message, fastgpt)
 
     # 先登记这一轮，页面断流之后才知道请求有没有落地。
     begin_reply(body.chat_id, turn_id, body.message)

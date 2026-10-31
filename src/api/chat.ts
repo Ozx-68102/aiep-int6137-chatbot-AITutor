@@ -21,13 +21,14 @@ export async function streamReply(
   turnId: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  retryOf?: string,
 ): Promise<ReplyOutcome> {
-  const outcome = await deliverReply(chatId, message, locale, turnId, onDelta, signal);
+  const outcome = await deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf);
   if (outcome !== 'not-started') {
     return outcome;
   }
   // 服务器说没有这一轮，说明请求没落地，重发一次不会生成两遍。
-  return deliverReply(chatId, message, locale, turnId, onDelta, signal);
+  return deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf);
 }
 
 async function deliverReply(
@@ -37,6 +38,7 @@ async function deliverReply(
   turnId: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  retryOf?: string,
 ): Promise<ReplyOutcome> {
   let response: Response;
   try {
@@ -44,7 +46,7 @@ async function deliverReply(
       method: 'POST',
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message, chatId, locale, turnId}),
+      body: JSON.stringify({message, chatId, locale, turnId, retryOf}),
       signal,
     });
   } catch {
