@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -401,55 +401,9 @@ async def _backfill_session(session_id: UUID) -> list[chat_log.StoredMessage]:
         ) from None
 
     await asyncio.to_thread(
-        chat_log.backfill, session_id, _rounds_from_records(records)
+        chat_log.backfill, session_id, chat_log.rounds_from_records(records)
     )
     return await asyncio.to_thread(chat_log.read_messages, session_id)
-
-
-def _rounds_from_records(records: list[ChatRecord]) -> list[chat_log.StoredRound]:
-    """上游的记录整理成一轮一轮的问答。
-
-    上游那一份：回答的编号是我们给的（responseChatItemId），提问的编号是它自己的。
-    提问跟回答按先后顺序配对。
-    """
-    rounds: list[chat_log.StoredRound] = []
-    question = ""
-    has_question = False
-    for record in records:
-        if record.role == "user":
-            question = record.text
-            has_question = True
-            continue
-        rounds.append(
-            chat_log.StoredRound(
-                turn_id=_turn_id_of(record.id),
-                question=question if has_question else "",
-                answer=record.text,
-                status=chat_log.COMPLETED,
-            )
-        )
-        question = ""
-        has_question = False
-
-    if has_question:
-        # 只有提问没有回答：那一轮被按了停止，上游只记下了提问。
-        rounds.append(
-            chat_log.StoredRound(
-                turn_id=uuid4(),
-                question=question,
-                answer=None,
-                status=chat_log.ABORTED,
-            )
-        )
-    return rounds
-
-
-def _turn_id_of(record_id: str) -> UUID:
-    """上游那条回答记录的编号就是我们的轮次编号。不是编号的另给一个。"""
-    try:
-        return UUID(record_id)
-    except ValueError:
-        return uuid4()
 
 
 async def _session_records(

@@ -15,13 +15,14 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from server.db import ChatMessage, db_session
+from server.fastgpt import ChatRecord
 
 logger = logging.getLogger("server.chat_log")
 
@@ -180,6 +181,52 @@ def backfill(session_id: UUID, rounds: list[StoredRound]) -> None:
                 seq += 1
 
     _write("backfill", session_id, action)
+
+
+def rounds_from_records(records: list[ChatRecord]) -> list[StoredRound]:
+    """上游的记录整理成一轮一轮的问答。
+
+    上游那一份：回答的编号是我们给的（responseChatItemId），提问的编号是它自己的。
+    提问跟回答按先后顺序配对。
+    """
+    rounds: list[StoredRound] = []
+    question = ""
+    has_question = False
+    for record in records:
+        if record.role == "user":
+            question = record.text
+            has_question = True
+            continue
+        rounds.append(
+            StoredRound(
+                turn_id=_turn_id_of(record.id),
+                question=question if has_question else "",
+                answer=record.text,
+                status=COMPLETED,
+            )
+        )
+        question = ""
+        has_question = False
+
+    if has_question:
+        # 只有提问没有回答：那一轮被按了停止，上游只记下了提问。
+        rounds.append(
+            StoredRound(
+                turn_id=uuid4(),
+                question=question,
+                answer=None,
+                status=ABORTED,
+            )
+        )
+    return rounds
+
+
+def _turn_id_of(record_id: str) -> UUID:
+    """上游那条回答记录的编号就是我们的轮次编号。不是编号的另给一个。"""
+    try:
+        return UUID(record_id)
+    except ValueError:
+        return uuid4()
 
 
 def _write(
