@@ -29,6 +29,8 @@ import {chatFrameClass} from './components/shell/frame-class.ts';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast} from './components/toast/Toast.tsx';
 import {translations} from './i18n.ts';
+import {clearCachedProfile, readCachedProfile, saveCachedProfile} from './session/profile-cache.ts';
+import type {CachedProfile} from './session/profile-cache.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
@@ -47,7 +49,7 @@ function serviceNoticeText(
   copy: (typeof translations)[Locale],
 ): string | null {
   if (state === 'unreachable') {
-    return copy.connectionError;
+    return copy.connectionRetry;
   }
   if (state === 'database') {
     return copy.serviceUnavailable;
@@ -59,7 +61,8 @@ function serviceNoticeText(
 }
 
 export default function App() {
-  const [locale, setLocale] = useState<Locale>(localeFromSystem);
+  const [cachedProfile] = useState<CachedProfile | null>(() => readCachedProfile());
+  const [locale, setLocale] = useState<Locale>(() => cachedProfile?.locale ?? localeFromSystem());
   const [auth, setAuth] = useState<'checking' | 'anonymous' | 'ready'>('checking');
   const [loginOffline, setLoginOffline] = useState(false);
   const [loginDetail, setLoginDetail] = useState<string | null>(null);
@@ -80,7 +83,7 @@ export default function App() {
   const [sessionWarning, setSessionWarning] = useState<{sessionId: string; text: string} | null>(
     null,
   );
-  const [username, setUsername] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(() => cachedProfile?.username ?? null);
   const [view, setView] = useState<'chat' | 'profile'>('chat');
   const [composingNew, setComposingNew] = useState(false);
   const [sendingNew, setSendingNew] = useState(false);
@@ -94,6 +97,7 @@ export default function App() {
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
   const [serviceState, setServiceState] = useState<ServiceState>('ok');
+  const serviceStateRef = useRef<ServiceState>('ok');
   const sendingRef = useRef<Set<string>>(new Set());
   const aborters = useRef(new Map<string, {controller: AbortController; turnId: string}>());
   const stoppers = useRef(new Map<string, Promise<void>>());
@@ -249,6 +253,7 @@ export default function App() {
         if (profile) {
           setUsername(profile.username);
           setLocale(profile.locale);
+          saveCachedProfile({username: profile.username, locale: profile.locale});
         }
         setAuth('ready');
       },
@@ -261,9 +266,10 @@ export default function App() {
           return;
         }
         if (connectionFailure(error)) {
-          const initial = localeFromSystem();
+          // 接口服务连不上：登录状态还在（cookie 还在），聊天区照常开着，
+          // 只在聊天区上方报一次连不上。用户名字和语言用本地记着的那份。
           setComposingNew(true);
-          setNotice(translations[initial].connectionRetry);
+          markService('unreachable');
           setAuth('ready');
           return;
         }
@@ -293,16 +299,21 @@ export default function App() {
         if (stopped) {
           return;
         }
+        const wasDown = serviceStateRef.current === 'unreachable';
         if (status.reply_store === 'unavailable') {
-          setServiceState('store');
+          markService('store');
         } else if (status.database === 'unavailable') {
-          setServiceState('database');
+          markService('database');
         } else {
-          setServiceState('ok');
+          markService('ok');
+        }
+        if (wasDown) {
+          // 服务器刚回来：把会话列表和用户信息补上。
+          void refreshWorkspace();
         }
       } catch {
         if (!stopped) {
-          setServiceState('unreachable');
+          markService('unreachable');
         }
       }
     };
@@ -377,8 +388,34 @@ export default function App() {
   }
 
   function showConnectionWarning() {
-    // 连不上服务器也走聊天区顶部的警示框，不再单独弹一个浮层。
-    setNotice((current) => current ?? text.connectionRetry);
+    // 连不上服务器归到服务状态里：聊天区上方只出一个框，不重复报两遍。
+    markService('unreachable');
+  }
+
+  function markService(state: ServiceState) {
+    serviceStateRef.current = state;
+    setServiceState(state);
+  }
+
+  /** 服务器回来了：把会话列表和用户信息补上，不用用户手动刷新页面。 */
+  async function refreshWorkspace(): Promise<void> {
+    try {
+      const items = await listSessions();
+      setSessions(sessionsFromList(items));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+      }
+      return;
+    }
+    try {
+      const profile = await readProfile();
+      setUsername(profile.username);
+      setLocale(profile.locale);
+      saveCachedProfile({username: profile.username, locale: profile.locale});
+    } catch {
+      return;
+    }
   }
 
   function openSidebar() {
@@ -407,6 +444,7 @@ export default function App() {
     setDraft('');
     setNotice(null);
     setUsername(null);
+    clearCachedProfile();
     setView('chat');
     setComposingNew(false);
     setConfirmLogout(false);
@@ -480,6 +518,7 @@ export default function App() {
       .then((profile) => {
         setUsername(profile.username);
         setLocale(profile.locale);
+        saveCachedProfile({username: profile.username, locale: profile.locale});
       })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 401) {
@@ -535,6 +574,7 @@ export default function App() {
       const profile = await updateProfile(next);
       setUsername(profile.username);
       setLocale(profile.locale);
+      saveCachedProfile({username: profile.username, locale: profile.locale});
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
