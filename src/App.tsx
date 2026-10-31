@@ -67,7 +67,12 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => !window.matchMedia('(max-width: 767px)').matches,
   );
-  const narrow = useNarrowScreen(() => setSidebarOpen(false));
+  // 用户在宽屏上想看到的侧边栏状态。窄屏自动收起只是临时的，不改它。
+  const sidebarWanted = useRef(sidebarOpen);
+  const narrow = useNarrowScreen(() => {
+    // 窄屏自动收起：不改用户的偏好，窗口拉宽之后按偏好恢复。
+    setSidebarOpen(false);
+  });
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -134,6 +139,13 @@ export default function App() {
     document.documentElement.lang = htmlLang[locale];
     document.title = 'H^2 Bot';
   }, [locale]);
+
+  useEffect(() => {
+    // 窗口从窄变宽：按用户之前的偏好把侧边栏恢复回去。
+    if (!narrow) {
+      setSidebarOpen(sidebarWanted.current);
+    }
+  }, [narrow]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -367,6 +379,19 @@ export default function App() {
   function showConnectionWarning() {
     // 连不上服务器也走聊天区顶部的警示框，不再单独弹一个浮层。
     setNotice((current) => current ?? text.connectionRetry);
+  }
+
+  function openSidebar() {
+    sidebarWanted.current = true;
+    setSidebarOpen(true);
+  }
+
+  function closeSidebar() {
+    // 窄屏上侧边栏是浮层，关掉它不代表用户想在宽屏上也收起。
+    if (!narrow) {
+      sidebarWanted.current = false;
+    }
+    setSidebarOpen(false);
   }
 
   /** 成功之后的短提示：弹窗自己关了，得有个地方告诉用户「成了」。 */
@@ -1152,7 +1177,9 @@ export default function App() {
         settingsOpen={view === 'profile'}
         username={username}
         onCreate={addSession}
-        onClose={() => setSidebarOpen(false)}
+        onClose={() => {
+          closeSidebar();
+        }}
         onOpenSession={openSession}
         onRename={(id, title) => renameOpenSession(id, title)}
         onDelete={(id) => removeSession(id)}
@@ -1168,7 +1195,9 @@ export default function App() {
       <ChatMain
         locale={locale}
         sidebarOpen={sidebarOpen}
-        onShowSidebar={() => setSidebarOpen(true)}
+        onShowSidebar={() => {
+          openSidebar();
+        }}
         active={active}
         warnings={warnings}
         enteringIds={enteringIds}
@@ -1187,45 +1216,42 @@ export default function App() {
           }
         }}
       />
-      {view === 'profile' ? (
-        <SettingsModal
-          locale={locale}
-          username={username}
-          error={confirmLogout ? null : profileError}
-          saving={savingLocale}
-          onLocale={(next) => {
-            void changeLocale(next);
-          }}
-          onLogout={() => setConfirmLogout(true)}
-          onClose={() => {
-            setConfirmLogout(false);
-            setProfileError(null);
-            setView('chat');
-          }}
-        />
-      ) : null}
-      {confirmLogout ? (
-        <ConfirmLogout
-          locale={locale}
-          error={profileError}
-          loggingOut={loggingOut}
-          onCancel={() => {
-            setProfileError(null);
-            setConfirmLogout(false);
-          }}
-          onConfirm={() => {
-            void signOut();
-          }}
-        />
-      ) : null}
-      {toast === null ? null : (
-        <Toast
-          key={toast.id}
-          message={toast.text}
-          lang={toast.lang}
-          onDismiss={() => setToast(null)}
-        />
-      )}
+      <SettingsModal
+        locale={locale}
+        open={view === 'profile'}
+        username={username}
+        error={confirmLogout ? null : profileError}
+        saving={savingLocale}
+        onLocale={(next) => {
+          void changeLocale(next);
+        }}
+        onLogout={() => setConfirmLogout(true)}
+        onClose={() => {
+          setConfirmLogout(false);
+          setProfileError(null);
+          setView('chat');
+        }}
+      />
+      <ConfirmLogout
+        locale={locale}
+        open={confirmLogout}
+        error={profileError}
+        loggingOut={loggingOut}
+        onCancel={() => {
+          setProfileError(null);
+          setConfirmLogout(false);
+        }}
+        onConfirm={() => {
+          void signOut();
+        }}
+      />
+      <Toast
+        message={toast?.text ?? null}
+        lang={toast?.lang ?? htmlLang[locale]}
+        onDismiss={() => {
+          setToast(null);
+        }}
+      />
     </div>
   );
 }
