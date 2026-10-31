@@ -1,4 +1,5 @@
 from server.types.api import (
+    AbortRequest,
     ChatRequest,
     HistoryMessageResponse,
     HistoryResponse,
@@ -16,6 +17,7 @@ from server.types.api import (
 from server.types.env import Settings, empty_fastgpt_fields
 
 __all__ = [
+    "AbortRequest",
     "ChatRequest",
     "HistoryMessageResponse",
     "HistoryResponse",

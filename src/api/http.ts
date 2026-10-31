@@ -39,7 +39,10 @@ export async function withConnectionRetry<T>(run: () => Promise<T>): Promise<T> 
   throw new ApiError(0, null);
 }
 
-export async function requestEmpty(path: string, init?: {method?: string}): Promise<void> {
+export async function requestEmpty(
+  path: string,
+  init?: {method?: string; body?: string},
+): Promise<void> {
   await withConnectionRetry(async () => {
     const response = await request(path, init);
     if (response.status === 204) {

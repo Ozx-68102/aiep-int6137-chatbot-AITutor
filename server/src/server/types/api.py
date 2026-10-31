@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -87,3 +87,17 @@ class ChatRequest(BaseModel):
     chat_id: UUID = Field(alias="chatId")
     turn_id: UUID = Field(alias="turnId")
     locale: str | None = None
+
+
+class AbortRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    turn_id: UUID | None = Field(default=None, alias="turnId")
+
+    @field_validator("turn_id", mode="before")
+    @classmethod
+    def _empty_turn_id(cls, value: object) -> object:
+        # 页面没有这一轮编号时传空串，这里当成没有。
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
