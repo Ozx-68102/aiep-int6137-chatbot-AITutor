@@ -7,6 +7,7 @@ import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
 import {FailedReply} from './FailedReply.tsx';
+import {MarkdownText} from './MarkdownText.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
 import {WarningBox, type WarningItem} from './WarningBox.tsx';
 
@@ -92,6 +93,18 @@ export function ChatMain({
                     }}
                     onAnimationEnd={() => onAnimationEnd(message.id)}
                   />
+                );
+              }
+              if (message.role === 'assistant') {
+                return (
+                  <div
+                    key={message.id}
+                    lang={message.locale ? htmlLang[message.locale] : undefined}
+                    className={bubbleClass(message.role, enteringIds.includes(message.id))}
+                    onAnimationEnd={() => onAnimationEnd(message.id)}
+                  >
+                    <MarkdownText text={textShown} />
+                  </div>
                 );
               }
               return (
