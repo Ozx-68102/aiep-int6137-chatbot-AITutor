@@ -425,3 +425,29 @@ cannot be hard linked from it into this project. Using the store at …」。
 - **助手回答的气泡从 `<p>` 换成 `<div>`**：`<p>` 里不能放列表、表格这些块级元素。
 - **包不小**：加上这两个依赖，产物里的 js 从 278 kB（gzip 85 kB）涨到 441 kB（gzip 134 kB）。
 
+## 2026-10-31 公式要另外一层：remark-math + rehype-katex
+
+Markdown 里没有公式。`$a^2 + b^2 = c^2$` 这种写法，Markdown 只会当普通文本显示。
+现在加 `remark-math`（认出 `$...$` 和 `$$...$$`）和 `rehype-katex`（用 KaTeX 排版）。
+
+实测出来的几点：
+
+- **KaTeX 的样式可以直接在 `src/index.css` 里 `@import 'katex/dist/katex.min.css';`**：
+  Tailwind v4 能解析包里的路径，不用改 `tsconfig.json`。
+- **公式写错不会炸页面**。`rehype-katex` 自己接住 KaTeX 的报错，改用宽松模式再排一次，
+  出错时把原文显示出来；我们把 `errorColor` 设成 `currentColor`，出错时颜色跟正文一样，
+  不会变成一片红。
+- **`$` 会被吃掉**：中文回答里写「$5 和 $10」这种价格，`remark-math` 会把中间那段
+  当成公式，美元符号消失、公式按数学字体显示。这是这套东西的固有毛病，改不掉
+  （要避开只能不用单美元符号的公式，我们上游正是用单美元符号写的）。
+- **流式输出时公式会跳一下**：公式没写完的时候前半段按普通文字显示，
+  闭合的 `$` 到了才变成公式。
+- **体积**：js 从 441 kB（gzip 134 kB）涨到 716 kB（gzip 217 kB），css 多 23 kB。
+  dist 里还会多出 KaTeX 的字体文件（20 个字体、woff2/woff/ttf 三份加起来约 800 kB），
+  浏览器实际只下载用得上的那一两个 woff2。`pnpm build` 会提示 chunk 超过 500 kB。
+- **行内公式的字号调小了一点**：KaTeX 自带样式把行内公式放成 1.21 倍字号，
+  我们在 `src/components/chat/markdown.css` 里改成 1.05 倍，跟正文齐平。
+
+对着真部署的「测试版本」会话验过：第三条回答里的 `$a^2 + b^2 = c^2$`、`$a$`、`$b$`、`$c$`
+都排出来了，没有报错元素。
+

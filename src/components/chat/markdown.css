@@ -169,3 +169,15 @@
   background-color: var(--color-stone-200);
   font-weight: 600;
 }
+
+/* 公式。KaTeX 自带的样式把行内公式放得比正文大，这里收一点。 */
+.markdown .katex {
+  font-size: 1.05em;
+}
+
+.markdown .katex-display {
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.125rem;
+}
