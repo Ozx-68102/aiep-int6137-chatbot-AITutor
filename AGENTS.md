@@ -32,6 +32,8 @@
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts`
   里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上
   `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
+- 用户名和语言另外记在 localStorage 的 `h2bot-profile` 里（`src/session/profile-cache.ts`）：
+  接口服务连不上的时候靠它撑住「我是谁、我用哪种语言」，退出登录要清掉。别当成冗余删了
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
 - 格式交给工具：写完跑对应的 fmt 命令，不要手动跟格式较劲
 - 文档和对话都用平常话，不用自造词和行话
