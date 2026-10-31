@@ -75,6 +75,8 @@ class HistoryMessageResponse(BaseModel):
     waiting: bool = False
     # 这一轮写到一半断了。页面靠它显示「消息生成失败」和重试按钮。
     failed: bool = False
+    # 这一轮被用户按了停止。页面靠它标出「已停止」。
+    aborted: bool = False
 
 
 class HistoryResponse(BaseModel):

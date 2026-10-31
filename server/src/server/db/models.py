@@ -7,7 +7,10 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
+    Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -85,3 +88,38 @@ class LoginToken(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     account: Mapped[Account] = relationship()
+
+
+class ChatMessage(Base):
+    """一场会话里的消息。
+
+    FastGPT 那边也有一份，但那是它工作流的副产品：它清库就没了，
+    被按停止的那一轮还会留下一条只有提问的记录。这里存一份我们自己说了算的，
+    页面上的历史从这份来。
+    """
+
+    __tablename__ = "message"
+    __table_args__ = (
+        Index("message_session_id_seq_idx", "session_id", "seq"),
+        UniqueConstraint(
+            "session_id",
+            "turn_id",
+            "role",
+            name="message_session_turn_role_key",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("session.id"))
+    # 这一轮的编号。跟 FastGPT 那边的回答记录（dataId）是同一个值。
+    turn_id: Mapped[UUID] = mapped_column(Uuid)
+    role: Mapped[str] = mapped_column(String(16))
+    text: Mapped[str] = mapped_column(Text)
+    # 这一轮的状态：streaming（还在写）、completed、failed、aborted。
+    status: Mapped[str] = mapped_column(String(16))
+    # 会话里的先后顺序。同一轮的提问和回答各占一个号。
+    seq: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

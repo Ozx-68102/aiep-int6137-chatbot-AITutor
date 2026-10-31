@@ -96,14 +96,30 @@ export function ChatMain({
                 );
               }
               if (message.role === 'assistant') {
+                const entering = enteringIds.includes(message.id);
                 return (
-                  <div
-                    key={message.id}
-                    lang={message.locale ? htmlLang[message.locale] : undefined}
-                    className={bubbleClass(message.role, enteringIds.includes(message.id))}
-                    onAnimationEnd={() => onAnimationEnd(message.id)}
-                  >
-                    <MarkdownText text={textShown} />
+                  <div key={message.id}>
+                    {textShown === '' ? null : (
+                      <div
+                        lang={message.locale ? htmlLang[message.locale] : undefined}
+                        className={bubbleClass(message.role, entering)}
+                        onAnimationEnd={() => onAnimationEnd(message.id)}
+                      >
+                        <MarkdownText text={textShown} />
+                      </div>
+                    )}
+                    {message.aborted === true ? (
+                      <p
+                        className={
+                          entering
+                            ? 'mb-3 m-0 animate-in text-sm text-stone-500 fade-in duration-200'
+                            : 'mb-3 m-0 text-sm text-stone-500'
+                        }
+                        onAnimationEnd={() => onAnimationEnd(message.id)}
+                      >
+                        {text.replyStopped}
+                      </p>
+                    ) : null}
                   </div>
                 );
               }

@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -25,9 +25,11 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from server.db import Account, ChatSession, LoginToken, db_session
+from server import chat_log
+from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
 from server.reply_store import (
+    ABORTED,
     FAILED,
     STREAMING,
     PartialReply,
@@ -88,6 +90,8 @@ _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
 _stop_tasks: set[asyncio.Task[None]] = set()
+# 每一轮落定以后写库的任务。单独放着：写库不能被那一轮的取消带跑。
+_settle_tasks: set[asyncio.Task[None]] = set()
 # 失败时叫停的那几下：要等它们落地（停止标记晚到的话，
 # 新开的那一轮会被自己人写的标记掐掉）。
 _pending_stops: dict[UUID, set[asyncio.Task[None]]] = {}
@@ -102,6 +106,10 @@ class _Relay:
         self.queue: asyncio.Queue[str | None] = asyncio.Queue()
         self.failed = False
         self.sent = False
+        # 这一轮已经写出来的文字。落库的时候要写它。
+        self.text = ""
+        # 这一轮最后的状态：写完了、被停了、还是失败了。
+        self.status = chat_log.COMPLETED
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -362,11 +370,28 @@ async def read_session_messages(
     session_id: UUID,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> HistoryResponse:
-    """一场会话的完整线程：FastGPT 的历史，加上正在写的这一轮。"""
-    fastgpt = _fastgpt()
+    """一场会话的完整线程：我们自己存的记录，加上正在写的这一轮。
 
+    历史来自我们自己的表，不是 FastGPT：它清库、上游挂掉，页面照样看得见。
+    老会话第一次读到的时候，把上游那一份抄一份过来。
+    """
     await asyncio.to_thread(_authorize_session, session_id, login_cookie)
 
+    stored = await asyncio.to_thread(chat_log.read_messages, session_id)
+    if not stored:
+        stored = await _backfill_session(session_id)
+
+    messages = _merge_current_turn(stored, read_partial(session_id))
+    return HistoryResponse(total=len(messages), messages=messages)
+
+
+async def _backfill_session(session_id: UUID) -> list[chat_log.StoredMessage]:
+    """把上游那一份抄进我们自己的表。
+
+    我们有了这张表以后，老会话还没有记录。抄一份过来之后，
+    页面的历史就从我们这份来了。
+    """
+    fastgpt = _fastgpt()
     try:
         records = await _session_records(session_id, fastgpt)
     except FastGPTError:
@@ -375,8 +400,56 @@ async def read_session_messages(
             _UPSTREAM_ERROR,
         ) from None
 
-    messages = _merge_current_turn(records, read_partial(session_id))
-    return HistoryResponse(total=len(messages), messages=messages)
+    await asyncio.to_thread(
+        chat_log.backfill, session_id, _rounds_from_records(records)
+    )
+    return await asyncio.to_thread(chat_log.read_messages, session_id)
+
+
+def _rounds_from_records(records: list[ChatRecord]) -> list[chat_log.StoredRound]:
+    """上游的记录整理成一轮一轮的问答。
+
+    上游那一份：回答的编号是我们给的（responseChatItemId），提问的编号是它自己的。
+    提问跟回答按先后顺序配对。
+    """
+    rounds: list[chat_log.StoredRound] = []
+    question = ""
+    has_question = False
+    for record in records:
+        if record.role == "user":
+            question = record.text
+            has_question = True
+            continue
+        rounds.append(
+            chat_log.StoredRound(
+                turn_id=_turn_id_of(record.id),
+                question=question if has_question else "",
+                answer=record.text,
+                status=chat_log.COMPLETED,
+            )
+        )
+        question = ""
+        has_question = False
+
+    if has_question:
+        # 只有提问没有回答：那一轮被按了停止，上游只记下了提问。
+        rounds.append(
+            chat_log.StoredRound(
+                turn_id=uuid4(),
+                question=question,
+                answer=None,
+                status=chat_log.ABORTED,
+            )
+        )
+    return rounds
+
+
+def _turn_id_of(record_id: str) -> UUID:
+    """上游那条回答记录的编号就是我们的轮次编号。不是编号的另给一个。"""
+    try:
+        return UUID(record_id)
+    except ValueError:
+        return uuid4()
 
 
 async def _session_records(
@@ -423,25 +496,48 @@ def _drop_stale_records(now: float) -> None:
 
 
 def _merge_current_turn(
-    records: list[ChatRecord],
+    stored: list[chat_log.StoredMessage],
     partial: PartialReply,
 ) -> list[HistoryMessageResponse]:
     """把 Redis 里当前这一轮接在历史后面。
 
-    历史来自 FastGPT：写完的轮次都在里面。正在写的那一轮还没落库，
-    刷新以后要靠 Redis 里这份把它补回来，这样用户提问和三个点都还在。
+    历史来自我们自己存的表：写完的轮次都在里面。正在写的那一轮还没落定，
+    Redis 里那份更新（有半截文字），用它把表里那一条补上。
     """
     messages = [
-        HistoryMessageResponse(id=item.id, role=item.role, text=item.text)
-        for item in records
+        HistoryMessageResponse(
+            id=item.id,
+            role=item.role,
+            text=item.text,
+            turn_id=item.turn_id,
+            waiting=item.status == chat_log.STREAMING,
+            failed=item.status == chat_log.FAILED,
+            aborted=item.status == chat_log.ABORTED,
+        )
+        for item in stored
     ]
     if partial.turn_id is None:
         return messages
 
-    # 这一轮已经落在 FastGPT 的历史里了（回答的编号就是我们的编号），不用再补。
-    if any(item.id == partial.turn_id for item in messages):
+    for index, item in enumerate(messages):
+        if item.turn_id != partial.turn_id or item.role != "assistant":
+            continue
+        if not item.waiting:
+            # 这一轮在我们自己的表里已经落定了：表里的是最终状态。
+            return messages
+        # 这一轮还在写：Redis 里的半截文字比表里的空位新。
+        messages[index] = item.model_copy(
+            update={
+                "text": partial.text,
+                "waiting": partial.status == STREAMING,
+                "failed": partial.status == FAILED,
+                "aborted": partial.status == ABORTED,
+            }
+        )
         return messages
 
+    # 表里没有这一轮（写库失败，或者这一轮比这张表还早）：
+    # 按老办法把 Redis 里这一轮接在后面。
     last = messages[-1] if messages else None
     if partial.question is not None and not (
         last is not None
@@ -465,6 +561,7 @@ def _merge_current_turn(
             turn_id=partial.turn_id,
             waiting=partial.status == STREAMING,
             failed=partial.status == FAILED,
+            aborted=partial.status == ABORTED,
         )
     )
     return messages
@@ -476,11 +573,14 @@ async def _clear_failed_turn(
     question: str,
     fastgpt: FastGPT,
 ) -> None:
-    """删掉上一轮在上游留下的记录。
+    """删掉上一轮留下的记录。
 
     重发的是同一句提问，上游会再记一遍。不删的话，历史里就有两遍问答。
     回答那一条的编号是我们给的（responseChatItemId），提问那一条要从记录里找。
+    我们自己那一份也要一起删：不然页面上会看见两遍。
     """
+    await asyncio.to_thread(chat_log.delete_round, chat_id, turn_id)
+
     try:
         records = await _session_records(chat_id, fastgpt, cached=False)
     except FastGPTError:
@@ -551,6 +651,9 @@ async def chat(
         # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」。
         begin_reply(body.chat_id, turn_id, body.message)
         mark_aborted(body.chat_id)
+        await asyncio.to_thread(
+            _record_stopped_round, body.chat_id, body.turn_id, body.message
+        )
         logger.info("这一轮发出之前就被停止 %s", body.chat_id)
         return StreamingResponse(_empty_sse(), media_type="text/event-stream")
 
@@ -582,10 +685,14 @@ async def _relay(
     relay: _Relay,
     fastgpt: FastGPT,
 ) -> None:
+    # 这一轮先记进我们自己的表：我们的进程要是中途死了，
+    # 表里留着这一轮的提问，页面上不会少一轮。
+    await asyncio.to_thread(chat_log.begin_round, chat_id, UUID(turn_id), message)
     try:
         async for event in fastgpt.events(chat_id, message, turn_id):
             if isinstance(event, str):
                 append_chunk(chat_id, event)
+                relay.text += event
                 outgoing = _chunk(event)
                 logger.info("发给页面 %s", outgoing.removesuffix("\n\n"))
                 await relay.queue.put(outgoing)
@@ -603,6 +710,7 @@ async def _relay(
         # 用户按了停止。状态在这里写：任务被掐掉时它确实还在写，
         # 页面轮询 /partial 时就能看到 aborted。
         logger.info("这一轮被停止 %s", chat_id)
+        relay.status = chat_log.ABORTED
         mark_aborted(chat_id)
         raise
     except FastGPTError:
@@ -626,6 +734,70 @@ async def _relay(
         # 这一下要等它落地：那时候上游可能正卡着，请求过去得慢一些。
         if relay.failed:
             _ask_upstream_to_stop(chat_id, wait=True)
+        # 这一轮落定以后写进我们自己的表。
+        _settle_round(chat_id, turn_id, relay, fastgpt)
+
+
+def _record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> None:
+    """这一轮在开始之前就被按了停止：提问记下来，状态是 aborted。"""
+    chat_log.begin_round(session_id, turn_id, question)
+    chat_log.finish_round(session_id, turn_id, "", chat_log.ABORTED)
+
+
+def _settle_round(
+    chat_id: UUID,
+    turn_id: str,
+    relay: _Relay,
+    fastgpt: FastGPT,
+) -> None:
+    """这一轮落定以后写进我们自己的表。
+
+    放在单独的任务里：这一轮的任务可能正被取消（用户按了停止），
+    在它里面 await 写库会写不成。
+    """
+    status = chat_log.FAILED if relay.failed else relay.status
+    task = asyncio.create_task(
+        _write_round_end(chat_id, turn_id, relay.text, status, fastgpt)
+    )
+    _settle_tasks.add(task)
+    task.add_done_callback(_settle_tasks.discard)
+
+
+async def _write_round_end(
+    chat_id: UUID,
+    turn_id: str,
+    text: str,
+    status: str,
+    fastgpt: FastGPT,
+) -> None:
+    if status == chat_log.FAILED:
+        # 失败以后上游可能已经把答案写完了（我们的 [DONE] 丢了）。
+        # 叫停已经发出去了，等它落地，再按编号核对一次上游。
+        await _wait_for_stop(chat_id)
+        answer = await _upstream_answer(chat_id, turn_id, fastgpt)
+        if answer is not None and answer.startswith(text):
+            # 上游那份从我们收到的那段接着往下写：这一轮其实写完了，
+            # 断的是我们的 [DONE]。用上游那份，状态改成写完了。
+            text = answer
+            status = chat_log.COMPLETED
+    await asyncio.to_thread(chat_log.finish_round, chat_id, UUID(turn_id), text, status)
+
+
+async def _upstream_answer(
+    chat_id: UUID,
+    turn_id: str,
+    fastgpt: FastGPT,
+) -> str | None:
+    """上游那一轮最后写出来的话。没有就是没有。"""
+    try:
+        records = await _session_records(chat_id, fastgpt, cached=False)
+    except FastGPTError:
+        logger.warning("读不到上游记录，核对不了 %s", chat_id)
+        return None
+    for record in records:
+        if record.role == "assistant" and record.id == turn_id:
+            return record.text
+    return None
 
 
 def _forget(chat_id: UUID, task: asyncio.Task[None]) -> None:
@@ -767,6 +939,8 @@ def _delete_session_row(session_id: UUID, login_cookie: str | None) -> None:
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
         chat_session = _require_session(session, account, session_id)
+        # 消息先删：它有外键指着这场会话。
+        session.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
         session.delete(chat_session)
 
 

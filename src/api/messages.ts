@@ -8,6 +8,7 @@ export type HistoryMessage = {
   turn_id: string | null;
   waiting: boolean;
   failed?: boolean;
+  aborted?: boolean;
 };
 
 /** 一场会话的完整线程。服务器已经把正在写的那一轮接在历史后面了。 */
@@ -23,6 +24,7 @@ export async function readMessages(sessionId: string): Promise<Message[]> {
     turnId: message.turn_id ?? undefined,
     waiting: message.waiting,
     failed: message.failed === true,
+    aborted: message.aborted === true,
   }));
 }
 
@@ -38,6 +40,7 @@ function isHistoryMessage(value: unknown): value is HistoryMessage {
     typeof value.text === 'string' &&
     (value.turn_id === null || typeof value.turn_id === 'string') &&
     typeof value.waiting === 'boolean' &&
-    (value.failed === undefined || typeof value.failed === 'boolean')
+    (value.failed === undefined || typeof value.failed === 'boolean') &&
+    (value.aborted === undefined || typeof value.aborted === 'boolean')
   );
 }
