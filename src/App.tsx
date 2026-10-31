@@ -1088,8 +1088,10 @@ export default function App() {
       applyPartialText(sessionId, turnId, partial);
       return;
     }
+    // 这一轮根本没写出来（上游还没接上就断了）：提示照样给，
+    // 也照样能重发 —— 这一轮在上游没有留下什么，重发就是重新问一遍。
     removeTurnAnswer(sessionId, turnId);
-    addErrorMessage(sessionId, text.replyInterrupted, locale);
+    addErrorMessage(sessionId, text.replyInterrupted, locale, turnId);
   }
 
   /** 这一场会话里最后一条助手回答，用来分辨 Redis 里那份是上一轮留下的还是这一轮的。 */
