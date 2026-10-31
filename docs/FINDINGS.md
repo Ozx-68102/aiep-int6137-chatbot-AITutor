@@ -354,3 +354,54 @@ v2 的工作流只看停止标记，不看连接断没断。所以一轮失败�
 
 上游的停止接口自己会等工作流收尾，最多五秒。
 
+## 2026-10-31 pnpm 的 store 目录随环境变，沙箱里装的依赖在维护者终端里加不上
+
+在维护者的终端里跑 `pnpm add react-markdown remark-gfm`，报 `ERR_PNPM_UNEXPECTED_STORE`：
+`node_modules` 现在连的是 `<项目>/node_modules/.pnpm-store/v11`，而 pnpm 想用
+`~/Library/pnpm/store/v11`。
+
+不是配置写错，也不是 pnpm 版本对不上：
+
+- 全局没有任何显式配置：项目根、`~`、`~/.config/pnpm/rc` 都没有 `.npmrc`；`pnpm-workspace.yaml`
+  里只有 `allowBuilds`；`pnpm config get store-dir` 是 undefined。
+- 两个 store 都是 v11，机器上两份 pnpm（`~/Library/pnpm/bin` 的 12.16.1、nvm 下用 npm 装的 12.15.0）
+  行为一致。报错里「可能是因为 node_modules 是用另一个大版本 pnpm 装的」这句在这里不适用。
+
+原因是 **pnpm 12 的默认 store 目录是运行时决定的**。pnpm 12.0.0 的变更记录里写着：
+「When no directory above the project accepts a hard link — inside an AI agent sandbox that only
+grants write access to the project, or a container with just the project mounted writable — the
+default store is now created at `<project>/node_modules/.pnpm-store` instead of in the pnpm home
+directory」（pnpm/pnpm#13525）。pnpm 二进制里也有对应的提示串：「is not used because packages
+cannot be hard linked from it into this project. Using the store at …」。
+
+也就是说，能不能用 home 里的 store，取决于这台机器上能不能把包从 store 硬链接进项目。
+在 agent 沙箱里只有工作区可写，home 里的 store 不可写，于是 pnpm 改用项目内的 store。
+
+实测（2026-10-31）：
+
+- 沙箱里对 `~/Library/pnpm/store/v11/index.db` 申请写权限 → `Operation not permitted`；
+  同一个项目内的 store 正常可写。
+- 沙箱里 `pnpm store path` 返回 `<项目>/node_modules/.pnpm-store/v11`。这行命令可以当作
+  「当前这个 shell 会用哪个 store」的探针。
+- 全局 store 的 `projects/` 里有一个指向本项目的软链（10-29 19:41）——那次是在沙箱外装的，
+  用的是全局 store；随后项目内 store 的 `index.db` 和 `node_modules/.modules.yaml` 都是 10-29 19:46
+  ——那次是在沙箱里装的，把 `node_modules` 改连到了项目内 store。之后没人重装过。
+
+修法：
+
+1. **在维护者的终端里跑一次 `pnpm install`**：把 `node_modules` 重新连到全局 store。
+   全局 store 里已经有 react@19.3.1、vite@8.3.5、typescript@7.0.2 这些包（索引 435 条），
+   `pnpm-lock.yaml` 和 `package.json` 是同步的（15 个依赖对得上），所以这次基本只是重新硬链接，
+   不改锁文件。这一步不能在 agent 沙箱里跑 —— 沙箱里跑只会又切回项目内 store。
+2. **把 store 固定下来**：项目根放 `.npmrc`，写 `store-dir=node_modules/.pnpm-store`，
+   终端和沙箱都用项目内 store，两边一致。代价是仓库多一个文件、失去跨项目共享缓存。
+   `.gitignore` 里已经有 `.pnpm-store/`，这个布局本来就是预期的。
+3. **明确指定全局 store**：`pnpm config set store-dir ~/Library/pnpm/store --global`。
+   这样在沙箱里跑 pnpm 会直接报错，而不是静默换 store；代价是沙箱里彻底装不了依赖。
+
+给 agent 的约束：**装依赖这步只能由维护者做**。只要在沙箱里装过一次，`node_modules` 就连到了
+项目内 store，维护者下一次 `pnpm add` / `pnpm install` 就会撞上这个错。在 store 目录固定下来
+之前，agent 不要跑 `pnpm install` / `pnpm add`。
+
+另外 `react-markdown` 和 `remark-gfm` 两个 store 里都没有，装它们需要联网。
+
