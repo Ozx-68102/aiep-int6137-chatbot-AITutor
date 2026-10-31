@@ -234,3 +234,20 @@ v1 的路由 `projects/app/src/pages/api/v1/chat/completions.ts` 传的就是 `a
 只有一个「无法连接到服务器，请稍后重试」，没有红色重复提示，用户名还在；服务起来之后提示自己
 消失，三条会话自己回来了。
 
+## 2026-10-31 异步接口里的同步数据库调用会卡住事件循环
+
+FastAPI 里 `def`（同步）的接口跑在线程池里，不占事件循环；但 `async def` 的接口里直接写
+`with db_session()`，整个事件循环就被卡住 —— 卡住的时候，正在流式输出的那一轮发不出去，
+停止请求也进不来（这就是停止偶尔停不掉的另一半原因）。
+
+本仓库受影响的只有四个异步接口：`/api/chat`、`/api/sessions/{id}/abort`、
+`/api/sessions/{id}/messages`、`DELETE /api/sessions/{id}`。其余接口都是同步的，没这个问题。
+
+改法：异步接口里碰数据库的那一步放到线程里（`await asyncio.to_thread(_authorize_session, ...)`，
+`app.py` 里的 `_authorize_session` / `_delete_session_row`）。
+
+实测（2026-10-31，本机 PostgreSQL）：数据库一次查询中位 **0.30 毫秒**，最大 78 毫秒（第一次
+要开连接）；Redis 一次写入中位 **0.09 毫秒**。所以 Redis 那几处（每轮状态、半截文字）留在
+事件循环里没问题，数据库那几处值得挪走。改完之后：停止请求从发出到返回 17 毫秒，
+`/partial` 读到 `aborted`，流里没有 `[DONE]` —— 停止照旧灵。
+
