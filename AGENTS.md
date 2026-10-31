@@ -11,6 +11,11 @@
 `uv sync`、`git add`、`git commit` 都算改动。
 只读的命令随便跑：`pnpm check`、`pnpm exec tsc --noEmit`、`bash scripts/check-server.sh`、`git status`。
 
+遇到大改动，不管前面许没许可，都停下来：说清楚为什么这么改、要动哪些地方、有什么风险，
+然后等我的明确许可再继续，不准闷声干大事。
+算大改动的包括：一次动多个文件、改数据结构或接口契约、加依赖或换工具、
+动登录/会话/流式这类核心链路、动真实数据、起服务。
+
 ## 去哪儿找什么
 - 产品与本地运行：[README.md](README.md)
 - 工具版本、环境变量、本地启动、Git 钩子：[docs/TECH.md](docs/TECH.md)
