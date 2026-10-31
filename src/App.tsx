@@ -105,6 +105,7 @@ export default function App() {
   const pollers = useRef(new Map<string, () => void>());
   const sessionsRef = useRef(sessions);
   const draftRef = useRef(draft);
+  const localeRef = useRef(locale);
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
   const connectionWarningRef = useRef<() => void>(() => undefined);
@@ -154,6 +155,7 @@ export default function App() {
   useEffect(() => {
     sessionsRef.current = sessions;
     draftRef.current = draft;
+    localeRef.current = locale;
     connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -176,7 +178,7 @@ export default function App() {
     let cancelled = false;
     flights.add(sessionId);
     setHistoryLoadingId(sessionId);
-    void loadThread(sessionId)
+    void loadThread(sessionId, localeRef.current)
       .then((thread) => {
         if (cancelled) {
           return;
@@ -917,12 +919,76 @@ export default function App() {
     }));
   }
 
-  function addErrorMessage(sessionId: string, content: string, messageLocale: Locale) {
+  /** 把这一轮的错误提示去掉（重发之前）。 */
+  function removeFailedNotice(sessionId: string, turnId: string) {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: session.messages.filter(
+        (message) => !(message.turnId === turnId && message.role === 'error'),
+      ),
+    }));
+  }
+
+  /**
+   * 重发一轮：把失败的回答换成重新答一遍同一句提问。
+   *
+   * 提问留在原处，失败的回答和它的提示去掉。新的回答算新的一轮，
+   * 服务器会把上一轮在上游留下的记录删掉，历史里不会出现两遍问答。
+   */
+  async function retryTurn(sessionId: string, turnId: string) {
+    if (sendingRef.current.has(sessionId)) {
+      return;
+    }
+    const question = questionOfTurn(sessionId, turnId);
+    if (question === null || question.trim() === '') {
+      setNotice(text.actionFailed);
+      return;
+    }
+    removeTurnAnswer(sessionId, turnId);
+    removeFailedNotice(sessionId, turnId);
+    const newTurnId = crypto.randomUUID();
+    sendingRef.current.add(sessionId);
+    setPendingIds((current) => new Set(current).add(sessionId));
+    setNotice(null);
+    clearSessionWarning(sessionId);
+    await sendQuestion(sessionId, question, newTurnId, turnId);
+  }
+
+  /**
+   * 某一轮问的是什么。
+   *
+   * 提问那条不一定带这一轮的编号：刷新以后看到的提问是上游的记录，
+   * 上游不知道我们的编号。那就按位置找 —— 失败提示前面最近的一条提问。
+   */
+  function questionOfTurn(sessionId: string, turnId: string): string | null {
+    const messages = sessionsRef.current.find((item) => item.id === sessionId)?.messages ?? [];
+    const notice = messages.findIndex(
+      (message) => message.role === 'error' && message.turnId === turnId,
+    );
+    for (let index = notice - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') {
+        return messages[index].text;
+      }
+    }
+    const own = messages.find((message) => message.role === 'user' && message.turnId === turnId);
+    return own?.text ?? null;
+  }
+
+  /**
+   * 聊天记录里的错误提示。带着这一轮的编号时，用户可以重发这一轮。
+   */
+  function addErrorMessage(
+    sessionId: string,
+    content: string,
+    messageLocale: Locale,
+    turnId?: string,
+  ) {
     const message: Message = {
       id: crypto.randomUUID(),
       role: 'error',
       text: content,
       locale: messageLocale,
+      turnId,
     };
     updateSession(sessionId, (session) => ({
       ...session,
@@ -963,7 +1029,7 @@ export default function App() {
       stopPolling(sessionId);
       clearPending(sessionId);
       if (partial.status === 'failed') {
-        addErrorMessage(sessionId, text.replyInterrupted, locale);
+        addErrorMessage(sessionId, text.replyInterrupted, locale, turnId);
       }
       if (partial.status === 'aborted') {
         setSessionWarning({sessionId, text: text.replyStopped});
@@ -1004,7 +1070,7 @@ export default function App() {
     }
     if (partial.status === 'failed') {
       applyPartialText(sessionId, turnId, partial);
-      addErrorMessage(sessionId, text.replyInterrupted, locale);
+      addErrorMessage(sessionId, text.replyInterrupted, locale, turnId);
       return;
     }
     if (partial.status === 'aborted') {
@@ -1039,7 +1105,12 @@ export default function App() {
     return null;
   }
 
-  async function sendQuestion(sessionId: string, question: string, turnId: string) {
+  async function sendQuestion(
+    sessionId: string,
+    question: string,
+    turnId: string,
+    retryOf?: string,
+  ) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
     aborters.current.set(sessionId, {controller, turnId});
@@ -1056,6 +1127,7 @@ export default function App() {
           applyStreamText(sessionId, assistantId, chunk);
         },
         controller.signal,
+        retryOf,
       );
       if (outcome === 'busy') {
         // 这场会话已经有一轮在写，这一次没发出去。把问题放回输入框，等答完再发。
@@ -1099,7 +1171,7 @@ export default function App() {
         return;
       }
       const detail = error instanceof ApiError ? error.detail : null;
-      addErrorMessage(sessionId, detail ?? text.connectionError, detail ? 'zh-CN' : locale);
+      addErrorMessage(sessionId, detail ?? text.connectionError, detail ? 'zh-CN' : locale, turnId);
     } finally {
       aborters.current.delete(sessionId);
       stoppers.current.delete(sessionId);
@@ -1113,7 +1185,7 @@ export default function App() {
   /** 重新读一次线程：这一轮是在别的页面发出去的，本页还不知道。 */
   async function refreshThread(sessionId: string) {
     try {
-      const thread = await loadThread(sessionId);
+      const thread = await loadThread(sessionId, locale);
       updateSession(sessionId, (session) => ({
         ...session,
         messages: thread.messages,
@@ -1162,7 +1234,7 @@ export default function App() {
     }
     if (partial.status === 'failed') {
       applyPartialText(sessionId, turnId, partial);
-      addErrorMessage(sessionId, text.replyInterrupted, locale);
+      addErrorMessage(sessionId, text.replyInterrupted, locale, turnId);
       return;
     }
     if (partial.status === 'finished') {
@@ -1253,6 +1325,11 @@ export default function App() {
         onStop={() => {
           if (active) {
             void stopSending(active.id);
+          }
+        }}
+        onRetry={(turnId) => {
+          if (active) {
+            void retryTurn(active.id, turnId);
           }
         }}
       />

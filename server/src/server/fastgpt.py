@@ -152,6 +152,34 @@ class FastGPT:
                 return True
         return False
 
+    async def delete_item(self, chat_id: UUID, content_id: str) -> bool:
+        """删掉这场会话里的某一条记录（软删）。
+
+        记录有两种编号：回答那一条的编号是我们给的（responseChatItemId），
+        提问那一条是 FastGPT 自己给的。重发一轮的时候两条都要删，
+        否则历史里会多出一遍问答。
+        """
+        try:
+            response = await self._client.post(
+                join_url(self._base_url, "core/chat/item/delete"),
+                json={
+                    "appId": self._app_id,
+                    "chatId": str(chat_id),
+                    "contentId": content_id,
+                },
+            )
+        except httpx2.HTTPError as exc:
+            logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
+            return False
+        if response.status_code != 200:
+            logger.error("FastGPT 删除记录返回 %s", response.status_code)
+            return False
+        try:
+            body = _read_body(response)
+        except FastGPTError:
+            return False
+        return isinstance(body, dict)
+
     async def delete_history(self, chat_id: UUID) -> None:
         try:
             response = await self._client.delete(
