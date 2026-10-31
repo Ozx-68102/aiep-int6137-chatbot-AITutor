@@ -17,6 +17,7 @@
 - 新人上手：[docs/开发手册/](docs/开发手册/)
 - 实测到的反直觉行为：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，
   也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
+- 界面上的提示（警示框、消息里的错误、表单里的红字）放在哪里：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
 - 后端特有的规矩和命令：[server/AGENTS.md](server/AGENTS.md)
 
 ## 守则
