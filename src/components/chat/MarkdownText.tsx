@@ -12,6 +12,9 @@ const components: Components = {
       </a>
     );
   },
+  // TODO：图片暂时不加载，只渲染成一个链接。
+  // 图片和视频生成那部分还没开放，现在不能动。等那边放开，
+  // 这里改回渲染 <img>，再定图片地址放在哪儿、怎么留住。
   img({src, alt}) {
     const address = src ?? '';
     if (address === '') {

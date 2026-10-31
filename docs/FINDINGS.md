@@ -418,7 +418,7 @@ cannot be hard linked from it into this project. Using the store at …」。
 - **地址只放行一部分协议**：http、https、irc、ircs、mailto、xmpp 和相对地址。
   其余的（`javascript:`、`data:` 这些）在渲染前就被清空了。
 - **图片不去加载**。`![](…)` 渲染成一个链接文字，页面不去请求第三方地址。
-  图片生成那部分还没开放，先不给页面开这个口子。
+  图片生成那部分还没开放，先不给页面开这个口子，代码里标了 TODO（`src/components/chat/MarkdownText.tsx`）。
 - **转换器会在块与块之间插换行**，这些换行在 `white-space: pre-wrap` 下会变成空行，
   列表里尤其明显（一项和下一项之间空出小半屏）。所以 Markdown 容器用 `white-space: normal`，
   只有段落和纯文本的列表项用 `pre-wrap`，含子块的列表项（带子列表的那种）改回 normal。
