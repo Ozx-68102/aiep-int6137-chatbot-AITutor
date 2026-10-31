@@ -475,6 +475,16 @@ Markdown 里没有公式。`$a^2 + b^2 = c^2$` 这种写法，Markdown 只会当
 
 另一处容易看混的：`getMaxHistoryLimitFromNodes(app.modules)` 算出来的 `limit`
 （默认 `max(10, 节点配的数) × 2`）只是「从库里取多少条记录」的余量，不是模型读到多少。
+**取多少和读多少是两个数**（2026-11-01 实测确认）：
+
+- 取：默认最多 20 条记录（10 轮），取的是最近的（`getChatItems` 里 `offset: 0, limit`）。
+- 读：12 条记录（6 轮），System 消息全留。
+
+多取的那几条是余量，模型不看。节点的 `history` 配成 N，那两个数一起变
+（取 `max(10, N) × 2`，读 `N × 2`）—— 找 FastGPT 那边改配置是一处配置管两个数。
+
+我们自己读历史用的又是另一个数：`getPaginationRecords` 分页取，取的是全部记录
+（「打个招呼」那场 22 条整条都在）。那是给页面显示的完整历史，跟上下文没关系。
 
 想突破 6 轮只有一条路：让 FastGPT 那边把应用的 AI 节点 `history` 配大。
 不传 chatId 自己拼上下文也做不到：不传 chatId 时上游会自己造一个新的 chatId
