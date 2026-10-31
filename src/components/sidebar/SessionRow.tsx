@@ -1,5 +1,6 @@
 import {Ellipsis, Pin} from 'lucide-react';
 import {type MouseEvent, useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
 import type {Session} from '../../type/chat.ts';
@@ -7,34 +8,13 @@ import {type Locale} from '../../type/locale.ts';
 import {ConfirmDelete} from './ConfirmDelete.tsx';
 import {RenameSession} from './RenameSession.tsx';
 
+/** 二级菜单挂在 body 上，位置按视口算。 */
 function menuPointFor(button: HTMLButtonElement): {top: number; right: number} {
   const rect = button.getBoundingClientRect();
-  const origin = menuOrigin(button);
   return {
-    top: rect.bottom + 4 - origin.top,
-    right: origin.right - rect.right,
+    top: rect.bottom + 4,
+    right: window.innerWidth - rect.right,
   };
-}
-
-function menuOrigin(node: HTMLElement): {top: number; right: number} {
-  let current = node.parentElement;
-  while (current) {
-    const style = getComputedStyle(current);
-    if (
-      style.translate !== 'none' ||
-      style.transform !== 'none' ||
-      style.scale !== 'none' ||
-      style.rotate !== 'none'
-    ) {
-      const box = current.getBoundingClientRect();
-      return {
-        top: box.top + (Number.parseFloat(style.borderTopWidth) || 0),
-        right: box.right - (Number.parseFloat(style.borderRightWidth) || 0),
-      };
-    }
-    current = current.parentElement;
-  }
-  return {top: 0, right: window.innerWidth};
 }
 
 export function SessionRow({
@@ -73,9 +53,11 @@ export function SessionRow({
     }
 
     function closeOnOutsidePointer(event: PointerEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || buttonRef.current?.contains(target)) {
+        return;
       }
+      setMenuOpen(false);
     }
 
     function closeOnEscape(event: KeyboardEvent) {
@@ -135,7 +117,7 @@ export function SessionRow({
         {sessionTitle(session, fallbackTitle)}
       </button>
       {session.pinned ? <Pin aria-hidden="true" className="mr-1 size-3.5 shrink-0" /> : null}
-      <div className={actionClass} ref={menuRef}>
+      <div className={actionClass}>
         <button
           type="button"
           className="inline-flex size-8 items-center justify-center rounded-lg border border-transparent bg-transparent text-inherit transition-colors duration-150 ease-out hover:bg-stone-900/15 active:bg-stone-900/25"
@@ -147,7 +129,10 @@ export function SessionRow({
         >
           <Ellipsis aria-hidden="true" className="size-4" />
         </button>
+      </div>
+      {createPortal(
         <div
+          ref={menuRef}
           className={
             menuOpen
               ? 'fixed z-50 flex min-w-36 flex-col rounded-lg border border-stone-300 bg-white p-1.5 shadow-lg'
@@ -191,8 +176,9 @@ export function SessionRow({
           >
             {text.deleteSession}
           </button>
-        </div>
-      </div>
+        </div>,
+        document.body,
+      )}
       <RenameSession
         locale={locale}
         open={renameOpen}

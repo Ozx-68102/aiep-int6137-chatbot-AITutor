@@ -199,3 +199,18 @@ v1 的路由 `projects/app/src/pages/api/v1/chat/completions.ts` 传的就是 `a
 
 实测（2026-10-31）：中止先到 → 上游一次都没被问，流直接结束，`/partial` 是 `{"status":"aborted"}`；对话先到 → 那一轮被掐掉，`/partial` 同样是 `aborted`；老客户端不带编号 → 服务器自己认当前这一轮，照样掐掉；停过之后发新一轮 → 正常跑完（`[DONE]` 收到，状态 `finished`）。
 
+## 2026-10-31 会话行上的 transform 会把行内的浮层关进去
+
+会话行有重新排序的动画，动画期间行上会带 `transform: translateY(...)`（`Sidebar.tsx` 里直接写
+`row.style.transform`）。这一下有两个副作用：
+
+- 带 transform 的元素会**建立层叠上下文**，行内那个 `fixed z-50` 的二级菜单的层级就被关在这一行里，
+  排在后面的会话行画在它上面 —— 菜单被后面的会话卡片盖住，点「重命名」「删除」点到的其实是下面那一行；
+- 带 transform 的元素还是 `position: fixed` 的**包含块**，浮层的位置是相对这一行算的，不是相对视口。
+
+所以二级菜单改成用 `createPortal` 挂到 `body` 上（`SessionRow.tsx`），位置直接按视口算：
+`top` 用按钮的 `getBoundingClientRect().bottom`，`right` 用 `window.innerWidth - rect.right`。
+点外面关菜单的判断也要改成同时看菜单本身和那个按钮（菜单已经不在按钮的父节点里了）。
+
+教训：行内浮层（菜单、下拉）一律走 portal，不要挂在带 transform 的行里。
+
