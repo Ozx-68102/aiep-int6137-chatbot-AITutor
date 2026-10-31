@@ -82,13 +82,23 @@ Redis 客户端也改了：连接不通要马上知道（默认的连接重试�
 
 - 每场会话正在跑的那一轮记在一张表里（`_running`）。中止接口按会话 id 找到那个任务并 `cancel()`。
 - 任务被取消时 `_relay` 记下 `aborted` 再把取消往上抛。已经写出来的半截文字留在 Redis 里。
-- 上游的连接随任务一起关掉，FastGPT 那边不会继续写下去。
+- 上游的连接随任务一起关掉。FastGPT 走的是 v1 接口，它判「这一轮停了」的标准就是客户端断开
+  （v4.14.5 源码 `packages/service/core/workflow/dispatch/index.ts`），所以断掉连接就等于告诉它别写了；
+  它会在下一个节点边界停下，已经在跑的那个节点会跑完。
 
 ### 页面断开不算停止
 
 刷新页面、关掉标签页，浏览器也会断开这条流。这时服务器**不**取消那一轮，它照旧写完，
 页面回来还能接上（这是「刷新后接上」的前提）。所以「停止」必须由页面明确说一声，
 不能拿连接断开来判断。
+
+### 为什么不用 FastGPT 自己的停止接口
+
+v4.14.5 有 `POST {访问地址}/v2/chat/stop`（body 是 `{appId, chatId}`），认 API key，我们部署上也有，
+调它会返回 `{"success": true}`。但它写的 Redis 标记只有 v2 调用会读，我们走的是 v1：实测在回答进行到
+第 1 秒时调它，连做 4 次，每一轮都照跑完、都有完整回答、都有 `[DONE]`。
+
+所以停一轮靠的是我们自己断开到上游的连接（cancel 掉 httpx 请求）。详见 [FINDINGS.md](FINDINGS.md)。
 
 ### 一个已知的副作用
 
@@ -168,7 +178,7 @@ FastGPT 那边也有位置放它 —— 请求体里的 `responseChatItemId`，�
 ]
 ```
 
-FastGPT 的接口文档写着：chatId 非空时，它自己去数据库取这场会话的历史，把 messages 数组最后一条当用户问题，其余忽略。所以上下文不用我们拼，页面也不用管。
+FastGPT 的接口文档写着：chatId 非空时，它自己去数据库取这场会话的历史，把 messages 数组最后一条当用户问题，其余忽略。所以上下文不用我们拼，页面也不用管。（文档站对应的是更新版本，这两条在 v4.14.5 的源码里同样成立，详见下面一节和 [FINDINGS.md](FINDINGS.md)。）
 
 「重试」按钮要重发的是哪一句，也在页面这边：就是那条半截回答前面的用户提问，页面的消息列表里本来就有。
 
@@ -178,6 +188,10 @@ FastGPT 的接口文档写着：chatId 非空时，它自己去数据库取这�
 
 - chatId 传非空字符串：FastGPT 自动从它的数据库取这场会话的历史，把 messages 数组**最后一个**内容当用户问题，其余 message 全部忽略。
 - chatId 不传：不用 FastGPT 的上下文功能，**完全靠传入的 messages 构造上下文**。
+
+这两条在 v4.14.5 的源码里同样成立（我们早前也实测过）。FastGPT 一次带几轮历史，是它应用里的
+「记忆轮数」定的：v4.14.5 的 AI 对话节点默认 6（`dispatch/ai/chat.ts` 里的 `history = 6`），
+`getHistories` 取最后 6×2 条记录，并保留开头的 System 消息。这个值在我们这边改不了。
 
 也就是说，想要自己掌握上下文（自己存、自己拼、想改想重发），就不能传 chatId，得把整段对话作为 messages 发过去。
 代价是 FastGPT 那边不再有这场会话的记录，我们的 `GET /api/sessions/{会话id}/messages` 也就没有东西可读，
@@ -190,21 +204,36 @@ FastGPT 的接口文档写着：chatId 非空时，它自己去数据库取这�
 FastGPT 源码里这个接口的注释是 "delete single chat history (soft delete)"，
 它把整场会话标记成删除，也就是**清空整场上下文**，不是删掉其中一轮。
 
-源码里另有一个 `core/chat/record/delete`，参数是 `sourceType`、`sourceId`、`chatId`、
-`contentId`（或 `contentIds`），删的是单条聊天记录。官方文档没有列它，地址、参数和鉴权方式
-要自己对着源码试（FastGPT 仓库 `projects/app/src/pages/api/core/chat/record/delete.ts`）。
+删单条记录在 v4.14.5 里是：
+
+```
+POST {访问地址}/core/chat/item/delete
+body: {appId, chatId, contentId}
+```
+
+它给那条记录写 `deleteTime`（软删），按 `dataId` 匹配。官方文档没有列它，地址、参数和鉴权方式
+要自己对着源码看（FastGPT 仓库 tag v4.14.5 的 `projects/app/src/pages/api/core/chat/item/delete.ts`）。
+
+对我们的用处：我们的 `responseChatItemId` 就是那条 AI 记录的 `dataId`，所以 `contentId` 传我们的
+turn id 就能精确删掉那一轮。
+
+（早先这里写的 `core/chat/record/delete` 和 `sourceType`/`sourceId`/`contentIds` 那套参数属于更新版本，
+v4.14.5 没有那个文件。）
 
 ### 每一轮的编号：FastGPT 有一个位置放我们的编号
 
 官方文档里有 `responseChatItemId`：传了它，FastGPT 就把这个值当作本次回答的 ID 存进数据库，
 并要求同一个 chatId 下唯一。也就是说「这一轮的编号」不用自己想办法编号，把自己的编号传过去就行。
-还没有用过，要实测。
+
+这一条已经在用了：每次发问我们生成一个 UUID 放在请求体的 `responseChatItemId` 里，
+实测那条 AI 记录的 `dataId` 就是我们的编号（见上面「编号从哪来」那一节和 [FINDINGS.md](FINDINGS.md)）。
 
 ### 截掉上一轮再重发
 
 重发用同一个 chatId、再发同一条用户消息就行。但这样 FastGPT 的历史里会**多出一轮**（又一条用户消息 + 一条新的助手消息），页面读历史时会看到两遍。
 
-要干净，得把上一轮那条助手消息删掉。地址和参数见上面「删一条消息」那一节，官方文档里查不到，要自己试。
+要干净，得把上一轮那条助手消息删掉。地址和参数见上面「删一条消息」那一节（v4.14.5 的
+`core/chat/item/delete`），鉴权方式还没在部署上试过。
 
 还有一个竞态：如果是我们这边超时放弃的，FastGPT 那边可能还在生成，那条记录过一会儿才落库，删除得等它出现。
 
@@ -212,7 +241,8 @@ FastGPT 源码里这个接口的注释是 "delete single chat history (soft dele
 
 - 「重试」点下去之后，服务器怎么认出「这是同一个请求的第二次」。编号已经有了，但还没有
   「同一个请求重发两次只生成一遍」的机制。
-- 删除上一轮助手消息的具体接口：官方文档没有，源码里有 `core/chat/record/delete`，参数和鉴权要试。
+- 删除上一轮助手消息的具体接口：官方文档没有，源码里有 `core/chat/item/delete`
+  （body `{appId, chatId, contentId}`，按 dataId 匹配我们的 turn id）；还没在部署上实测过。
 - 上下文归谁：继续用 chatId（FastGPT 存历史，我们只管显示），还是自己存、自己拼、自己发（不传 chatId）。
   这一条定了，「删掉上一轮再重发」才好做。
 - Redis 里那半截文字在重发时怎么清。现在 `begin_reply` 会把文本 key 删掉重来，看着是自动的，但要实测。

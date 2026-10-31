@@ -20,7 +20,11 @@
 
 [API 文档介绍](https://doc.fastgpt.io/zh-CN/openapi/intro) 写明：从 4.15.0 起，手工维护的接口说明不再更新，最新列表在部署地址的 `/apidoc/devapi` 和 `/apidoc/systemopenapi`。
 
+（2026-10-31 补：我们这个部署是 v4.14.5 基线，这两个地址都是 404 —— 它们 4.15.0 才有，v4.14.5 的源码里没有任何 apidoc 相关页面。整份接口清单要对着 v4.14.5 的源码看，详见下面 2026-10-31 那条。）
+
 [对话接口](https://doc.fastgpt.io/zh-CN/openapi/chat) 里，和某一场 `chatId` 有关的操作是：列会话、改标题、改置顶、删除这场会话、取基本信息、取消息、取运行详情、删一条消息、点赞或点踩。没有「把这一场对话分享出去」的接口。
+
+（2026-10-31 补：这份清单来自文档站，对应的是更新版本；v4.14.5 自己的文档源码里同样没有「停止」。）
 
 文档里的「分享」指的是应用的免登录窗口：在控制台的发布渠道里创建一条链接，地址带 `shareId`，打开的是整个应用，不是我们某一场会话。清空会话的说明也把「分享链接」和 API 创建的会话分成两种来源。
 
@@ -115,14 +119,16 @@ FastGPT 的历史里才有这一轮，页面才恢复。
    就被收成 `FastGPTError`，接口回一个 502 和一行字，不打栈；通用处理器也只记一行。
 3. **错误信息对用户没有意义**：上游挂掉时页面只说「暂时问不到上游，请稍后重试」。
 
-## 2026-10-30 FastGPT 的三个接口事实
+## 2026-10-30 FastGPT 的几个接口事实
 
 对着[官方对话接口文档](https://doc.fastgpt.io/zh-CN/openapi/chat)和 FastGPT 源码核过：
 
 - `DELETE {访问地址}/core/chat/history/delHistory` 的注释是 "delete single chat history (soft delete)"，
   它把**整场会话**标记成删除，也就是清空整场上下文，没有「删一轮」这个选项。
-- 源码里另有 `core/chat/record/delete`，参数 `sourceType`、`sourceId`、`chatId`、`contentId`，
-  删的是单条聊天记录。官方文档没有列它。
+- 源码里另有删单条记录的接口，官方文档没有列它。（2026-10-31 更正：v4.14.5 里是
+  `POST {访问地址}/core/chat/item/delete`，body 是 `{appId, chatId, contentId}`，实现是给那条记录写
+  `deleteTime`（软删），按 `dataId` 匹配。早先这里写的 `core/chat/record/delete` 和
+  `sourceType`/`sourceId`/`contentIds` 那套参数属于更新版本，v4.14.5 没有那个文件。）
 - `responseChatItemId` 会把客户端给的值当作本次回答的 ID 存进 FastGPT 的数据库（同一 chatId 下要唯一）。
   实测（21:22）：传 `responseChatItemId=turn-test-0001`，再用 `getPaginationRecords` 读回来，
   那条 AI 记录的 `dataId` 就是 `turn-test-0001`，Human 记录的 `dataId` 是 FastGPT 自己的。
@@ -139,4 +145,37 @@ Safari 3.1–18.7 不支持，26 起支持；Chrome 80 起就支持）。所以�
 另外 Safari 的 favicon 缓存是按**页面地址**记的：某个地址缓存成「没有图标」之后，
 重新加载同一个地址它也不会再取一次，换成带查询参数的地址（新的缓存键）才会重新取。
 这就是「根目录没有图标，带上 ?session=xxx 刷新才有」这种现象的来源。
+
+## 2026-10-31 FastGPT 的版本基线是 v4.14.5，接口清单看源码不看文档站
+
+我们这个 FastGPT 是内部部署的，基线是 **v4.14.5**（内部可能有改动，别当原版用）。它的接口说明分三层：
+
+1. 代码里的 OpenAPI 定义（`packages/global/openapi/**`），每个路由带 summary 和 description，是给自动生成的接口清单用的；
+2. 文档站的手写页（`document/content/docs/**`）；
+3. 部署地址上的自动清单 `/apidoc/devapi` 和 `/apidoc/systemopenapi`。
+
+第 3 层是 4.15.0 才引入的，v4.14.5 的源码里没有任何 apidoc 相关页面，所以在我们部署上这两个地址都是 404（返回的是前端页面）。第 2 层对应的是更新版本的文档：v4.14.5 自己的文档源码 `document/content/docs/introduction/development/openapi/chat.mdx`（「对话接口」页，1248 行）里没有「停止」两个字。
+
+所以「文档里没有、源码里有」在 FastGPT 是常态，两边都不是接口全集。要确认某个接口存不存在、地址和参数是什么，看官方仓库 tag v4.14.5 的源码，再实测一次。取单个文件不用克隆整个仓库：
+
+```bash
+curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
+```
+
+## 2026-10-31 FastGPT 的停止接口只对 v2 有效，我们走 v1
+
+v4.14.5 有 `POST {访问地址}/v2/chat/stop`：body 是 `{appId, chatId}`，鉴权走 `authChatCrud`（API key 可以）。它做的事是往 Redis 写一个标记 `agent_runtime_stopping:{appId}:{chatId}`（TTL 60 秒），然后每 50 毫秒轮询这个标记，最多等 5 秒，标记没了就返回 `{success: true}`。源码：`projects/app/src/pages/api/v2/chat/stop.ts`、`packages/service/core/workflow/dispatch/workflowStatus.ts`。我们部署上这个接口存在，认我们的 API key（实测返回 `{"success":true}`）。
+
+但它对我们没用。调度器 `packages/service/core/workflow/dispatch/index.ts` 里的判停函数分两种：
+
+- `apiVersion === 'v2'`：看上面那个 Redis 标记（每 100 毫秒轮询一次）；
+- `apiVersion === 'v1'`：只看客户端连接断没断（`res.closed || res.errored`）。
+
+v1 的路由 `projects/app/src/pages/api/v1/chat/completions.ts` 传的就是 `apiVersion: 'v1'`，我们打的也是 `/v1/chat/completions` → 那个标记没人读。
+
+实测（2026-10-31）：同一句问题，第 1 秒时调停止接口，连做 4 次，每一轮都跑完、都有完整回答、都有 `[DONE]`。停止接口的耗时（0.98 / 5.19 / 5.32 / 6.17 秒）只是跟着那一轮自己什么时候结束走（运行结束时会删掉标记），跟有没有被停掉无关。
+
+另外每轮**开始**时调度器会先删掉停止标记（源码注释 "Remove stopping sign"），所以「先停止、后发这一轮」这种次序也一定不生效。
+
+对 v1 有效的停止信号只有一个：我们自己断开到上游的连接 —— 也就是我们 cancel 掉 httpx 请求时发生的事。FastGPT 在下一个节点边界停下（判据就是客户端断开），已经在跑的那个节点会跑完。
 
