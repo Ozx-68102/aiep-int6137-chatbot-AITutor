@@ -88,6 +88,10 @@ _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
 _stop_tasks: set[asyncio.Task[None]] = set()
+# 失败时叫停的那几下：要等它们落地（停止标记晚到的话，
+# 新开的那一轮会被自己人写的标记掐掉）。
+_pending_stops: dict[UUID, set[asyncio.Task[None]]] = {}
+_STOP_WAIT_SECONDS = 7.0
 _records_cache: dict[UUID, tuple[float, list[ChatRecord]]] = {}
 _RECORDS_CACHE_SECONDS = 5.0
 _RECORDS_PAGE_SIZE = 100
@@ -550,6 +554,10 @@ async def chat(
         logger.info("这一轮发出之前就被停止 %s", body.chat_id)
         return StreamingResponse(_empty_sse(), media_type="text/event-stream")
 
+    # 之前叫停上游的那一下要落地：停止标记晚到的话，
+    # 新开的这一轮会被自己人写的标记掐掉。
+    await _wait_for_stop(body.chat_id)
+
     # 重发：把上一轮在上游留下的记录删掉，历史里才不会出现两遍问答。
     if body.retry_of is not None:
         await _clear_failed_turn(body.chat_id, body.retry_of, body.message, fastgpt)
@@ -612,6 +620,12 @@ async def _relay(
         finally:
             # 不能 await：任务被取消时再 await 会把取消吞掉。
             relay.queue.put_nowait(None)
+        # 失败以后也要叫上游收手。v2 不看连接断没断，不叫停的话
+        # 上游会把这一轮写完：token 白花，那条记录还会晚到我们的历史里。
+        # 放在结束流以后叫：页面不用等这一下。
+        # 这一下要等它落地：那时候上游可能正卡着，请求过去得慢一些。
+        if relay.failed:
+            _ask_upstream_to_stop(chat_id, wait=True)
 
 
 def _forget(chat_id: UUID, task: asyncio.Task[None]) -> None:
@@ -671,11 +685,40 @@ def _upstream_client() -> FastGPT | None:
     return fastgpt
 
 
-def _ask_upstream_to_stop(session_id: UUID) -> None:
-    """给上游发停止请求，不等它返回。"""
+def _ask_upstream_to_stop(session_id: UUID, wait: bool = False) -> None:
+    """给上游发停止请求，不等它返回。
+
+    wait 为真时把它记在会话上：开新一轮之前要等它落地
+    （停止标记晚到的话，新开的那一轮会被自己人写的标记掐掉）。
+    按停止那条路不用等：那时候上游还好好着，标记很快就写进去了。
+    """
     task = asyncio.create_task(_stop_upstream(session_id))
     _stop_tasks.add(task)
     task.add_done_callback(_stop_tasks.discard)
+    if wait:
+        _pending_stops.setdefault(session_id, set()).add(task)
+        task.add_done_callback(lambda done: _forget_pending_stop(session_id, done))
+
+
+def _forget_pending_stop(session_id: UUID, task: asyncio.Task[None]) -> None:
+    tasks = _pending_stops.get(session_id)
+    if tasks is None:
+        return
+    tasks.discard(task)
+    if not tasks:
+        del _pending_stops[session_id]
+
+
+async def _wait_for_stop(session_id: UUID) -> None:
+    """等叫停上游的那几下落定。
+
+    停止是一个运行态标记：标记写进去，上游才会在下一个节点边界收手。
+    标记晚到的话，新开的那一轮会被自己人写的停止标记掐掉。
+    """
+    tasks = _pending_stops.get(session_id)
+    if not tasks:
+        return
+    await asyncio.wait(list(tasks), timeout=_STOP_WAIT_SECONDS)
 
 
 async def _stop_upstream(session_id: UUID) -> None:
