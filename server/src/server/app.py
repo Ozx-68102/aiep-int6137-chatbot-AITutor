@@ -282,9 +282,7 @@ async def delete_session(
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
     fastgpt = _fastgpt()
-    with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
-        _require_session(session, account, session_id)
+    await asyncio.to_thread(_authorize_session, session_id, login_cookie)
 
     try:
         await fastgpt.delete_history(session_id)
@@ -294,11 +292,7 @@ async def delete_session(
             _SERVER_ERROR,
         ) from None
 
-    with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
-        chat_session = _require_session(session, account, session_id)
-        session.delete(chat_session)
-
+    await asyncio.to_thread(_delete_session_row, session_id, login_cookie)
     discard_reply(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -314,9 +308,7 @@ async def abort_session_reply(
     先把停止记下来，再取消任务：这样即使这一轮还没开始（停止请求先到），
     后到的对话请求也会看到这个编号，不再开这一轮。
     """
-    with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
-        _require_session(session, account, session_id)
+    await asyncio.to_thread(_authorize_session, session_id, login_cookie)
 
     turn_id = str(body.turn_id) if body is not None and body.turn_id is not None else ""
     if turn_id == "":
@@ -363,9 +355,7 @@ async def read_session_messages(
     """一场会话的完整线程：FastGPT 的历史，加上正在写的这一轮。"""
     fastgpt = _fastgpt()
 
-    with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
-        _require_session(session, account, session_id)
+    await asyncio.to_thread(_authorize_session, session_id, login_cookie)
 
     try:
         records = await _session_records(session_id, fastgpt)
@@ -470,9 +460,7 @@ async def chat(
     logger.info("对话请求 %s", body.model_dump_json(by_alias=True))
     fastgpt = _fastgpt()
 
-    with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
-        _require_session(session, account, body.chat_id)
+    await asyncio.to_thread(_authorize_session, body.chat_id, login_cookie)
 
     # 同一场会话同时只跑一轮。上一轮还在写的时候再发一次，
     # FastGPT 那边会多出一轮，Redis 里的半截文字也会被清掉重来，两轮的片段交错着写。
@@ -607,6 +595,24 @@ def _require_session(
     if not isinstance(found, ChatSession):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
     return found
+
+
+def _authorize_session(session_id: UUID, login_cookie: str | None) -> None:
+    """确认这场会话是这个账号的。
+
+    数据库是同步的，接口是异步的：这一步要放到线程里跑，
+    别把事件循环卡住（卡住的时候，正在流式输出的那一轮也发不出去）。
+    """
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        _require_session(session, account, session_id)
+
+
+def _delete_session_row(session_id: UUID, login_cookie: str | None) -> None:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        chat_session = _require_session(session, account, session_id)
+        session.delete(chat_session)
 
 
 def _login_account(
