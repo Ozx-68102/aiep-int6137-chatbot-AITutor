@@ -32,16 +32,20 @@ from server.reply_store import (
     PartialReply,
     append_chunk,
     begin_reply,
+    current_turn_id,
     discard_reply,
     mark_aborted,
     mark_failed,
     mark_finished,
     read_partial,
+    request_stop,
     round_in_flight,
+    stop_requested,
     store_available,
 )
 from server.settings import load_settings
 from server.types import (
+    AbortRequest,
     ChatRequest,
     HistoryMessageResponse,
     HistoryResponse,
@@ -302,12 +306,23 @@ async def delete_session(
 @app.post("/api/sessions/{session_id}/abort", status_code=status.HTTP_204_NO_CONTENT)
 async def abort_session_reply(
     session_id: UUID,
+    body: AbortRequest | None = None,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
-    """用户按了停止：掐掉这一轮的上游任务。已经写出来的半截文字留着。"""
+    """用户按了停止：掐掉这一轮的上游任务。已经写出来的半截文字留着。
+
+    先把停止记下来，再取消任务：这样即使这一轮还没开始（停止请求先到），
+    后到的对话请求也会看到这个编号，不再开这一轮。
+    """
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
         _require_session(session, account, session_id)
+
+    turn_id = str(body.turn_id) if body is not None and body.turn_id is not None else ""
+    if turn_id == "":
+        # 页面没带编号就用当前这一轮的编号。
+        turn_id = current_turn_id(session_id)
+    request_stop(session_id, turn_id)
 
     task = _running.get(session_id)
     if not task:
@@ -316,6 +331,9 @@ async def abort_session_reply(
 
     for running in task:
         running.cancel()
+    # 等这一轮真的收尾（状态改成 aborted），页面随后读到的才是最终状态，
+    # 不会读到还在写的中间状态。
+    await asyncio.wait(task, timeout=2.0)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -462,6 +480,14 @@ async def chat(
         raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
 
     turn_id = str(body.turn_id)
+    if stop_requested(body.chat_id, turn_id):
+        # 用户在对话请求到达之前就按了停止：这一轮不开。
+        # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」。
+        begin_reply(body.chat_id, turn_id, body.message)
+        mark_aborted(body.chat_id)
+        logger.info("这一轮发出之前就被停止 %s", body.chat_id)
+        return StreamingResponse(_empty_sse(), media_type="text/event-stream")
+
     # 先登记这一轮，页面断流之后才知道请求有没有落地。
     begin_reply(body.chat_id, turn_id, body.message)
     relay = _Relay()
@@ -537,6 +563,12 @@ async def _sse(relay: _Relay) -> AsyncIterator[str]:
         if item is None:
             break
         yield item
+
+
+async def _empty_sse() -> AsyncIterator[str]:
+    """这一轮被停止了：流直接结束，没有 [DONE]。"""
+    for piece in ():
+        yield piece
 
 
 def _chunk(content: str) -> str:

@@ -63,9 +63,16 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await requestEmpty(`/api/sessions/${sessionId}`, {method: 'DELETE'});
 }
 
-/** 让服务器停掉这一轮的上游任务。已经写出来的半截文字留在 Redis 里。 */
-export async function abortReply(sessionId: string): Promise<void> {
-  await requestEmpty(`/api/sessions/${sessionId}/abort`, {method: 'POST'});
+/**
+ * 让服务器停掉这一轮的上游任务。已经写出来的半截文字留在 Redis 里。
+ * 带上这一轮的编号：即使这一轮还没开始，服务器也会记住这个编号，
+ * 后到的对话请求看到编号对得上就不再开这一轮。
+ */
+export async function abortReply(sessionId: string, turnId: string): Promise<void> {
+  await requestEmpty(`/api/sessions/${sessionId}/abort`, {
+    method: 'POST',
+    body: turnId === '' ? undefined : JSON.stringify({turnId}),
+  });
 }
 
 export async function createSession(title: string | null = null): Promise<SessionItem> {

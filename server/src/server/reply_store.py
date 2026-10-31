@@ -19,6 +19,8 @@ FINISHED = "finished"
 FAILED = "failed"
 ABORTED = "aborted"
 
+_STOP_TTL_SECONDS = 60
+
 _client: Redis | None = None
 
 
@@ -133,6 +135,44 @@ def round_in_flight(chat_id: UUID) -> bool:
         return False
 
 
+def request_stop(chat_id: UUID, turn_id: str) -> None:
+    """用户按了停止。
+
+    记下这一轮的编号：即使这一轮还没开始（停止请求先到），后到的对话请求看到
+    编号对得上，就不再开这一轮。先到后到都不影响结果。
+    """
+    if turn_id == "":
+        return
+
+    with _tolerate("request_stop", chat_id):
+        _redis().set(_stop_key(chat_id), turn_id, ex=_STOP_TTL_SECONDS)
+
+
+def stop_requested(chat_id: UUID, turn_id: str) -> bool:
+    """这一轮是不是已经被要求停下了。Redis 不通就当没有，聊天照常走。"""
+    if turn_id == "":
+        return False
+
+    try:
+        value = _redis().get(_stop_key(chat_id))
+    except RedisError:
+        logger.warning(
+            "Redis 读不到 %s 的停止标记，按没有停处理", chat_id, exc_info=True
+        )
+        return False
+
+    return value == turn_id
+
+
+def current_turn_id(chat_id: UUID) -> str:
+    """当前这一轮的编号。读不到就当没有。"""
+    try:
+        return read_partial(chat_id).turn_id or ""
+    except RedisError:
+        logger.warning("Redis 读不到 %s 的轮次编号，按没有处理", chat_id, exc_info=True)
+        return ""
+
+
 def _turn_value(turn_id: str, question: str) -> str:
     return json.dumps({"id": turn_id, "question": question}, ensure_ascii=False)
 
@@ -196,3 +236,7 @@ def _text_key(chat_id: UUID) -> str:
 
 def _turn_key(chat_id: UUID) -> str:
     return f"h2botapp-chat:{chat_id}:turn"
+
+
+def _stop_key(chat_id: UUID) -> str:
+    return f"h2botapp-chat:{chat_id}:stop"
