@@ -405,3 +405,23 @@ cannot be hard linked from it into this project. Using the store at …」。
 
 另外 `react-markdown` 和 `remark-gfm` 两个 store 里都没有，装它们需要联网。
 
+## 2026-10-31 助手回答改成渲染 Markdown
+
+以前助手回答整段当纯文本显示，`**加粗**`、标题、列表、表格全是原样。现在用
+`react-markdown` + `remark-gfm` 渲染（表格、删除线、任务列表这些 GFM 的写法也认），
+样式写在 `src/components/chat/markdown.css`。
+
+实测出来的几点：
+
+- **原始 HTML 不会被执行**。`react-markdown` 默认不解析 Markdown 里的 HTML，
+  `<div>…</div>` 会当文字显示出来，和以前一样，页面不用自己转义。
+- **地址只放行一部分协议**：http、https、irc、ircs、mailto、xmpp 和相对地址。
+  其余的（`javascript:`、`data:` 这些）在渲染前就被清空了。
+- **图片不去加载**。`![](…)` 渲染成一个链接文字，页面不去请求第三方地址。
+  图片生成那部分还没开放，先不给页面开这个口子。
+- **转换器会在块与块之间插换行**，这些换行在 `white-space: pre-wrap` 下会变成空行，
+  列表里尤其明显（一项和下一项之间空出小半屏）。所以 Markdown 容器用 `white-space: normal`，
+  只有段落和纯文本的列表项用 `pre-wrap`，含子块的列表项（带子列表的那种）改回 normal。
+- **助手回答的气泡从 `<p>` 换成 `<div>`**：`<p>` 里不能放列表、表格这些块级元素。
+- **包不小**：加上这两个依赖，产物里的 js 从 278 kB（gzip 85 kB）涨到 441 kB（gzip 134 kB）。
+
