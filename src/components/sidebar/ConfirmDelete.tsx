@@ -1,22 +1,33 @@
-import {useEffect, useState} from 'react';
-import {createPortal} from 'react-dom';
+import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
+import {Modal} from '../shell/Modal.tsx';
 
 export function ConfirmDelete({
   locale,
+  open,
   error,
   onCancel,
   onConfirm,
 }: {
   locale: Locale;
+  open: boolean;
   error: string | null;
   onCancel: () => void;
   onConfirm: () => Promise<boolean>;
 }) {
   const text = translations[locale];
   const [pending, setPending] = useState(false);
+
+  // 每次打开都把上一次的等待状态清掉。
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setPending(false);
+    }
+  }
 
   async function confirm() {
     if (pending) {
@@ -33,31 +44,9 @@ export function ConfirmDelete({
     }
   }
 
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key !== 'Escape') {
-        return;
-      }
-      event.stopPropagation();
-      onCancel();
-    }
-
-    document.addEventListener('keydown', closeOnEscape, true);
-    return () => document.removeEventListener('keydown', closeOnEscape, true);
-  }, [onCancel]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
-      onClick={onCancel}
-    >
-      <div
-        className="relative flex w-full max-w-md flex-col gap-6 rounded-xl border border-stone-300 bg-white p-8 shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+  return (
+    <Modal open={open} titleId="delete-title" panelClass="w-full max-w-md p-8" onClose={onCancel}>
+      <div className="flex flex-col gap-6">
         <CloseButton label={text.close} onClick={onCancel} />
         <h2 id="delete-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>
           {text.deleteSession}
@@ -98,7 +87,6 @@ export function ConfirmDelete({
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+    </Modal>
   );
 }

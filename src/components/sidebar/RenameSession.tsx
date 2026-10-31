@@ -1,17 +1,19 @@
-import {useEffect, useState} from 'react';
-import {createPortal} from 'react-dom';
+import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
+import {Modal} from '../shell/Modal.tsx';
 
 export function RenameSession({
   locale,
+  open,
   initialTitle,
   error,
   onCancel,
   onConfirm,
 }: {
   locale: Locale;
+  open: boolean;
   initialTitle: string;
   error: string | null;
   onCancel: () => void;
@@ -22,6 +24,16 @@ export function RenameSession({
   const [pending, setPending] = useState(false);
   const trimmed = draft.trim();
   const unchanged = trimmed === '' || trimmed === initialTitle.trim();
+
+  // 每次打开都把输入框里的内容换成当前名字。
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setDraft(initialTitle);
+      setPending(false);
+    }
+  }
 
   async function confirm() {
     if (pending || unchanged) {
@@ -38,30 +50,10 @@ export function RenameSession({
     }
   }
 
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key !== 'Escape') {
-        return;
-      }
-      event.stopPropagation();
-      onCancel();
-    }
-
-    document.addEventListener('keydown', closeOnEscape, true);
-    return () => document.removeEventListener('keydown', closeOnEscape, true);
-  }, [onCancel]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
-      onClick={onCancel}
-    >
+  return (
+    <Modal open={open} titleId="rename-title" panelClass="w-full max-w-md p-8" onClose={onCancel}>
       <form
-        className="relative flex w-full max-w-md flex-col gap-6 rounded-xl border border-stone-300 bg-white p-8 shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rename-title"
-        onClick={(event) => event.stopPropagation()}
+        className="flex flex-col gap-6"
         onSubmit={(event) => {
           event.preventDefault();
           void confirm();
@@ -113,7 +105,6 @@ export function RenameSession({
           </button>
         </div>
       </form>
-    </div>,
-    document.body,
+    </Modal>
   );
 }
