@@ -1,12 +1,13 @@
-import {useEffect} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
 import {LanguageMenu} from '../language/LanguageMenu.tsx';
+import {Modal} from '../shell/Modal.tsx';
 import {accountLine} from './account-line.ts';
 
 export function SettingsModal({
   locale,
+  open,
   username,
   error,
   saving,
@@ -15,6 +16,7 @@ export function SettingsModal({
   onClose,
 }: {
   locale: Locale;
+  open: boolean;
   username: string | null;
   error: string | null;
   saving: boolean;
@@ -24,29 +26,14 @@ export function SettingsModal({
 }) {
   const text = translations[locale];
 
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    }
-
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
-      onClick={onClose}
+    <Modal
+      open={open}
+      titleId="settings-title"
+      panelClass="min-h-80 w-full max-w-2xl p-8"
+      onClose={onClose}
     >
-      <div
-        className="relative flex min-h-80 w-full max-w-2xl flex-col gap-8 rounded-xl border border-stone-300 bg-white p-8 shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div className="flex flex-col gap-8">
         <CloseButton label={text.close} onClick={onClose} />
         <h2 id="settings-title" className="m-0 pr-10 text-2xl" lang={htmlLang[locale]}>
           {text.profile}
@@ -94,6 +81,6 @@ export function SettingsModal({
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -193,46 +193,44 @@ export function SessionRow({
           </button>
         </div>
       </div>
-      {renameOpen ? (
-        <RenameSession
-          locale={locale}
-          initialTitle={session.title ?? ''}
-          error={dialogError}
-          onCancel={() => {
-            setDialogError(null);
+      <RenameSession
+        locale={locale}
+        open={renameOpen}
+        initialTitle={session.title ?? ''}
+        error={dialogError}
+        onCancel={() => {
+          setDialogError(null);
+          setRenameOpen(false);
+        }}
+        onConfirm={async (title) => {
+          const saved = await onRename(title);
+          if (saved) {
             setRenameOpen(false);
-          }}
-          onConfirm={async (title) => {
-            const saved = await onRename(title);
-            if (saved) {
-              setRenameOpen(false);
-            } else {
-              // 没成功：弹窗留着，错误就写在弹窗里，别让用户什么都看不到。
-              setDialogError(text.actionFailed);
-            }
-            return saved;
-          }}
-        />
-      ) : null}
-      {deleteOpen ? (
-        <ConfirmDelete
-          locale={locale}
-          error={dialogError}
-          onCancel={() => {
-            setDialogError(null);
+          } else {
+            // 没成功：弹窗留着，错误就写在弹窗里，别让用户什么都看不到。
+            setDialogError(text.actionFailed);
+          }
+          return saved;
+        }}
+      />
+      <ConfirmDelete
+        locale={locale}
+        open={deleteOpen}
+        error={dialogError}
+        onCancel={() => {
+          setDialogError(null);
+          setDeleteOpen(false);
+        }}
+        onConfirm={async () => {
+          const removed = await onDelete();
+          if (removed) {
             setDeleteOpen(false);
-          }}
-          onConfirm={async () => {
-            const removed = await onDelete();
-            if (removed) {
-              setDeleteOpen(false);
-            } else {
-              setDialogError(text.actionFailed);
-            }
-            return removed;
-          }}
-        />
-      ) : null}
+          } else {
+            setDialogError(text.actionFailed);
+          }
+          return removed;
+        }}
+      />
     </li>
   );
 }
