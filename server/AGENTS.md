@@ -20,6 +20,28 @@
 ## 验收
 - 改完后端代码：`uv run ruff check .` 和 `uv run ruff format --check .`
 
+## FastGPT 的版本基线
+
+FastGPT 是内部部署的，当前基线是 **v4.14.5**（内部可能改过，别当原版用）。
+
+它的接口清单不要照文档站看：
+
+- 文档站 doc.fastgpt.io 的「对话接口」页对应的是更新版本。从 4.15.0 起官方不再手工维护接口说明，
+  改成分布在部署地址的 `/apidoc/devapi` 和 `/apidoc/systemopenapi`；这两个地址是 4.15.0 才引入的，
+  我们这个部署上都是 404（v4.14.5 的源码里没有 apidoc 相关页面）。
+- FastGPT 的接口说明分三层：代码里的 OpenAPI 定义（`packages/global/openapi/**`，每个路由带
+  summary 和 description）→ 文档站的手写页（`document/content/docs/**`）→ 部署上的自动清单
+  （4.15 以后才有）。「文档没有、源码有」是常态，两边都不是全集。
+- 所以要确认某个接口存不存在、地址和参数是什么，直接看官方仓库 tag **v4.14.5** 的源码，
+  再用一次实测确认。聊天相关的实现在 `projects/app/src/pages/api/`，
+  OpenAPI 定义在 `packages/global/openapi/core/chat/`。
+
+看源码不用克隆整个仓库，取单个文件就行：
+
+```bash
+curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
+```
+
 ## 边界
 - 没有我的明确许可，不要动手实现：我回答你的问题、给你补充信息，都不算许可；只有我明确表示可以动手了，
   才动手。在那之前只做只读的事，不写文件、不改代码、不跑会改动仓库的命令

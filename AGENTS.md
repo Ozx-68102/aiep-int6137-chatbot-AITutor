@@ -25,7 +25,9 @@
   推送只能我做：上游推送后禁止删除和改写提交树，模型推上去的东西一旦有问题就再也改不了
 - 不擅自加依赖、换包管理器、改目录结构，如有需要直接提出来，不要静默绕过这些问题
 - 聊天页面在 `src/`，接口服务在 `server/`。浏览器只访问本仓库的接口，不直连 FastGPT。
-  FastGPT 的工作流和知识库不在本仓库改，那边的事找 FastGPT 的维护者
+  FastGPT 的工作流和知识库不在本仓库改，那边的事找 FastGPT 的维护者。
+  我们这个 FastGPT 是内部部署的 **v4.14.5** 基线，接口以官方源码为准，不要照文档站抄
+  （见 [server/AGENTS.md](server/AGENTS.md) 的「FastGPT 的版本基线」）
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts`
   里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上
   `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
