@@ -123,6 +123,9 @@ export function ChatMain({
                   </div>
                 );
               }
+              // TODO：每一轮下面加一个小的「编辑」按钮，点开是修改框
+              //（右下角「取消」「发送」），改完发出去等于把这一轮重问一遍，
+              //用户视角跟「重试」一样。设计和待定的问题写在 docs/EDIT_MESSAGE.md。
               return (
                 <p
                   key={message.id}
