@@ -7,11 +7,13 @@ import {CloseButton} from '../close-button/CloseButton.tsx';
 export function RenameSession({
   locale,
   initialTitle,
+  error,
   onCancel,
   onConfirm,
 }: {
   locale: Locale;
   initialTitle: string;
+  error: string | null;
   onCancel: () => void;
   onConfirm: (title: string) => Promise<boolean>;
 }) {
@@ -77,6 +79,11 @@ export function RenameSession({
           autoFocus
           onChange={(event) => setDraft(event.target.value)}
         />
+        {error ? (
+          <p className="m-0 text-red-600" role="alert">
+            {error}
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2">
           <button
             type="button"

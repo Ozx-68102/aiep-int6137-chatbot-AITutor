@@ -6,10 +6,12 @@ import {CloseButton} from '../close-button/CloseButton.tsx';
 
 export function ConfirmDelete({
   locale,
+  error,
   onCancel,
   onConfirm,
 }: {
   locale: Locale;
+  error: string | null;
   onCancel: () => void;
   onConfirm: () => Promise<boolean>;
 }) {
@@ -63,6 +65,11 @@ export function ConfirmDelete({
         <p className="m-0" lang={htmlLang[locale]}>
           {text.deleteConfirm}
         </p>
+        {error ? (
+          <p className="m-0 text-red-600" role="alert">
+            {error}
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2">
           <button
             type="button"

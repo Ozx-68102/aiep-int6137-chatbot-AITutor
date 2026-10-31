@@ -21,12 +21,13 @@ import {
 } from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
 import {ChatMain} from './components/chat/ChatMain.tsx';
+import type {WarningItem} from './components/chat/WarningBox.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
 import {ConfirmLogout} from './components/settings/ConfirmLogout.tsx';
 import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
-import {ConnectionToast} from './components/toast/ConnectionToast.tsx';
+import {Toast} from './components/toast/Toast.tsx';
 import {translations} from './i18n.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {titleFromQuestion} from './session/title.ts';
@@ -71,6 +72,9 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [sessionWarning, setSessionWarning] = useState<{sessionId: string; text: string} | null>(
+    null,
+  );
   const [username, setUsername] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'profile'>('chat');
   const [composingNew, setComposingNew] = useState(false);
@@ -86,15 +90,17 @@ export default function App() {
   const [threadRetry, setThreadRetry] = useState(0);
   const [serviceState, setServiceState] = useState<ServiceState>('ok');
   const sendingRef = useRef<Set<string>>(new Set());
-  const aborters = useRef(new Map<string, AbortController>());
+  const aborters = useRef(new Map<string, {controller: AbortController; turnId: string}>());
+  const stoppers = useRef(new Map<string, Promise<void>>());
   const titleSaves = useRef(new Map<string, Promise<void>>());
   const pollers = useRef(new Map<string, () => void>());
   const sessionsRef = useRef(sessions);
   const draftRef = useRef(draft);
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
-  const connectionToastRef = useRef<() => void>(() => undefined);
+  const connectionWarningRef = useRef<() => void>(() => undefined);
   const connectionCopyRef = useRef('');
+  const toastCount = useRef(0);
   const resumePartialRef = useRef<(sessionId: string, messages: Message[]) => void>(
     () => undefined,
   );
@@ -105,15 +111,24 @@ export default function App() {
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
   const historyLocked = historyLoadingId === active?.id && active.messages.length === 0;
-  const connectionToast =
-    toast === null ? null : (
-      <ConnectionToast
-        key={toast.id}
-        message={toast.text}
-        lang={toast.lang}
-        onDismiss={() => setToast(null)}
-      />
-    );
+  // 会话级的提示都在聊天区顶部的警示框里，只有一种样子。
+  const warnings: WarningItem[] = [];
+  if (serviceNotice !== null) {
+    warnings.push({id: 'service', tone: 'warning', text: serviceNotice});
+  }
+  if (notice !== null) {
+    warnings.push({id: 'notice', tone: 'error', text: notice});
+  }
+  if (sessionWarning !== null && sessionWarning.sessionId === active?.id) {
+    warnings.push({
+      id: 'session',
+      tone: 'warning',
+      text: sessionWarning.text,
+      onDismiss: () => {
+        setSessionWarning(null);
+      },
+    });
+  }
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -123,7 +138,7 @@ export default function App() {
   useEffect(() => {
     sessionsRef.current = sessions;
     draftRef.current = draft;
-    connectionToastRef.current = showConnectionToast;
+    connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
   });
@@ -172,7 +187,7 @@ export default function App() {
           return;
         }
         if (connectionFailure(error)) {
-          connectionToastRef.current();
+          connectionWarningRef.current();
           return;
         }
         setNotice(explain(error, connectionCopyRef.current));
@@ -236,11 +251,7 @@ export default function App() {
         if (connectionFailure(error)) {
           const initial = localeFromSystem();
           setComposingNew(true);
-          setToast({
-            id: 1,
-            text: translations[initial].connectionRetry,
-            lang: htmlLang[initial],
-          });
+          setNotice(translations[initial].connectionRetry);
           setAuth('ready');
           return;
         }
@@ -353,12 +364,15 @@ export default function App() {
     setActiveId(found.id);
   }
 
-  function showConnectionToast() {
-    setToast((current) => ({
-      id: (current?.id ?? 0) + 1,
-      text: text.connectionRetry,
-      lang: htmlLang[locale],
-    }));
+  function showConnectionWarning() {
+    // 连不上服务器也走聊天区顶部的警示框，不再单独弹一个浮层。
+    setNotice((current) => current ?? text.connectionRetry);
+  }
+
+  /** 成功之后的短提示：弹窗自己关了，得有个地方告诉用户「成了」。 */
+  function showToast(message: string) {
+    toastCount.current += 1;
+    setToast({id: toastCount.current, text: message, lang: htmlLang[locale]});
   }
 
   function enterLogin(detail: string | null) {
@@ -381,7 +395,7 @@ export default function App() {
       stop();
     }
     pollers.current.clear();
-    setToast(null);
+    setSessionWarning(null);
     setLoginOffline(false);
     setLoginDetail(detail);
     setLoginSubmitting(false);
@@ -417,7 +431,7 @@ export default function App() {
       }
       if (connectionFailure(error)) {
         setLoginOffline(true);
-        showConnectionToast();
+        showConnectionWarning();
         return;
       }
       setLoginDetail(explain(error, text.connectionError));
@@ -502,7 +516,7 @@ export default function App() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return;
       }
       setProfileError(explain(error, text.connectionError));
@@ -526,7 +540,7 @@ export default function App() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return;
       }
       setProfileError(explain(error, text.connectionError));
@@ -546,6 +560,7 @@ export default function App() {
     }
     try {
       const item = await renameSession(id, trimmed);
+      showToast(text.renameDone);
       setSessions((current) =>
         current.map((session) => {
           if (session.id !== id) {
@@ -564,7 +579,7 @@ export default function App() {
         return false;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return false;
       }
       setNotice(explain(error, text.connectionError));
@@ -585,7 +600,7 @@ export default function App() {
         return false;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return false;
       }
       setNotice(explain(error, text.connectionError));
@@ -603,13 +618,14 @@ export default function App() {
         return false;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return false;
       }
       setNotice(explain(error, text.connectionError));
       return false;
     }
     setSessions((current) => current.filter((session) => session.id !== id));
+    showToast(text.deleteDone);
     stopPolling(id);
     clearPending(id);
     if (!wasCurrent) {
@@ -634,7 +650,7 @@ export default function App() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return;
       }
       setNotice(explain(error, text.connectionError));
@@ -684,6 +700,7 @@ export default function App() {
       markEntering(userMessage.id);
       sendingRef.current.add(sessionId);
       setPendingIds((current) => new Set(current).add(sessionId));
+      clearSessionWarning(sessionId);
       await sendQuestion(sessionId, question, turnId);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -691,7 +708,7 @@ export default function App() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return;
       }
       if (sessionId === '') {
@@ -734,6 +751,7 @@ export default function App() {
     sendingRef.current.add(sessionId);
     setPendingIds((current) => new Set(current).add(sessionId));
     setNotice(null);
+    clearSessionWarning(sessionId);
     clearUnsent();
     setDraft('');
     updateSession(sessionId, (session) => ({
@@ -848,26 +866,17 @@ export default function App() {
     markEntering(message.id);
   }
 
-  function addNoticeMessage(sessionId: string, content: string, messageLocale: Locale) {
-    const message: Message = {
-      id: crypto.randomUUID(),
-      role: 'notice',
-      text: content,
-      locale: messageLocale,
-    };
-    updateSession(sessionId, (session) => ({
-      ...session,
-      messages: [...session.messages, message],
-    }));
-    markEntering(message.id);
-  }
-
   function clearPending(sessionId: string) {
     setPendingIds((current) => {
       const next = new Set(current);
       next.delete(sessionId);
       return next;
     });
+  }
+
+  /** 新的一轮开始了：上一轮的提示（比如「对话已停止」）不再占着位置。 */
+  function clearSessionWarning(sessionId: string) {
+    setSessionWarning((current) => (current?.sessionId === sessionId ? null : current));
   }
 
   function stopPolling(sessionId: string) {
@@ -892,7 +901,7 @@ export default function App() {
         addErrorMessage(sessionId, text.replyInterrupted, locale);
       }
       if (partial.status === 'aborted') {
-        addNoticeMessage(sessionId, text.replyStopped, locale);
+        setSessionWarning({sessionId, text: text.replyStopped});
       }
     });
     pollers.current.set(sessionId, stop);
@@ -935,7 +944,7 @@ export default function App() {
     }
     if (partial.status === 'aborted') {
       applyPartialText(sessionId, turnId, partial);
-      addNoticeMessage(sessionId, text.replyStopped, locale);
+      setSessionWarning({sessionId, text: text.replyStopped});
       return;
     }
     if (partial.status === 'finished') {
@@ -968,7 +977,7 @@ export default function App() {
   async function sendQuestion(sessionId: string, question: string, turnId: string) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
-    aborters.current.set(sessionId, controller);
+    aborters.current.set(sessionId, {controller, turnId});
     let received = '';
     try {
       addWaitingMessage(sessionId, assistantId, turnId);
@@ -988,16 +997,22 @@ export default function App() {
         removeTurn(sessionId, turnId);
         setDraft(question);
         saveUnsent(question);
-        addNoticeMessage(sessionId, text.roundBusy, locale);
+        setSessionWarning({sessionId, text: text.roundBusy});
         await refreshThread(sessionId);
         return;
       }
       if (outcome === 'aborted') {
-        // 用户按了停止。已经写出来的半截留着，一个字都没写出来就把气泡去掉。
+        // 用户按了停止。停止流程负责收尾：它去问服务器这一轮到底怎么样，
+        // 页面上说的话要跟服务器一致。
+        const stop = stoppers.current.get(sessionId);
+        if (stop) {
+          await stop;
+          return;
+        }
         if (received.trim() === '') {
           removeTurnAnswer(sessionId, turnId);
         }
-        addNoticeMessage(sessionId, text.replyStopped, locale);
+        setSessionWarning({sessionId, text: text.replyStopped});
         return;
       }
       if (outcome === 'interrupted') {
@@ -1015,13 +1030,14 @@ export default function App() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionToast();
+        showConnectionWarning();
         return;
       }
       const detail = error instanceof ApiError ? error.detail : null;
       addErrorMessage(sessionId, detail ?? text.connectionError, detail ? 'zh-CN' : locale);
     } finally {
       aborters.current.delete(sessionId);
+      stoppers.current.delete(sessionId);
       sendingRef.current.delete(sessionId);
       if (!pollers.current.has(sessionId)) {
         clearPending(sessionId);
@@ -1046,40 +1062,82 @@ export default function App() {
     }
   }
 
-  async function stopSending(sessionId: string) {
-    const controller = aborters.current.get(sessionId);
-    controller?.abort();
+  /**
+   * 用户按了停止之后的收尾。
+   *
+   * 先让服务器记下停止（服务器写停止标记，再取消正在跑的任务），
+   * 再问服务器这一轮到底怎么样：服务器说还在写就接着等，
+   * 说停了就显示「对话已停止」。页面不自己宣布停了。
+   */
+  async function finishStop(sessionId: string, turnId: string) {
     try {
-      await abortReply(sessionId);
+      await abortReply(sessionId, turnId);
     } catch {
       // 服务器那边收不到也不碍事：页面已经不等这一轮了。
     }
+
+    let partial: PartialReply | null = null;
+    try {
+      partial = await readPartial(sessionId);
+    } catch {
+      partial = null;
+    }
+
+    if (partial === null || (partial.turnId !== null && partial.turnId !== turnId)) {
+      // 问不到服务器，或者 Redis 里留着的是别的轮次：按停掉了处理。
+      removeTurnAnswer(sessionId, turnId);
+      setSessionWarning({sessionId, text: text.replyStopped});
+      return;
+    }
+    if (partial.status === 'streaming') {
+      // 服务器那边还在写：接着等，别骗用户说停了。
+      startPolling(sessionId, turnId);
+      setSessionWarning({sessionId, text: text.replyStopFailed});
+      return;
+    }
+    if (partial.status === 'failed') {
+      applyPartialText(sessionId, turnId, partial);
+      addErrorMessage(sessionId, text.replyInterrupted, locale);
+      return;
+    }
+    if (partial.status === 'finished') {
+      // 回答其实已经写完了：把答案补上，不显示「对话已停止」。
+      applyPartialText(sessionId, turnId, partial);
+      return;
+    }
+    // aborted，或者这一轮根本没开始。
+    if (partial.text.trim() === '') {
+      removeTurnAnswer(sessionId, turnId);
+    }
+    setSessionWarning({sessionId, text: text.replyStopped});
+  }
+
+  async function stopSending(sessionId: string) {
+    const entry = aborters.current.get(sessionId);
+    const turnId = entry?.turnId ?? '';
+    const operation = finishStop(sessionId, turnId);
+    stoppers.current.set(sessionId, operation);
+    // 本地先断开：页面不等这一轮了。服务器那边由 finishStop 去说。
+    entry?.controller.abort();
+    await operation;
   }
 
   if (auth === 'checking') {
-    return (
-      <>
-        <div className="h-full bg-stone-100" />
-        {connectionToast}
-      </>
-    );
+    return <div className="h-full bg-stone-100" />;
   }
 
   if (auth === 'anonymous') {
     return (
-      <>
-        <LoginScreen
-          locale={locale}
-          error={loginError}
-          offline={loginOffline}
-          submitting={loginSubmitting}
-          onLocale={setLocale}
-          onSubmit={(usernameValue, password) => {
-            void submitLogin(usernameValue, password);
-          }}
-        />
-        {connectionToast}
-      </>
+      <LoginScreen
+        locale={locale}
+        error={loginError}
+        offline={loginOffline}
+        submitting={loginSubmitting}
+        onLocale={setLocale}
+        onSubmit={(usernameValue, password) => {
+          void submitLogin(usernameValue, password);
+        }}
+      />
     );
   }
 
@@ -1112,8 +1170,7 @@ export default function App() {
         sidebarOpen={sidebarOpen}
         onShowSidebar={() => setSidebarOpen(true)}
         active={active}
-        notice={notice}
-        serviceNotice={serviceNotice}
+        warnings={warnings}
         enteringIds={enteringIds}
         onAnimationEnd={(id) => {
           setEnteringIds((current) => current.filter((item) => item !== id));
@@ -1161,7 +1218,14 @@ export default function App() {
           }}
         />
       ) : null}
-      {connectionToast}
+      {toast === null ? null : (
+        <Toast
+          key={toast.id}
+          message={toast.text}
+          lang={toast.lang}
+          onDismiss={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }
