@@ -67,7 +67,7 @@ class FastGPT:
         try:
             async with self._client.stream(
                 "POST",
-                join_url(self._base_url, "v1/chat/completions"),
+                join_url(self._base_url, "v2/chat/completions"),
                 json=payload,
             ) as response:
                 logger.info(
@@ -120,6 +120,37 @@ class FastGPT:
             raise FastGPTError
 
         return _record_page(_read_body(response))
+
+    async def stop_chat(self, chat_id: UUID) -> bool:
+        """让上游停下这一轮。
+
+        v2 的停止是一个运行态标记（Redis 里的
+        `agent_runtime_stopping:{appId}:{chatId}`），工作流每 100 毫秒看一眼，
+        到下一个节点边界就收手。v1 只能靠断连接，那招在 v2 上不管用
+        （v2 不看连接状态）。
+
+        这个接口自己会等工作流收尾，最多等五秒 —— 所以调用方不要等它的返回。
+        """
+        try:
+            response = await self._client.post(
+                join_url(self._base_url, "v2/chat/stop"),
+                json={
+                    "appId": self._app_id,
+                    "chatId": str(chat_id),
+                },
+            )
+        except httpx2.HTTPError as exc:
+            logger.error("FastGPT 停止请求发不出去 %s：%s", chat_id, exc)
+            return False
+        if response.status_code != 200:
+            logger.error("FastGPT 停止返回 %s", response.status_code)
+            return False
+        body = _read_body(response)
+        if isinstance(body, dict):
+            data = body.get("data")
+            if isinstance(data, dict) and data.get("success") is True:
+                return True
+        return False
 
     async def delete_history(self, chat_id: UUID) -> None:
         try:
