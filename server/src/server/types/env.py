@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     fastgpt_base_url: str = ""
     fastgpt_api_key: SecretStr = SecretStr("")
     fastgpt_app_id: str = ""
+    # 等上游的读超时（秒）：管「等上游第一个字节」和「两块字之间」这两件事。
+    fastgpt_read_timeout_seconds: float = Field(default=30.0, gt=0)
     database_host: str = Field(min_length=1)
     database_port: int = Field(ge=1, le=65535)
     database_name: str = Field(min_length=1)
@@ -57,6 +59,7 @@ class Settings(BaseSettings):
         "fastgpt_base_url",
         "fastgpt_app_id",
         "fastgpt_api_key",
+        "fastgpt_read_timeout_seconds",
         "database_host",
         "database_name",
         "database_user",
