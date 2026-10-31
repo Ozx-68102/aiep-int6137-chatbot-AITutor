@@ -86,6 +86,7 @@ _NO_LANGUAGE = "账号没有语言设置"
 _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
+_stop_tasks: set[asyncio.Task[None]] = set()
 _records_cache: dict[UUID, tuple[float, list[ChatRecord]]] = {}
 _RECORDS_CACHE_SECONDS = 5.0
 _RECORDS_PAGE_SIZE = 100
@@ -320,6 +321,10 @@ async def abort_session_reply(
     if not task:
         # 这一轮已经结束了，或者还没开始。不用改状态。
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # 告诉上游停下。v2 的停止是运行态标记，上游看到就收手；v1 只能靠断连接，
+    # 那一招在 v2 上不管用。这个接口自己会等上游收尾（最多五秒），所以不等它。
+    _ask_upstream_to_stop(session_id)
 
     for running in task:
         running.cancel()
@@ -579,6 +584,40 @@ def _fastgpt() -> FastGPT:
         logger.error("FastGPT 客户端未建立")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _SERVER_ERROR)
     return fastgpt
+
+
+def _upstream_client() -> FastGPT | None:
+    """上游客户端没有就返回 None。
+
+    停止是尽力而为：上游连不上不能让停止接口整个失败，
+    我们自己的状态（Redis 里的停止标记）才是页面要看的东西。
+    """
+    fastgpt = app.state.fastgpt
+    if not isinstance(fastgpt, FastGPT):
+        return None
+    return fastgpt
+
+
+def _ask_upstream_to_stop(session_id: UUID) -> None:
+    """给上游发停止请求，不等它返回。"""
+    task = asyncio.create_task(_stop_upstream(session_id))
+    _stop_tasks.add(task)
+    task.add_done_callback(_stop_tasks.discard)
+
+
+async def _stop_upstream(session_id: UUID) -> None:
+    fastgpt = _upstream_client()
+    if fastgpt is None:
+        logger.warning("上游客户端没建起来 %s，这一轮停不了上游", session_id)
+        return
+    try:
+        stopped = await fastgpt.stop_chat(session_id)
+    except Exception:
+        logger.error("上游停止失败 %s", session_id, exc_info=True)
+        return
+    logger.info(
+        "上游停止 %s：%s", session_id, "上游收到了" if stopped else "上游没回成功"
+    )
 
 
 def _require_session(
