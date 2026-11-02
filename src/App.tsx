@@ -6,7 +6,7 @@ import {ApiError} from './api/http.ts';
 import {readPartial} from './api/partial.ts';
 import type {PartialReply} from './api/partial.ts';
 import {readStatus} from './api/status.ts';
-import {logout, readProfile, updateProfile, uploadAvatar} from './api/profile.ts';
+import {changePassword, logout, readProfile, updateProfile, uploadAvatar} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {
   abortReply,
@@ -23,6 +23,7 @@ import type {LoginResult} from './api/session.ts';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import type {WarningItem} from './components/chat/WarningBox.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
+import {ChangePasswordModal} from './components/settings/ChangePasswordModal.tsx';
 import {ConfirmLogout} from './components/settings/ConfirmLogout.tsx';
 import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
@@ -66,6 +67,7 @@ export default function App() {
   const [auth, setAuth] = useState<'checking' | 'anonymous' | 'ready'>('checking');
   const [loginOffline, setLoginOffline] = useState(false);
   const [loginDetail, setLoginDetail] = useState<string | null>(null);
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => !window.matchMedia('(max-width: 767px)').matches,
@@ -90,6 +92,9 @@ export default function App() {
   const [composingNew, setComposingNew] = useState(false);
   const [sendingNew, setSendingNew] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [changePasswordBusy, setChangePasswordBusy] = useState(false);
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [savingLocale, setSavingLocale] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -460,7 +465,9 @@ export default function App() {
     setView('chat');
     setComposingNew(false);
     setConfirmLogout(false);
+    setChangePasswordOpen(false);
     setProfileError(null);
+    setChangePasswordError(null);
     setPendingIds(new Set());
     setHistoryLoadingId(null);
     loadedThreads.current.clear();
@@ -496,6 +503,7 @@ export default function App() {
     setLoginSubmitting(true);
     setLoginOffline(false);
     setLoginDetail(null);
+    setLoginNotice(null);
     try {
       const result = await login(usernameValue, password);
       await openAccount(result);
@@ -657,6 +665,39 @@ export default function App() {
       setProfileError(explain(error, text.connectionError));
     } finally {
       setLoggingOut(false);
+    }
+  }
+
+  async function submitChangePassword(
+    oldPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) {
+    if (changePasswordBusy) {
+      return;
+    }
+    setChangePasswordBusy(true);
+    setChangePasswordError(null);
+    try {
+      await changePassword(oldPassword, newPassword, confirmPassword);
+      // 成功：服务端已经清掉本设备的 login cookie、吊销了这个账号所有设备的登录，
+      // 不用再调 logout，直接带着提示回登录页。
+      setChangePasswordOpen(false);
+      setLoginNotice(text.passwordChanged);
+      enterLogin(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setChangePasswordOpen(false);
+        enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        showConnectionWarning();
+        return;
+      }
+      setChangePasswordError(explain(error, text.connectionError));
+    } finally {
+      setChangePasswordBusy(false);
     }
   }
 
@@ -1329,6 +1370,7 @@ export default function App() {
       <LoginScreen
         locale={locale}
         error={loginError}
+        notice={loginNotice}
         offline={loginOffline}
         submitting={loginSubmitting}
         onLocale={setLocale}
@@ -1410,6 +1452,10 @@ export default function App() {
         onAvatarPick={(file) => {
           void pickAvatar(file);
         }}
+        onChangePassword={() => {
+          setChangePasswordError(null);
+          setChangePasswordOpen(true);
+        }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {
           setConfirmLogout(false);
@@ -1428,6 +1474,24 @@ export default function App() {
         }}
         onConfirm={() => {
           void signOut();
+        }}
+      />
+      <ChangePasswordModal
+        locale={locale}
+        open={changePasswordOpen}
+        username={username}
+        error={changePasswordError}
+        busy={changePasswordBusy}
+        onSubmit={(oldPassword, newPassword, confirmPassword) =>
+          submitChangePassword(oldPassword, newPassword, confirmPassword)
+        }
+        onCancel={() => {
+          setChangePasswordError(null);
+          setChangePasswordOpen(false);
+        }}
+        onClose={() => {
+          setChangePasswordError(null);
+          setChangePasswordOpen(false);
         }}
       />
       <Toast
