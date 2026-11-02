@@ -74,6 +74,14 @@
 - 远端 GitHub 已经导入同一份分支名规则集
   （https://conventionalbranch.org/enforce/#rulesets）。不合规的分支名推不上去，
   本地用 `--no-verify` 跳过钩子也绕不过
+- 用 LayerFS 并行开发时，最终合并在 LayerFS 里做：0 冲突才落地 git——用 `git commit-tree`
+  把那边的分支和提交复刻过来，拓扑、每个提交的时间戳、每一步的改动痕迹都照搬；
+  分支名和提交信息按上面两条钩子规矩写（commit-tree 是底层命令，不触发钩子，
+  所以要逐条拿 `.githooks/commit-msg` 预检）。有冲突就停下来问维护者怎么合，不自己拍板
+- 复刻落地之后，把本轮在 git 里建的分支删掉（`git branch -d` 只删已合并的，删不丢内容；
+  这一步属于常驻许可，不用再问）
+- 上面这套仪式防的是真有重叠的那天：文件不相交时线性提交的信息一样全，但两条线改了
+  同一个文件时，线性重放会静默覆盖掉一边的改动，只有真合并会把冲突报出来
 - 新克隆后执行一次 `bash scripts/setup-hooks.sh`
 - 不提交 `.env`、`server/.venv`、`logs/`
 
