@@ -12,6 +12,7 @@ dependencies = [
     "furl>=2.1.4",
     "httpx2>=2.16.0",
     "pillow>=13.0.0",
+    "pillow-heif>=1.8.1",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",

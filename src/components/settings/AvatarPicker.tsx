@@ -34,7 +34,7 @@ export function AvatarPicker({
           <input
             ref={inputRef}
             type="file"
-            accept="image/png,image/jpeg"
+            accept="image/png,image/jpeg,image/heic,image/heif"
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0] ?? null;

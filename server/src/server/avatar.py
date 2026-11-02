@@ -3,17 +3,23 @@
 存进库的是处理过的图（256 见方的 PNG），不是用户传上来的原图：
 库里的大小可控，返回的类型固定，原图里带的 EXIF 也不会跟着走。
 
+收 PNG、JPEG、HEIC。iPhone 拍的照片默认是 HEIC，Pillow 自己解不了，
+要注册 pillow-heif 的打开器。
+
 SVG 不收：同源下它能带脚本。
 """
 
 from io import BytesIO
 
+import pillow_heif
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+pillow_heif.register_heif_opener()
+
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_PIXELS = 20_000_000
 SIZE = 256
-_ALLOWED_FORMATS = frozenset({"PNG", "JPEG"})
+_ALLOWED_FORMATS = frozenset({"PNG", "JPEG", "HEIF"})
 
 
 class AvatarError(Exception):
@@ -25,13 +31,13 @@ def normalize(data: bytes) -> bytes:
     if len(data) == 0:
         raise AvatarError("文件是空的")
     if len(data) > MAX_UPLOAD_BYTES:
-        raise AvatarError("文件太大，请传 2 MB 以内的")
+        raise AvatarError("文件太大，请传 5 MB 以内的")
 
     try:
         image = Image.open(BytesIO(data))
         image_format = image.format
         if image_format is None or image_format not in _ALLOWED_FORMATS:
-            raise AvatarError("只支持 PNG、JPEG")
+            raise AvatarError("只支持 PNG、JPEG、HEIC")
         if image.width * image.height > MAX_PIXELS:
             raise AvatarError("图片太大了")
         image.load()
