@@ -10,6 +10,14 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class PasswordChange(BaseModel):
+    # 密码的规则不写在这里：Pydantic 的 422 正文是数组，前端读不出字符串
+    # （见 docs/ACCOUNT_MANAGEMENT.md）。端点里手动查，回一句中文。
+    old_password: str
+    new_password: str
+    new_password_confirm: str
+
+
 class SessionItem(BaseModel):
     id: UUID
     title: str | None
