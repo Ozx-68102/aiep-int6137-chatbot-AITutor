@@ -15,7 +15,7 @@ export function LoginScreen({
 }: {
   locale: Locale;
   error: string | null;
-  /** Neutral notice (e.g. "Please log in again after changing password"), shown in stone color, not treated as an error. */
+  /** 中性的提示（比如「密码已修改，请重新登录」），石头色，不当错误处理。 */
   notice?: string | null;
   offline: boolean;
   submitting: boolean;
