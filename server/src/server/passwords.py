@@ -56,6 +56,11 @@ def check_password_policy(password: str, username: str) -> str | None:
     """
     if password != password.strip():
         return "密码首尾不能有空格"
+    # 只收英文键盘上打得出来的字符（可打印 ASCII）。中文这类字符在密码框里
+    # 打不出来也显示不了，多半是粘贴或输入法误触带进来的；前端输入框直接过滤掉，
+    # 这里再拦一道，免得有人绕过页面直接调接口，存进一个自己都登不进来的密码。
+    if any(ord(char) < 32 or ord(char) > 126 for char in password):
+        return "密码只能用英文键盘上的字符"
     if len(password) < _MIN_LENGTH or len(password) > _MAX_LENGTH:
         return f"密码长度要在 {_MIN_LENGTH} 到 {_MAX_LENGTH} 之间"
     if username != "" and username.lower() in password.lower():

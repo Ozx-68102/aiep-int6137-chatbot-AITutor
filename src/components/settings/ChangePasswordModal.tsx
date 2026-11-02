@@ -5,6 +5,17 @@ import {CloseButton} from '../close-button/CloseButton.tsx';
 import {Modal} from '../shell/Modal.tsx';
 import {PasswordStrength} from './PasswordStrength.tsx';
 
+/**
+ * 设新密码的框只收英文键盘上打得出来的字符（可打印 ASCII）：
+ * 中文、emoji、全角符号在输入时直接滤掉，不报错。多半是粘贴或
+ * 输入法误触带进来的，静默丢掉比弹一句红字友好。
+ * 旧密码那个框不过滤：它要原样对上库里存的东西。
+ * 后端 check_password_policy 有同一条硬门槛。
+ */
+function printableAscii(value: string): string {
+  return value.replace(/[^\x20-\x7E]/g, '');
+}
+
 export function ChangePasswordModal({
   locale,
   open,
@@ -84,7 +95,7 @@ export function ChangePasswordModal({
               type="password"
               autoComplete="new-password"
               value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
+              onChange={(event) => setNewPassword(printableAscii(event.target.value))}
             />
           </label>
           <p className="m-0 text-xs text-stone-500" lang={htmlLang[locale]}>
@@ -100,7 +111,7 @@ export function ChangePasswordModal({
             type="password"
             autoComplete="new-password"
             value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
+            onChange={(event) => setConfirmPassword(printableAscii(event.target.value))}
           />
         </label>
         {error ? (
