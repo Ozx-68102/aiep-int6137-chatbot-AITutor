@@ -53,6 +53,12 @@ class LoginResponse(BaseModel):
     sessions: list[SessionItem]
 
 
+class AdminLoginResponse(BaseModel):
+    """控制台登录的结果。界面还没建，先只回用户名。"""
+
+    username: str
+
+
 class ProfileResponse(BaseModel):
     id: UUID
     username: str

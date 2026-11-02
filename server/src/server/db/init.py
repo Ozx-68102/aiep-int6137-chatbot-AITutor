@@ -18,6 +18,7 @@ def init_db() -> None:
     _ensure_pinned_at_column(engine)
     _ensure_login_token_expiry(engine)
     _ensure_avatar_column(engine)
+    _ensure_role_column(engine)
     with db_session() as session:
         _ensure_admin(session)
 
@@ -28,6 +29,32 @@ def _ensure_avatar_column(engine: Engine) -> None:
         return
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE account ADD COLUMN avatar bytea"))
+
+
+def _ensure_role_column(engine: Engine) -> None:
+    """给 account 补 role 列。
+
+    已有行的 role 一律填 chat：这张表里现在只有聊天账号，控制台的管理员
+    账号是后面那批活的事（docs/ACCOUNT_MANAGEMENT.md 的顺序第 4 步）。
+    约束单独加：ADD COLUMN 带 CHECK 在 PostgreSQL 里会把整张表扫一遍验，
+    拆成两步则新列有默认值、约束只对新写的行生效。
+    """
+    columns = {column["name"] for column in inspect(engine).get_columns("account")}
+    if "role" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE account ADD COLUMN role varchar(16) "
+                "NOT NULL DEFAULT 'chat'"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE account ADD CONSTRAINT account_role_check "
+                "CHECK (role IN ('chat', 'admin'))"
+            )
+        )
 
 
 def _ensure_pinned_column(engine: Engine) -> None:

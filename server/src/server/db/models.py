@@ -14,10 +14,12 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 _LOCALE_IN = "IN ('zh-CN', 'zh-TW', 'en')"
+_ROLE_IN = "IN ('chat', 'admin')"
 
 
 class Base(DeclarativeBase):
@@ -26,10 +28,16 @@ class Base(DeclarativeBase):
 
 class Account(Base):
     __tablename__ = "account"
+    __table_args__ = (CheckConstraint(f"role {_ROLE_IN}", name="account_role_check"),)
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    # 这个账号能进哪一边：chat 是聊天页，admin 是控制台。没有第三种。
+    # 默认 chat，所以已有的库跑一遍 init 之后，老账号都还是聊天账号。
+    role: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'chat'")
+    )
     # 用户自己传的头像。存的是处理过的图（256 见方的 PNG），空着就用默认头像。
     avatar: Mapped[bytes | None] = mapped_column(LargeBinary)
     language_setting: Mapped["LanguageSetting | None"] = relationship(

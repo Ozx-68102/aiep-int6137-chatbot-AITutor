@@ -61,6 +61,7 @@ from server.reply_store import (
 from server.settings import load_settings
 from server.types import (
     AbortRequest,
+    AdminLoginResponse,
     ChatRequest,
     HistoryMessageResponse,
     HistoryResponse,
@@ -96,6 +97,13 @@ _UNAUTHORIZED = "用户名或密码不正确"
 _LOGIN_REQUIRED = "未登录"
 _COOKIE_NAME = "login"
 _COOKIE_MAX_AGE = 7 * 24 * 60 * 60
+# 控制台那一边独立的 cookie（docs/ACCOUNT_MANAGEMENT.md 顺序第 2 步）。
+# 两边的登录互不通用：聊天页拿不到 admin_login，控制台也不认 login。
+_ADMIN_COOKIE_NAME = "admin_login"
+_ROLE_CHAT = "chat"
+_ROLE_ADMIN = "admin"
+_ROLE_DENIED_CHAT = "这个账号不能登录聊天页"
+_ROLE_DENIED_ADMIN = "这个账号不能登录控制台"
 _STATUS_PATH = "/api/status"
 _SERVER_ERROR = "服务器错误"
 _NO_LANGUAGE = "账号没有语言设置"
@@ -166,7 +174,7 @@ class _RefreshLoginCookie:
                 )
                 if not already_set:
                     fresh = Response()
-                    _set_login_cookie(fresh, cookie)
+                    _set_cookie(fresh, _COOKIE_NAME, cookie)
                     headers.append("set-cookie", fresh.headers["set-cookie"])
             await send(message)
 
@@ -259,8 +267,26 @@ def login(body: LoginRequest, response: Response) -> LoginResponse:
     with db_session() as session:
         result, token = _login_account(session, body.username, body.password)
 
-    _set_login_cookie(response, token)
+    _set_cookie(response, _COOKIE_NAME, token)
     return result
+
+
+@app.post("/api/admin/login")
+def admin_login(body: LoginRequest, response: Response) -> AdminLoginResponse:
+    """控制台那一边：只认 role 是 admin 的账号，发 admin_login cookie。
+
+    跟 /api/login 同一条规矩：先验密码再看 role，密码不对一律回
+    「用户名或密码不正确」。控制台界面是后面那批活，接口先立起来。
+    """
+    _sweep_expired_tokens()
+    with db_session() as session:
+        account = _verified_account(session, body.username, body.password)
+        _require_role(account, _ROLE_ADMIN)
+        token = _new_token(session, account)
+        username = account.username
+
+    _set_cookie(response, _ADMIN_COOKIE_NAME, token)
+    return AdminLoginResponse(username=username)
 
 
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -274,12 +300,12 @@ def logout(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": _LOGIN_REQUIRED},
             )
-            _clear_login_cookie(result)
+            _clear_cookie(result, _COOKIE_NAME)
             return result
         session.delete(token)
 
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_login_cookie(result)
+    _clear_cookie(result, _COOKIE_NAME)
     return result
 
 
@@ -350,7 +376,7 @@ def change_password(
     clear_failures(_RATELIMIT_ACCOUNT_SCOPE, account_id)
     logger.info("密码已修改 %s", account_id)
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_login_cookie(result)
+    _clear_cookie(result, _COOKIE_NAME)
     return result
 
 
@@ -1070,11 +1096,12 @@ def _delete_session_row(session_id: UUID, login_cookie: str | None) -> None:
         session.delete(chat_session)
 
 
-def _login_account(
-    session: Session,
-    username: str,
-    password: str,
-) -> tuple[LoginResponse, str]:
+def _verified_account(session: Session, username: str, password: str) -> Account:
+    """密码验过的账号。顺手把落后的哈希重写一遍。
+
+    没这个人、密码不对，都是同一句话：不给探测留口子。role 要等密码
+    验对了才看（顺序见 docs/ACCOUNT_MANAGEMENT.md 的「role」一节）。
+    """
     account = session.scalar(select(Account).where(Account.username == username))
     if not isinstance(account, Account):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
@@ -1085,10 +1112,18 @@ def _login_account(
     if needs_rehash(account.password_hash):
         account.password_hash = hash_password(password)
 
-    language = account.language_setting
-    if language is None:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
+    return account
 
+
+def _require_role(account: Account, role: str) -> None:
+    """密码对了但账号不属于这一边：403，跟「密码不对」分开说。"""
+    if account.role == role:
+        return
+    denied = _ROLE_DENIED_CHAT if role == _ROLE_CHAT else _ROLE_DENIED_ADMIN
+    raise HTTPException(status.HTTP_403_FORBIDDEN, denied)
+
+
+def _new_token(session: Session, account: Account) -> str:
     token = secrets.token_urlsafe(32)
     session.add(
         LoginToken(
@@ -1097,6 +1132,22 @@ def _login_account(
             expires_at=_login_deadline(),
         )
     )
+    return token
+
+
+def _login_account(
+    session: Session,
+    username: str,
+    password: str,
+) -> tuple[LoginResponse, str]:
+    account = _verified_account(session, username, password)
+    _require_role(account, _ROLE_CHAT)
+
+    language = account.language_setting
+    if language is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
+
+    token = _new_token(session, account)
     result = LoginResponse(
         locale=language.locale,
         sessions=_session_items(account),
@@ -1105,9 +1156,14 @@ def _login_account(
 
 
 def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
+    """聊天接口只认 chat 账号。
+
+    判断放在这一层，所有聊天接口就都盖到了，不用每个端点自己记着查。
+    """
     token = _login_token(session, login_cookie)
     if token is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+    _require_role(token.account, _ROLE_CHAT)
     return token.account
 
 
@@ -1170,9 +1226,9 @@ def _cookie_is_valid(login_cookie: str) -> bool:
         return _login_token(session, login_cookie) is not None
 
 
-def _set_login_cookie(response: Response, token: str) -> None:
+def _set_cookie(response: Response, name: str, token: str) -> None:
     response.set_cookie(
-        key=_COOKIE_NAME,
+        key=name,
         value=token,
         max_age=_COOKIE_MAX_AGE,
         httponly=True,
@@ -1181,9 +1237,9 @@ def _set_login_cookie(response: Response, token: str) -> None:
     )
 
 
-def _clear_login_cookie(response: Response) -> None:
+def _clear_cookie(response: Response, name: str) -> None:
     response.delete_cookie(
-        key=_COOKIE_NAME,
+        key=name,
         path="/",
         httponly=True,
         samesite="lax",
