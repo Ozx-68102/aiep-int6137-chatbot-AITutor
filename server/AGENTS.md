@@ -49,7 +49,7 @@ curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
 - 停止上游要另外调 `POST {访问地址}/v2/chat/stop`，body 是 `{appId, chatId}`。**光断连接
   在 v2 上停不住上游**（实测：不叫停的话，上游会把整篇答案写完）。这个接口自己最多等五秒，
   所以调用方不要等它的返回。
-- 依据和实测见 [docs/FINDINGS.md](../docs/FINDINGS.md) 的「我们改用 v2/chat/completions」。
+- 依据和实测见 [docs/FASTGPT_API.md](../docs/FASTGPT_API.md) 的「停止机制」和「v1 与 v2 对话接口」。
 
 ## 边界
 - 没有我的明确许可，不要动手实现：我回答你的问题、给你补充信息，都不算许可；只有我明确表示可以动手了，
@@ -65,6 +65,10 @@ curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
   不写进代码，也不写进日志
 - 日志在仓库根目录的 `logs/server.log`，超过 5MB 会轮转归档。里面写着用户提问和
   FastGPT 的上游原文，不要贴进提交说明、文档或 issue
+- 新的 Redis 键空间一律挂在 `h2botapp-chat:` 前缀底下：应用连的 Redis 用户 `h2bot_app`
+  的 ACL 只放行这一个前缀，别的前缀会 `NoPermissionError`，而且照「Redis 不通就放行」
+  的降级写法这个错不会浮出来——功能直接静默失效。要另起前缀先请维护者放开 ACL。
+  实测见 [docs/FINDINGS.md](../docs/FINDINGS.md) 2026-11-02 那条
 - 配置模型和接口模型在 `server/src/server/types`
 
 ## 登录状态
