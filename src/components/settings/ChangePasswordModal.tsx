@@ -28,8 +28,7 @@ export function ChangePasswordModal({
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const blocked =
-    busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
+  const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
 
   // 关掉就把三个输入框清空：下次打开不带上一回输的密码。
   useEffect(() => {
