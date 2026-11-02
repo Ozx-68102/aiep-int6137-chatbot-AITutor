@@ -66,8 +66,8 @@
 - 分支名遵循 Conventional Branch（https://conventionalbranch.org）：`main`、`master`、
   `develop` 不用前缀；其余写成 `<type>/<description>`。类型只用 feature、feat、bugfix、fix、
   hotfix、release、chore，以及 ai、copilot、cursor、claude、codex。描述只用小写字母、数字、
-  连字符和点，例如 `feature/add-login-page`。提交时由 commit-check 检查，规则在
-  `commit-check.toml`，不在钩子脚本里再写一份
+  连字符和点，例如 `feature/add-login-page`。推送前由 `.githooks/pre-push` 检查，
+  正则是 https://conventionalbranch.org/v1.1.0/spec.json 里的那条，用 Perl 匹配
 - 远端 GitHub 已经导入同一份分支名规则集
   （https://conventionalbranch.org/enforce/#rulesets）。不合规的分支名推不上去，
   本地用 `--no-verify` 跳过钩子也绕不过

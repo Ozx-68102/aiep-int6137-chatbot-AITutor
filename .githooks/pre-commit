@@ -1,4 +1,0 @@
-#!/bin/sh
-# Branch names are checked by commit-check. The rules are commit-check.toml.
-# https://conventionalbranch.org/enforce/#commit-check
-exec uvx --from commit-check==2.19.4 commit-check --branch

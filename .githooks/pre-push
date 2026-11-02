@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Conventional Branch 1.1.0.
+# grammar.regex from https://conventionalbranch.org/v1.1.0/spec.json
+# Perl runs this regex the same way on macOS, Linux, and Windows Git Bash.
+# commit-msg already depends on Perl. POSIX grep -E has no (?: groups,
+# and grep -P is not available on every system.
+
+set -euo pipefail
+
+if ! command -v perl >/dev/null 2>&1; then
+  echo "pre-push: perl is required to check branch names" >&2
+  exit 1
+fi
+
+pattern='^(?:main|master|develop|(?:feature|feat|bugfix|fix|hotfix|release|chore|ai|copilot|cursor|claude|codex)/[a-z0-9]+(?:\.[a-z0-9]+)*(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)*)$'
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+
+if ! perl -e 'exit(($ARGV[0] =~ /$ARGV[1]/) ? 0 : 1)' "$branch" "$pattern"; then
+  cat >&2 <<EOF
+pre-push: branch name '${branch}' does not follow the Conventional Branch specification.
+Expected <type>/<description>, for example feature/add-login-page.
+See https://conventionalbranch.org/
+EOF
+  exit 1
+fi
