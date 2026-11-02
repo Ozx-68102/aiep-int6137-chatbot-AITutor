@@ -7,7 +7,15 @@
 - [ ] 后端加 `POST /api/register`：用户名 + 密码 + 确认密码。
 - [ ] 建账号时同时建 language_setting，缺了的话 `_profile` 和 `_login_account` 会抛 500。
 - [ ] 注册成功直接签发登录 cookie，用户直接进页面，不用再登一次。
-- [ ] 用户名撞名回 409 或 400，别让它变成 500（`account.username` 有唯一约束）。
+- [ ] 用户名先归一化再存、再比：去首尾空格 + 转小写。前端登录时已经 `trim()` 了
+  （[src/components/login/LoginScreen.tsx](../src/components/login/LoginScreen.tsx)），后端不归一化的话，
+  两边对「用户名是什么」的说法就不一样。
+- [ ] 唯一约束只挡完全一样的字符串：库里是 `UNIQUE (username)`，默认区分大小写，
+  所以 `admin`、`Admin`、`admin `（多一个空格）是三个不同的账号。归一化之后它们才算撞名，
+  撞名回 409 或 400，别让它变成 500。
+- [ ] 现在库里只有一个账号：用户名 `admin`、密码 `admin`，写在
+  [server/src/server/db/init.py](../server/src/server/db/init.py) 里，也写在 README 上。
+  改密码的接口做出来之前，这一对凭据谁都能用。
 - [ ] 登录页加「注册」入口：[src/components/login/LoginScreen.tsx](../src/components/login/LoginScreen.tsx) 现在只有登录表单。
 - [ ] 新文案在 [src/i18n.ts](../src/i18n.ts) 里三种语言各写一遍。
 
