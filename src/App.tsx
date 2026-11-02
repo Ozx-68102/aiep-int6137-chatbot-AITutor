@@ -37,7 +37,14 @@ import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
 import {startPartialPolling} from './session/poll.ts';
 import {visibleText} from './session/text.ts';
-import {pushSessionToUrl, readSessionFromUrl, replaceSessionToUrl} from './session/location.ts';
+import {
+  pushPageToUrl,
+  pushSessionToUrl,
+  readPageFromUrl,
+  readSessionFromUrl,
+  replacePageOutOfUrl,
+  replaceSessionToUrl,
+} from './session/location.ts';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
@@ -112,6 +119,11 @@ export default function App() {
   const sessionsRef = useRef(sessions);
   const draftRef = useRef(draft);
   const localeRef = useRef(locale);
+  const viewRef = useRef(view);
+  const activeIdRef = useRef(activeId);
+  // 改密页是不是自己压进历史的：正常入口压了一条，取消等于浏览器后退；
+  // 直接以 ?page=password 打开时历史里没有可退的，取消就地把参数换掉。
+  const passwordPushed = useRef(false);
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
   const connectionWarningRef = useRef<() => void>(() => undefined);
@@ -162,6 +174,8 @@ export default function App() {
     sessionsRef.current = sessions;
     draftRef.current = draft;
     localeRef.current = locale;
+    viewRef.current = view;
+    activeIdRef.current = activeId;
     connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -351,7 +365,23 @@ export default function App() {
 
   useEffect(() => {
     function onPopState() {
+      if (readPageFromUrl() === 'password') {
+        // 浏览器前进又回到改密页：历史里这一条本来就是压进去的。
+        setView('password');
+        passwordPushed.current = true;
+        return;
+      }
+      passwordPushed.current = false;
+      const leavingPassword = viewRef.current === 'password';
+      if (leavingPassword) {
+        setView('chat');
+      }
       const wanted = readSessionFromUrl();
+      if (leavingPassword && wanted === activeIdRef.current) {
+        // 从改密页退回来、会话没变：只切视图，不走 showSession/showNewChat，
+        // 输入框里没发出去的字原样留着。
+        return;
+      }
       if (wanted === null) {
         showNewChat();
         return;
@@ -379,6 +409,12 @@ export default function App() {
   }, []);
 
   function applyUrlSession(list: Session[]): void {
+    if (readPageFromUrl() === 'password') {
+      // 直接以 ?page=password 打开、或在改密页上刷新：回到改密页。
+      // 这种进入方式历史里没有我们压的那一条，取消走就地替换的路。
+      setView('password');
+      passwordPushed.current = false;
+    }
     const wanted = readSessionFromUrl();
     if (wanted === null) {
       setComposingNew(true);
@@ -462,6 +498,10 @@ export default function App() {
     setUsername(null);
     clearCachedProfile();
     setView('chat');
+    // 改密页的地址参数跟着登录态一起清掉：重新登录后该回到聊天，
+    // 不该又弹回改密页。
+    replacePageOutOfUrl();
+    passwordPushed.current = false;
     setComposingNew(false);
     setConfirmLogout(false);
     setProfileError(null);
@@ -1378,7 +1418,7 @@ export default function App() {
   }
 
   // 修改密码是独立的一页，不是弹窗：没有背景可误点，密码输一半不会丢。
-  // 取消回设置弹窗（入口在那里）。
+  // 地址带 ?page=password，刷新和后退都是页面的行为，不是弹窗的。
   if (view === 'password') {
     return (
       <ChangePasswordPage
@@ -1391,7 +1431,15 @@ export default function App() {
         }
         onCancel={() => {
           setChangePasswordError(null);
-          setView('profile');
+          if (passwordPushed.current) {
+            // 入口压过一条历史：取消就是后退，popstate 会把视图和地址一起带回去。
+            window.history.back();
+            return;
+          }
+          // 直接以 ?page=password 打开（刷新、贴地址），历史里没有可退的：
+          // 就地把参数换掉回聊天。
+          replacePageOutOfUrl();
+          setView('chat');
         }}
       />
     );
@@ -1471,6 +1519,10 @@ export default function App() {
         onChangePassword={() => {
           setChangePasswordError(null);
           setView('password');
+          // 真页面：地址变成 ?page=password（session 参数保留），压一条历史，
+          // 浏览器后退就能回来。
+          pushPageToUrl('password');
+          passwordPushed.current = true;
         }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {
