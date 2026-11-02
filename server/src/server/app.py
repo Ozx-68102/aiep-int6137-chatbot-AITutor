@@ -22,10 +22,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.exception_handlers import (
-    http_exception_handler,
-    request_validation_exception_handler,
-)
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import delete, select
@@ -166,12 +163,23 @@ class _RefreshLoginCookie:
 app.add_middleware(_RefreshLoginCookie)
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> Response:
+    """422 也回一句中文。
+
+    页面只认 {"detail": "字符串"}：Pydantic 默认的 422 正文是数组，
+    前端读不出字符串，会显示成「无法连接到服务器」。
+    """
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": _validation_message(exc)},
+    )
+
+
 @app.exception_handler(Exception)
 async def _unhandled_error(request: Request, exc: Exception) -> Response:
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
-    if isinstance(exc, RequestValidationError):
-        return await request_validation_exception_handler(request, exc)
 
     # 这里只记一行。栈由 uvicorn 打一遍就够，打两遍会把日志撑爆。
     logger.error("请求失败 %s %s：%s", request.method, request.url.path, exc)
@@ -179,6 +187,48 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": _SERVER_ERROR},
     )
+
+
+def _validation_message(exc: RequestValidationError) -> str:
+    """把校验错误拼成一句话，字段名在前，认得的类型用中文。"""
+    parts: list[str] = []
+    for error in exc.errors():
+        field = _field_name(error["loc"])
+        text = _validation_text(error)
+        parts.append(f"{field}：{text}" if field else text)
+    return "；".join(parts) or "请求参数不合法"
+
+
+def _field_name(loc: tuple[int | str, ...]) -> str:
+    """字段名：位置标记（body、path……）后面的部分。
+
+    剩下的都是序号（比如 JSON 解析失败的 loc）时不算字段名，
+    提示里不显示。
+    """
+    names = [str(item) for item in loc]
+    if names and names[0] in {"body", "path", "query", "cookie", "header"}:
+        names = names[1:]
+    if names and all(name.isdigit() for name in names):
+        return ""
+    return ".".join(names)
+
+
+def _validation_text(error: dict[str, object]) -> str:
+    # 校验器自己抛的 ValueError 消息就是中文，去掉前缀直接用。
+    message = str(error["msg"]).removeprefix("Value error, ")
+    kind = error.get("type")
+    if kind == "missing":
+        return "缺少这个字段"
+    if kind == "json_invalid":
+        return "请求的正文不是合法的 JSON"
+    if kind in {"uuid_parsing", "uuid_validation", "string_type"}:
+        return "格式不对"
+    limits = error.get("ctx")
+    if kind == "string_too_short" and isinstance(limits, dict):
+        return f"长度不能少于 {limits.get('min_length', '?')}"
+    if kind == "string_too_long" and isinstance(limits, dict):
+        return f"长度不能超过 {limits.get('max_length', '?')}"
+    return message
 
 
 @app.post("/api/login")
