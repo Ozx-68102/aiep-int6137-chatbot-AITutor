@@ -1,0 +1,12 @@
+[branch]
+conventional_branch = true
+require_description_grammar = true
+allow_branch_types = [
+  "feature", "feat",
+  "bugfix", "fix",
+  "hotfix",
+  "release",
+  "chore",
+  "ai", "claude", "codex", "copilot", "cursor",
+]
+allow_branch_names = ["main", "master", "develop"]

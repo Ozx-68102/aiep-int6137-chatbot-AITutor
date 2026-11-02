@@ -90,6 +90,8 @@ FastGPT 的访问地址、API 密钥和应用 ID，等上游的读超时（`FAST
 ## Git
 
 提交说明由 `.githooks/commit-msg` 检查：英文，类型加冒号加一句话，类型后面不带括号。
+分支名在提交时由 [commit-check](https://conventionalbranch.org/enforce/#commit-check)
+检查。允许哪些名字写在仓库根目录的 `commit-check.toml`，`.githooks/pre-commit` 只调用它。
 具体写法见 [AGENTS.md](../AGENTS.md) 的「Git」一节。
 
 克隆本仓库后需要在仓库根目录执行一次：
