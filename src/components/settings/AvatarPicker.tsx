@@ -1,10 +1,11 @@
 import {useRef} from 'react';
 import {translations} from '../../i18n.ts';
-import type {Locale} from '../../type/locale.ts';
+import {htmlLang, type Locale} from '../../type/locale.ts';
 import {AvatarImage} from '../avatar/AvatarImage.tsx';
 
 export function AvatarPicker({
   locale,
+  username,
   avatarUrl,
   busy,
   custom,
@@ -12,6 +13,7 @@ export function AvatarPicker({
   onRemove,
 }: {
   locale: Locale;
+  username: string | null;
   avatarUrl: string | null;
   busy: boolean;
   custom: boolean;
@@ -22,15 +24,20 @@ export function AvatarPicker({
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="flex items-center gap-4 border-b border-stone-300 py-4">
+    <div className="flex items-start gap-4 border-b border-stone-300 py-4">
       <AvatarImage
         src={avatarUrl}
         alt={text.avatar}
         className="size-20 shrink-0 rounded-full border border-stone-300 bg-stone-100 object-cover"
       />
-      <div className="flex flex-col items-start gap-2">
-        <p className="m-0 text-sm text-stone-600">{text.avatarHint}</p>
-        <div className="flex flex-wrap gap-2">
+      <div className="flex min-w-0 flex-col items-start">
+        {username ? (
+          <p className="m-0 truncate text-lg" lang={htmlLang[locale]}>
+            {username}
+          </p>
+        ) : null}
+        <p className="m-0 mt-4 text-xs text-stone-500">{text.avatarHint}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
           <input
             ref={inputRef}
             type="file"

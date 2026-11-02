@@ -3,7 +3,6 @@ import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
 import {LanguageMenu} from '../language/LanguageMenu.tsx';
 import {Modal} from '../shell/Modal.tsx';
-import {accountLine} from './account-line.ts';
 import {AvatarPicker} from './AvatarPicker.tsx';
 
 export function SettingsModal({
@@ -52,19 +51,13 @@ export function SettingsModal({
         <div className="flex flex-col">
           <AvatarPicker
             locale={locale}
+            username={username}
             avatarUrl={avatarUrl}
             busy={avatarBusy}
             custom={hasCustomAvatar}
             onPick={onAvatarPick}
             onRemove={onAvatarRemove}
           />
-          <div className="border-b border-stone-300 py-4">
-            <p className="m-0 text-lg" lang={htmlLang[locale]}>
-              {username
-                ? accountLine(locale, username)
-                : `${text.username}${locale === 'en' ? ':' : '：'}`}
-            </p>
-          </div>
           <div className="flex items-center justify-between gap-4 border-b border-stone-300 py-4">
             <p className="m-0" lang={htmlLang[locale]}>
               {text.language}
