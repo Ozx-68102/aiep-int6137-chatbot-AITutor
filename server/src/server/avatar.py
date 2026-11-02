@@ -10,10 +10,10 @@ from io import BytesIO
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_PIXELS = 20_000_000
 SIZE = 256
-_ALLOWED_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
+_ALLOWED_FORMATS = frozenset({"PNG", "JPEG"})
 
 
 class AvatarError(Exception):
@@ -25,13 +25,13 @@ def normalize(data: bytes) -> bytes:
     if len(data) == 0:
         raise AvatarError("文件是空的")
     if len(data) > MAX_UPLOAD_BYTES:
-        raise AvatarError("文件太大，请传 5 MB 以内的")
+        raise AvatarError("文件太大，请传 2 MB 以内的")
 
     try:
         image = Image.open(BytesIO(data))
         image_format = image.format
         if image_format is None or image_format not in _ALLOWED_FORMATS:
-            raise AvatarError("只支持 PNG、JPEG、WebP")
+            raise AvatarError("只支持 PNG、JPEG")
         if image.width * image.height > MAX_PIXELS:
             raise AvatarError("图片太大了")
         image.load()
