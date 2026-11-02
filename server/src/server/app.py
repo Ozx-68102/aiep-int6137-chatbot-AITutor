@@ -234,7 +234,16 @@ def _validation_text(error: dict[str, object]) -> str:
         return "缺少这个字段"
     if kind == "json_invalid":
         return "请求的正文不是合法的 JSON"
-    if kind in {"uuid_parsing", "uuid_validation", "string_type"}:
+    if kind in {"model_type", "model_attributes_type"}:
+        return "请求的正文不是一个对象"
+    if kind in {
+        "uuid_parsing",
+        "uuid_validation",
+        "uuid_type",
+        "string_type",
+        "int_type",
+        "bool_type",
+    }:
         return "格式不对"
     limits = error.get("ctx")
     if kind == "string_too_short" and isinstance(limits, dict):
