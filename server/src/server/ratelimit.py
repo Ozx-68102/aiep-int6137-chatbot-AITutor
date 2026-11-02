@@ -55,7 +55,10 @@ def clear_failures(scope: str, identifier: str) -> None:
 
 
 def _key(scope: str, identifier: str) -> str:
-    return f"h2botapp-ratelimit:{scope}:{identifier}"
+    # 前缀挂在 h2botapp-chat: 底下：部署的 Redis ACL 只放行这一个前缀
+    # （h2botapp-chat:*），另起前缀会被拒、限流静默失效。这个前缀指的是
+    # 整个项目，不只是聊天那一个动作。
+    return f"h2botapp-chat:ratelimit:{scope}:{identifier}"
 
 
 def _redis() -> Redis:
