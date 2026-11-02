@@ -26,9 +26,10 @@ def register_failure(scope: str, identifier: str) -> None:
     key = _key(scope, identifier)
     try:
         client = _redis()
-        count = client.incr(key)
-        if count == 1:
-            client.expire(key, WINDOW_SECONDS)
+        # SET NX 带着过期时间原子地建键：先 INCR 再 EXPIRE 的话，
+        # 两步之间进程死了会留下一个永不过期的计数。
+        if client.set(key, 1, ex=WINDOW_SECONDS, nx=True) is None:
+            client.incr(key)
     except RedisError:
         logger.warning("Redis 写不进限流计数 %s，放行这一次失败", key, exc_info=True)
 
