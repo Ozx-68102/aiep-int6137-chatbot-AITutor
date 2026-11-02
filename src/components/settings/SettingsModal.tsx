@@ -16,6 +16,7 @@ export function SettingsModal({
   saving,
   onLocale,
   onAvatarPick,
+  onChangePassword,
   onLogout,
   onClose,
 }: {
@@ -29,6 +30,7 @@ export function SettingsModal({
   saving: boolean;
   onLocale: (locale: Locale) => void;
   onAvatarPick: (file: File) => void;
+  onChangePassword: () => void;
   onLogout: () => void;
   onClose: () => void;
 }) {
@@ -69,6 +71,15 @@ export function SettingsModal({
                 onLocale(next);
               }}
             />
+          </div>
+          <div className="border-b border-stone-300 py-4">
+            <button
+              type="button"
+              className="w-fit rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+              onClick={onChangePassword}
+            >
+              {text.changePassword}
+            </button>
           </div>
           <div className="py-4">
             {error ? (
