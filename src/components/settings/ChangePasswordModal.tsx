@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
@@ -28,16 +28,19 @@ export function ChangePasswordModal({
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [wasOpen, setWasOpen] = useState(open);
   const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
 
   // 关掉就把三个输入框清空：下次打开不带上一回输的密码。
-  useEffect(() => {
+  // 照 Modal.tsx 的写法在渲染里调状态，不进 useEffect。
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (!open) {
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
     }
-  }, [open]);
+  }
 
   return (
     <Modal
