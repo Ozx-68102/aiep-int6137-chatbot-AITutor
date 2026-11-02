@@ -20,8 +20,11 @@
 - 产品与本地运行：[README.md](README.md)
 - 工具版本、环境变量、本地启动、Git 钩子：[docs/TECH.md](docs/TECH.md)
 - 新人上手：[docs/开发手册/](docs/开发手册/)
-- 实测到的反直觉行为：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，
-  也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
+- 实测到的反直觉行为（浏览器、库、平台层）：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，
+  不写密钥、密码、cookie，也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和
+  FastGPT 的上游原文，超过 5MB 会轮转归档
+- FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)。聊天流、停止、
+  重试和 `message` 表：[docs/INTERRUPTED_REPLY.md](docs/INTERRUPTED_REPLY.md)
 - 界面上的提示（警示框、消息里的错误、表单里的红字）放在哪里：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
 - 后端特有的规矩和命令：[server/AGENTS.md](server/AGENTS.md)
 

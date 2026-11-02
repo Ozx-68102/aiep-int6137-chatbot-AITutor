@@ -16,7 +16,7 @@
 
 ## 本地运行
 
-工具版本和 Git 钩子见 [docs/TECH.md](docs/TECH.md)，实测与文档不一致的地方见 [docs/FINDINGS.md](docs/FINDINGS.md)。
+工具版本和 Git 钩子见 [docs/TECH.md](docs/TECH.md)，实测与文档不一致的地方见 [docs/FINDINGS.md](docs/FINDINGS.md)，FastGPT 上游的接口实测见 [docs/FASTGPT_API.md](docs/FASTGPT_API.md)。
 
 先在本机装好 PostgreSQL 和 Redis 并确认它们在运行。然后在仓库根目录准备 `.env`：复制 `.env.example`，填上自己的 FastGPT、数据库和 Redis 连接信息。
 
