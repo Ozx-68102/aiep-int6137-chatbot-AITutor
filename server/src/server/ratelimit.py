@@ -30,9 +30,7 @@ def register_failure(scope: str, identifier: str) -> None:
         if count == 1:
             client.expire(key, WINDOW_SECONDS)
     except RedisError:
-        logger.warning(
-            "Redis 写不进限流计数 %s，放行这一次失败", key, exc_info=True
-        )
+        logger.warning("Redis 写不进限流计数 %s，放行这一次失败", key, exc_info=True)
 
 
 def is_locked(scope: str, identifier: str) -> bool:
