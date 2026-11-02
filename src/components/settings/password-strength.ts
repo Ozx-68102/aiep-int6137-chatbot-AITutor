@@ -25,10 +25,13 @@ export function passwordStrength(password: string, username: string | null): Str
     return 0;
   }
 
-  let score = 0;
-  if (password.length >= 8) {
-    score = 1;
+  // 不足 8 位过不了后端的硬门槛：直接按「太弱」算，
+  // 不让字符多样性的加分把它抬上去。
+  if (password.length < 8) {
+    return 0;
   }
+
+  let score = 1;
   if (password.length >= 12) {
     score = 2;
   }
