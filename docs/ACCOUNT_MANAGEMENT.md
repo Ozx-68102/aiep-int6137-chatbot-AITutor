@@ -111,9 +111,12 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ## role
 
-- [ ] `account` 加 `role` 列，取值 `chat`（只能进聊天页）和 `admin`（只能进控制台）。没有第三种。
-- [ ] 登录先验密码再判 role：密码不对一律回「用户名或密码不正确」；密码对了但 role 不对，回 403 说明这个账号不能进这一边。
-- [ ] role 的判断放在 `_account_from_cookie` 那一层（[server/src/server/app.py](../server/src/server/app.py)）：聊天接口只认 `chat`，`/api/admin/*` 只认 `admin`。
+- [x] `account` 加 `role` 列，取值 `chat`（只能进聊天页）和 `admin`（只能进控制台）。没有第三种。
+  数据库加了 `account_role_check` 约束，已有行一律填 `chat`（`init.py` 的 `_ensure_role_column`）。
+- [x] 登录先验密码再判 role：密码不对一律回「用户名或密码不正确」；密码对了但 role 不对，回 403 说明这个账号不能进这一边。
+- [x] role 的判断放在 `_account_from_cookie` 那一层（[server/src/server/app.py](../server/src/server/app.py)）：聊天接口只认 `chat`，`/api/admin/*` 只认 `admin`。
+  聊天侧已经盖全；`/api/admin/*` 目前只有 `POST /api/admin/login`（发 `admin_login` cookie），
+  控制台其余接口和界面是顺序第 4 步。
 
 ## 控制台
 
@@ -212,7 +215,7 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ## 数据库要加的
 
-- [ ] `account`：`role`、`must_change_password`、`disabled`、`created_at`
+- [ ] `account`：`role`（已加，2026-11-03）、`must_change_password`、`disabled`、`created_at`
 - [ ] `login_token`：`revoked_at`
 - [ ] 新表 `audit_log`
 
