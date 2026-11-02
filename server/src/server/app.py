@@ -10,8 +10,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import (
     Cookie,
     FastAPI,
@@ -35,6 +33,7 @@ from server import avatar as avatar_image
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
+from server.passwords import hash_password, needs_rehash, verify_password
 from server.reply_store import (
     ABORTED,
     FAILED,
@@ -1008,12 +1007,11 @@ def _login_account(
     if not isinstance(account, Account):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
 
-    hasher = PasswordHasher()
-    if not _password_matches(hasher, account.password_hash, password):
+    if not verify_password(account.password_hash, password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _UNAUTHORIZED)
 
-    if hasher.check_needs_rehash(account.password_hash):
-        account.password_hash = hasher.hash(password)
+    if needs_rehash(account.password_hash):
+        account.password_hash = hash_password(password)
 
     language = account.language_setting
     if language is None:
@@ -1136,12 +1134,3 @@ def _session_item(item: ChatSession) -> SessionItem:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-def _password_matches(hasher: PasswordHasher, stored_hash: str, password: str) -> bool:
-    try:
-        hasher.verify(stored_hash, password)
-    except (VerifyMismatchError, VerificationError, InvalidHashError):
-        return False
-
-    return True
