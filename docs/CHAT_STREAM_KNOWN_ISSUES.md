@@ -5,6 +5,20 @@
 现在的问题都记在这里。每条写清楚：什么现象、为什么、代码在哪、怎么修。
 这一层有几处做得很好，列在最后——修的时候不要推翻它们。
 
+## 验证情况
+
+**实测过的**（本机 PostgreSQL，2026-11-02）：
+
+- 每个请求的清扫 `DELETE`：中位 0.31 毫秒，最大 15.5 毫秒。
+- 每个请求的查令牌 + 续期（`SELECT` + `UPDATE`）：中位 0.53 毫秒，最大 5.1 毫秒。
+- 同步查库对事件循环的影响：一个 5 毫秒的心跳在同步查库时最大间隔 6.6 毫秒（约 1.6 毫秒额外延迟）。
+- 清扫那条 `DELETE` 的执行计划：`Seq Scan on login_token`，扫过 111 行。
+- FastAPI 的 422 正文：`{"detail": [...]}`，是数组（`fastapi/exception_handlers.py` 里的
+  `request_validation_exception_handler`）。
+
+**读代码推出来的（没跑起来看）**：第 5 条（轮询空转）、第 10 条（发送失败清掉输入）。
+这两条要确认得开浏览器点一遍。
+
 ## 根因：这一轮的结局没有跟着流走
 
 流里只有两种帧：内容帧，和 `data: [DONE]`（[server/src/server/app.py:831](../server/src/server/app.py#L831)、
@@ -77,13 +91,25 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 而 `_login_token` 每次都调 `_sweep_expired_tokens()`（[server/src/server/app.py:998](../server/src/server/app.py#L998)），
 后者自己再开一个连接做一次 `DELETE`（[server/src/server/app.py:1012](../server/src/server/app.py#L1012)）。
 
-所以每个请求 = 2 次数据库往返 + 1 次写事务，全在事件循环上跑。
+所以每个请求 = **2 个数据库连接、3 条语句（`SELECT` 查令牌、`UPDATE` 续期、`DELETE` 清扫）、2 次提交**。
+而且中间件和业务接口各续期一次——同一个令牌行一个请求里被更新两遍。
 
 [docs/FINDINGS.md](FINDINGS.md) 里「异步接口里的同步数据库调用会卡住事件循环」记的就是这类问题，
-当时修了 4 个异步接口，**中间件这条漏了**。本机一个人用看不出来；有人同时聊天时，
-正在流式输出的那一轮会被别的请求卡住。
+当时修了 4 个异步接口，**中间件这条漏了**。
 
-**怎么修**：cookie 的有效性判断不该每次请求都查库；过期令牌的清扫改成定时任务。
+实测下来代价不算大（见上面「验证情况」：中位不到 1 毫秒），但有两个会随规模变坏的地方：
+
+- **`login_token` 上没有 `expires_at` 的索引**（只有主键和 `token_hash` 的唯一索引）。
+  清扫那条 `DELETE` 走的是 `Seq Scan`——现在扫过 111 行，代价可以忽略；
+  行数涨上去以后，每个请求都要把整张表扫一遍。
+- **`login_token` 表只增不减**：每登录一次插一行，只有过期了才被清掉。本机已经攒了 111 行。
+  公网上学生反复登录，这张表就一直涨，而清扫是每个请求都扫全表。
+
+**怎么修**：
+
+- 清扫改成定时任务（或者只在查不到令牌时才清），别每个请求都扫。
+- 给 `expires_at` 加一个索引。
+- cookie 的有效性判断不该每次请求都查库：续期可以在同一个事务里做，中间件那次查库可以省掉。
 
 ## 7. 一轮没有可查的时间线
 
@@ -140,11 +166,13 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 ## 11. 后端的错误信息会被前端显示成「无法连接到服务器」
 
 前端只认 `{"detail": "字符串"}`（[src/api/http.ts:96](../src/api/http.ts#L96)）。
-FastAPI 的 422 校验错误返回的 `detail` 是数组，前端读不出字符串，
-于是 `explain()` 显示成「无法连接到服务器」，`connectionFailure()` 还判定成「服务连不上」
-（[src/api/failure.ts:3](../src/api/failure.ts#L3)）。
+FastAPI 的 422 校验错误返回 `{"detail": [...]}`，`detail` 是数组（实测确认，
+`fastapi/exception_handlers.py` 里的 `request_validation_exception_handler`），
+前端读不出字符串，于是 `explain()` 显示成「无法连接到服务器」，
+`connectionFailure()` 还判定成「服务连不上」（[src/api/failure.ts:3](../src/api/failure.ts#L3)）。
 
 **怎么修**：后端所有错误都返回 `{"detail": "中文句子"}`，别用 Pydantic 的字段校验去报业务错误。
+`HTTPException` 走的是 `http_exception_handler`，出来就是 `{"detail": exc.detail}`，是字符串，没问题。
 
 ## 12. 模块级可变状态，只能单进程跑
 
