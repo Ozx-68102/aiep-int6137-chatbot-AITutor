@@ -54,8 +54,10 @@ def check_password_policy(password: str, username: str) -> str | None:
     前端的强度检测器拿同样的规则做提示，硬门槛只在这里拦。
     消息要跟前端一字不差（分工见 docs/ACCOUNT_MANAGEMENT.md）。
     """
-    if password != password.strip():
-        return "密码首尾不能有空格"
+    # 密码只能是连续字符：空格一律不收（维护者定的规则）。
+    # 制表符、换行这些落在下面那条 ASCII 门槛里。
+    if " " in password:
+        return "密码不能包含空格"
     # 只收英文键盘上打得出来的字符（可打印 ASCII）。中文这类字符在密码框里
     # 打不出来也显示不了，多半是粘贴或输入法误触带进来的；前端输入框直接过滤掉，
     # 这里再拦一道，免得有人绕过页面直接调接口，存进一个自己都登不进来的密码。
