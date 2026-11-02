@@ -1051,20 +1051,30 @@ export default function App() {
 
   function startPolling(sessionId: string, turnId: string) {
     stopPolling(sessionId);
-    const stop = startPartialPolling(sessionId, (partial) => {
-      applyPartialText(sessionId, turnId, partial);
-      if (partial.status === 'streaming') {
-        return;
-      }
-      stopPolling(sessionId);
-      clearPending(sessionId);
-      if (partial.status === 'failed') {
-        addErrorMessage(sessionId, text.replyInterrupted, locale, turnId);
-      }
-      if (partial.status === 'aborted') {
-        setSessionWarning({sessionId, text: text.replyStopped});
-      }
-    });
+    const stop = startPartialPolling(
+      sessionId,
+      (partial) => {
+        applyPartialText(sessionId, turnId, partial);
+        if (partial.status === 'streaming') {
+          return;
+        }
+        stopPolling(sessionId);
+        clearPending(sessionId);
+        if (partial.status === 'failed') {
+          addErrorMessage(sessionId, text.replyInterrupted, locale, turnId);
+        }
+        if (partial.status === 'aborted') {
+          setSessionWarning({sessionId, text: text.replyStopped});
+        }
+      },
+      () => {
+        // 会话没了（404）或会话过期（401）：轮询到此为止，输入框解锁。
+        // 过期的事不用在这里说：下一个动作（发送、重命名……）自然会
+        // 带着去重新登录。
+        stopPolling(sessionId);
+        clearPending(sessionId);
+      },
+    );
     pollers.current.set(sessionId, stop);
   }
 
