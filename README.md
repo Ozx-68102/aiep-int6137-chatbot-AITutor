@@ -39,3 +39,9 @@ uv run python -m server.db.init
 这条命令只创建缺失的表和列。账号已存在时不改密码，也不清除已有会话。初始账号的用户名和密码写在 `server/src/server/db/init.py`。
 
 Python 命令统一在 `server/` 目录下用 `uv run` 执行，不要在仓库根目录直接用 `python` 或 `pip`。
+
+## 第三方数据署名
+
+密码强度检测用 [zxcvbn-ts](https://github.com/zxcvbn-ts/zxcvbn)（MIT）。它的中文字典
+（`@zxcvbn-ts/language-zh`）数据来自 OpenSubtitles 2024，经 [OPUS](https://opus.nlpl.eu/)
+（Helsinki-NLP）提供，许可为 ODC-BY；原数据归字幕贡献者和版权方所有。

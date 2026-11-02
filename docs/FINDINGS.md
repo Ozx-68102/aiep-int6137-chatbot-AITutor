@@ -617,3 +617,35 @@ cd server && uv run python -m server.db.backfill
 
 顺带：验收这类「Redis 挂了要放行」的降级路径时，降级被触发这件事本身
 要从日志里主动确认一遍，不能只看接口返回——接口返回正常恰恰可能是降级在兜着。
+
+## 2026-11-03 zxcvbn-ts 的中文字典是拼音，收不到无声调的连写
+
+密码强度检测换成 [zxcvbn-ts](https://github.com/zxcvbn-ts/zxcvbn)（Dropbox zxcvbn 的
+TypeScript 移植，MIT）。选型时以为「中文支持」是指汉字，实测下来不是：
+
+- `@zxcvbn-ts/language-zh` 里**一个汉字都没有**，全是罗马化拼音。字典来源是
+  OpenSubtitles 2024（经 OPUS 提供，ODC-BY，再分发要署名——已写进 README）。
+- `wordSequences` 那份是无声调拼音（`yi er san si wu`），但 `commonWords` 那份**带声调**
+  （`wǒ`、`nǐ`、`shì`）。用户实际输入的是无声调连写，带声调的条目匹配不上。
+- 后果是拼音常见密码评分虚高：不加自定义字典时，`woaini1314`（中文泄露密码榜的常客）
+  被评成 **3 分「强」**，`wodemingzi`、`xiaoming123` 同样是 3 分。`@zxcvbn-ts/language-common`
+  的泄露密码榜偏西方，也收不到这些。
+- 修法：zxcvbn-ts 的 `dictionary` 是 `Record<string, string[]>`，官方支持自定义字典
+  （数组顺序即频率排名）。补一份约 70 条的 `pinyin-common`（woaini、520、1314、mima、
+  xiaoming、wangzherongyao 这类），`woaini1314`/`wodemingzi`/`mima123` 降到「太弱」，
+  `xiaoming123` 降到「弱」。这是给库喂数据，不是自己另写一套评分。
+- 简繁体不分：拼音对简繁是同一套（愛/爱 都是 ai），所以一个 zh 包对两边同等有效。
+
+字典体积（`pnpm build` 实测）：core 33 kB、common 435 kB、zh 427 kB、en 1.2 MB，
+合计约 2.1 MB（gzip 约 1 MB）。全部走动态 import，**首屏包只涨 9 kB**
+（718.56 → 727.52 kB，gzip 217.31 → 220.02），字典只在打开改密弹窗时才下载。
+单次 `check` 实测 2 毫秒，每次击键同步算就够，不用 debounce。
+
+顺带一条产品结论：**密码只收可打印 ASCII**。中文密码在桌面的 `type=password` 框里
+本来就打不出来（输入法不做组合），手机上贴进去、换台电脑就登不进来，等于把自己锁在
+外面（控制台重置密码还没建）。所以设密码的输入框静默过滤非 ASCII（不报错），
+后端 `check_password_policy` 有同一条门槛。zh 字典仍然有用——用户实际会输入的
+「中文密码」本来就是拼音。
+
+（另：`banana42` 这类 8 位小写加数字，zxcvbn 评「弱」——这是它按猜测次数给的老实判断，
+不是按长度卡人。原来的手搓版本给「一般」是虚高。8 位仍然能过、能用，只是提示老实了。）
