@@ -557,3 +557,11 @@ cd server && uv run python -m server.db.backfill
 （前者超了说明上游没接上，该快速失败；后者是模型在想，该给足时间）。
 目前没有遇到慢上游的情况，先不加这层复杂度。
 
+## 2026-11-02 Starlette 的 multipart 大小限制管不着上传的文件
+
+做头像上传时查出来的：`starlette/formparsers.py` 里的 `max_part_size`（默认 1 MB）
+只管普通表单字段，不管上传的文件。文件那一份是写进 `SpooledTemporaryFile` 的，
+超过 1 MB 就落到临时文件上，没有上限。
+
+所以「Starlette 默认限制上传 1 MB」这种说法不成立。要给上传的文件限大小得自己定：
+我们读文件时只读上限加一的字节，超了直接退回去（`server/src/server/avatar.py`）。

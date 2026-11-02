@@ -17,8 +17,17 @@ def init_db() -> None:
     _ensure_pinned_column(engine)
     _ensure_pinned_at_column(engine)
     _ensure_login_token_expiry(engine)
+    _ensure_avatar_column(engine)
     with db_session() as session:
         _ensure_admin(session)
+
+
+def _ensure_avatar_column(engine: Engine) -> None:
+    columns = {column["name"] for column in inspect(engine).get_columns("account")}
+    if "avatar" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE account ADD COLUMN avatar bytea"))
 
 
 def _ensure_pinned_column(engine: Engine) -> None:

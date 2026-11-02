@@ -6,8 +6,8 @@ import {ApiError} from './api/http.ts';
 import {readPartial} from './api/partial.ts';
 import type {PartialReply} from './api/partial.ts';
 import {readStatus} from './api/status.ts';
-import {logout, readProfile, updateProfile} from './api/profile.ts';
-import type {Profile} from './api/profile.ts';
+import {deleteAvatar, logout, readProfile, updateProfile, uploadAvatar} from './api/profile.ts';
+import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {
   abortReply,
   createSession,
@@ -84,6 +84,8 @@ export default function App() {
     null,
   );
   const [username, setUsername] = useState<string | null>(() => cachedProfile?.username ?? null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [savingAvatar, setSavingAvatar] = useState(false);
   const [view, setView] = useState<'chat' | 'profile'>('chat');
   const [composingNew, setComposingNew] = useState(false);
   const [sendingNew, setSendingNew] = useState(false);
@@ -255,6 +257,7 @@ export default function App() {
         if (profile) {
           setUsername(profile.username);
           setLocale(profile.locale);
+          setAvatarUrl(profile.avatarUrl);
           saveCachedProfile({username: profile.username, locale: profile.locale});
         }
         setAuth('ready');
@@ -414,6 +417,7 @@ export default function App() {
       const profile = await readProfile();
       setUsername(profile.username);
       setLocale(profile.locale);
+      setAvatarUrl(profile.avatarUrl);
       saveCachedProfile({username: profile.username, locale: profile.locale});
     } catch {
       return;
@@ -520,6 +524,7 @@ export default function App() {
       .then((profile) => {
         setUsername(profile.username);
         setLocale(profile.locale);
+        setAvatarUrl(profile.avatarUrl);
         saveCachedProfile({username: profile.username, locale: profile.locale});
       })
       .catch((error: unknown) => {
@@ -576,6 +581,7 @@ export default function App() {
       const profile = await updateProfile(next);
       setUsername(profile.username);
       setLocale(profile.locale);
+      setAvatarUrl(profile.avatarUrl);
       saveCachedProfile({username: profile.username, locale: profile.locale});
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -589,6 +595,54 @@ export default function App() {
       setProfileError(explain(error, text.connectionError));
     } finally {
       setSavingLocale(false);
+    }
+  }
+
+  async function pickAvatar(file: File) {
+    if (savingAvatar) {
+      return;
+    }
+    setSavingAvatar(true);
+    setProfileError(null);
+    try {
+      const profile = await uploadAvatar(file);
+      setAvatarUrl(profile.avatarUrl);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        showConnectionWarning();
+        return;
+      }
+      setProfileError(explain(error, text.connectionError));
+    } finally {
+      setSavingAvatar(false);
+    }
+  }
+
+  async function removeAvatar() {
+    if (savingAvatar) {
+      return;
+    }
+    setSavingAvatar(true);
+    setProfileError(null);
+    try {
+      const profile = await deleteAvatar();
+      setAvatarUrl(profile.avatarUrl);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        enterLogin(error.detail);
+        return;
+      }
+      if (connectionFailure(error)) {
+        showConnectionWarning();
+        return;
+      }
+      setProfileError(explain(error, text.connectionError));
+    } finally {
+      setSavingAvatar(false);
     }
   }
 
@@ -1290,6 +1344,7 @@ export default function App() {
         activeId={activeId}
         settingsOpen={view === 'profile'}
         username={username}
+        avatarUrl={avatarUrl}
         onCreate={addSession}
         onClose={() => {
           closeSidebar();
@@ -1339,10 +1394,19 @@ export default function App() {
         locale={locale}
         open={view === 'profile'}
         username={username}
+        avatarUrl={avatarUrl}
+        avatarBusy={savingAvatar}
+        hasCustomAvatar={avatarUrl !== null && !avatarUrl.startsWith(defaultAvatarUrl)}
         error={confirmLogout ? null : profileError}
         saving={savingLocale}
         onLocale={(next) => {
           void changeLocale(next);
+        }}
+        onAvatarPick={(file) => {
+          void pickAvatar(file);
+        }}
+        onAvatarRemove={() => {
+          void removeAvatar();
         }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {

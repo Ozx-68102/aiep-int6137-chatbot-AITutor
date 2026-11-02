@@ -49,6 +49,9 @@ class ProfileResponse(BaseModel):
     id: UUID
     username: str
     locale: Literal["zh-CN", "zh-TW", "en"]
+    # 头像的地址。默认头像由前端提供（/avatar-default.svg），
+    # 自己传的头像走接口，地址后面带内容哈希：换了图地址就变，缓存自动失效。
+    avatar_url: str
 
 
 class ProfileUpdate(BaseModel):

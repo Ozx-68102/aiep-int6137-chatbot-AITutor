@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -29,6 +30,8 @@ class Account(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    # 用户自己传的头像。存的是处理过的图（256 见方的 PNG），空着就用默认头像。
+    avatar: Mapped[bytes | None] = mapped_column(LargeBinary)
     language_setting: Mapped["LanguageSetting | None"] = relationship(
         back_populates="account",
         uselist=False,

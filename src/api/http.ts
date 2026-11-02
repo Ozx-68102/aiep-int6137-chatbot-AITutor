@@ -41,7 +41,7 @@ export async function withConnectionRetry<T>(run: () => Promise<T>): Promise<T> 
 
 export async function requestEmpty(
   path: string,
-  init?: {method?: string; body?: string},
+  init?: {method?: string; body?: string | FormData},
 ): Promise<void> {
   await withConnectionRetry(async () => {
     const response = await request(path, init);
@@ -56,7 +56,7 @@ export async function requestEmpty(
 
 export async function requestJson(
   path: string,
-  init?: {method?: string; body?: string},
+  init?: {method?: string; body?: string | FormData},
 ): Promise<unknown> {
   return withConnectionRetry(async () => {
     const response = await request(path, init);
@@ -72,12 +72,20 @@ export async function requestJson(
   });
 }
 
-async function request(path: string, init?: {method?: string; body?: string}): Promise<Response> {
+async function request(
+  path: string,
+  init?: {method?: string; body?: string | FormData},
+): Promise<Response> {
   try {
     return await fetch(path, {
       method: init?.method ?? 'GET',
       credentials: 'include',
-      headers: init?.body === undefined ? undefined : {'Content-Type': 'application/json'},
+      // FormData 的 Content-Type 由浏览器自己带（里面要带 boundary），
+      // 这里再写死成 json 就坏了。
+      headers:
+        init?.body === undefined || init.body instanceof FormData
+          ? undefined
+          : {'Content-Type': 'application/json'},
       body: init?.body,
     });
   } catch {

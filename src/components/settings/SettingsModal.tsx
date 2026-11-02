@@ -4,23 +4,34 @@ import {CloseButton} from '../close-button/CloseButton.tsx';
 import {LanguageMenu} from '../language/LanguageMenu.tsx';
 import {Modal} from '../shell/Modal.tsx';
 import {accountLine} from './account-line.ts';
+import {AvatarPicker} from './AvatarPicker.tsx';
 
 export function SettingsModal({
   locale,
   open,
   username,
+  avatarUrl,
+  avatarBusy,
+  hasCustomAvatar,
   error,
   saving,
   onLocale,
+  onAvatarPick,
+  onAvatarRemove,
   onLogout,
   onClose,
 }: {
   locale: Locale;
   open: boolean;
   username: string | null;
+  avatarUrl: string | null;
+  avatarBusy: boolean;
+  hasCustomAvatar: boolean;
   error: string | null;
   saving: boolean;
   onLocale: (locale: Locale) => void;
+  onAvatarPick: (file: File) => void;
+  onAvatarRemove: () => void;
   onLogout: () => void;
   onClose: () => void;
 }) {
@@ -39,6 +50,14 @@ export function SettingsModal({
           {text.profile}
         </h2>
         <div className="flex flex-col">
+          <AvatarPicker
+            locale={locale}
+            avatarUrl={avatarUrl}
+            busy={avatarBusy}
+            custom={hasCustomAvatar}
+            onPick={onAvatarPick}
+            onRemove={onAvatarRemove}
+          />
           <div className="border-b border-stone-300 py-4">
             <p className="m-0 text-lg" lang={htmlLang[locale]}>
               {username

@@ -1,4 +1,4 @@
-import {PanelLeftClose, SquarePlus, User} from 'lucide-react';
+import {PanelLeftClose, SquarePlus} from 'lucide-react';
 import {useLayoutEffect, useRef} from 'react';
 import {SessionRow} from './SessionRow.tsx';
 import logoUrl from '../../assets/H-Squared_Bot_Vector.svg';
@@ -6,6 +6,7 @@ import {translations} from '../../i18n.ts';
 import {orderSessions} from '../../session/pin-order.ts';
 import type {Session} from '../../type/chat.ts';
 import type {Locale} from '../../type/locale.ts';
+import {AvatarImage} from '../avatar/AvatarImage.tsx';
 import {sidebarClass} from './class.ts';
 
 export function Sidebar({
@@ -16,6 +17,7 @@ export function Sidebar({
   activeId,
   settingsOpen,
   username,
+  avatarUrl,
   onCreate,
   onClose,
   onOpenSession,
@@ -31,6 +33,7 @@ export function Sidebar({
   activeId: string | null;
   settingsOpen: boolean;
   username: string | null;
+  avatarUrl: string | null;
   onCreate: () => void;
   onClose: () => void;
   onOpenSession: (id: string) => void;
@@ -172,7 +175,11 @@ export function Sidebar({
           aria-current={settingsOpen ? 'page' : undefined}
           onClick={onOpenSettings}
         >
-          <User aria-hidden="true" className="size-4 shrink-0" />
+          <AvatarImage
+            src={avatarUrl}
+            alt=""
+            className="size-7 shrink-0 rounded-full border border-stone-300 bg-stone-100 object-cover"
+          />
           <span className="truncate">{username ?? text.profile}</span>
         </button>
       </aside>

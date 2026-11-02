@@ -12,7 +12,16 @@ from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
+from fastapi import (
+    Cookie,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
@@ -25,6 +34,7 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from server import avatar as avatar_image
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
@@ -86,6 +96,10 @@ _COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 _STATUS_PATH = "/api/status"
 _SERVER_ERROR = "服务器错误"
 _NO_LANGUAGE = "账号没有语言设置"
+_NO_AVATAR = "没有头像"
+# 默认头像在前端的静态资源里：/avatar-default.svg。后端不复制一份，
+# 两份一样的图迟早会走偏。
+_DEFAULT_AVATAR_URL = "/avatar-default.svg"
 _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
@@ -216,6 +230,53 @@ def update_profile(
         if language is None:
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
         language.locale = body.locale
+        return _profile(account)
+
+
+@app.post("/api/avatar")
+def upload_avatar(
+    file: Annotated[UploadFile, File()],
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> ProfileResponse:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        # 只读上限加一的字节：超了直接退回去，不把它整个读进内存。
+        data = file.file.read(avatar_image.MAX_UPLOAD_BYTES + 1)
+        try:
+            account.avatar = avatar_image.normalize(data)
+        except avatar_image.AvatarError as error:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+        return _profile(account)
+
+
+@app.get("/api/avatar")
+def read_avatar(
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> Response:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        data = account.avatar
+
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _NO_AVATAR)
+
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "ETag": f'"{_avatar_version(data)}"',
+        },
+    )
+
+
+@app.delete("/api/avatar")
+def delete_avatar(
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> ProfileResponse:
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        account.avatar = None
         return _profile(account)
 
 
@@ -975,7 +1036,23 @@ def _profile(account: Account) -> ProfileResponse:
     locale = language.locale
     if locale != "zh-CN" and locale != "zh-TW" and locale != "en":
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
-    return ProfileResponse(id=account.id, username=account.username, locale=locale)
+    return ProfileResponse(
+        id=account.id,
+        username=account.username,
+        locale=locale,
+        avatar_url=_avatar_url(account),
+    )
+
+
+def _avatar_url(account: Account) -> str:
+    data = account.avatar
+    if data is None:
+        return _DEFAULT_AVATAR_URL
+    return f"/api/avatar?v={_avatar_version(data)}"
+
+
+def _avatar_version(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:16]
 
 
 def _cookie_is_valid(login_cookie: str) -> bool:
