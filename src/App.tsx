@@ -444,6 +444,12 @@ export default function App() {
   }
 
   function enterLogin(detail: string | null) {
+    // 被踢回登录页时，正打到一半的字存起来，登录成功后放回输入框。
+    // 主动退出不走这里存：signOut 成功之后会把这份缓存清掉。
+    const typed = draftRef.current.trim();
+    if (typed !== '') {
+      saveUnsent(typed);
+    }
     setAuth('anonymous');
     setSessions([]);
     setActiveId(null);
@@ -516,7 +522,12 @@ export default function App() {
     let next = sessionsFromList(result.sessions);
     setSessions(next);
     applyUrlSession(next);
-    setDraft('');
+    // 被踢时存下的那句话放回输入框；放回就消费掉，别带去再下一次登录。
+    const unsent = readUnsent();
+    setDraft(unsent);
+    if (unsent !== '') {
+      clearUnsent();
+    }
     setNotice(null);
     setView('chat');
     setAuth('ready');
@@ -631,6 +642,9 @@ export default function App() {
     try {
       await logout();
       enterLogin(null);
+      // 主动退出：enterLogin 刚存过草稿，这里清掉，别带去下一次登录。
+      // （退出时 401 是被踢，走上面 catch 的路，不清。）
+      clearUnsent();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(null);
@@ -801,6 +815,8 @@ export default function App() {
       await sendQuestion(sessionId, question, turnId);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        // 会话在发出前就过期了：这句提问存起来，登录后放回输入框。
+        saveUnsent(question);
         enterLogin(error.detail);
         return;
       }
@@ -1205,6 +1221,9 @@ export default function App() {
     } catch (error) {
       removeTurnAnswer(sessionId, turnId);
       if (error instanceof ApiError && error.status === 401) {
+        // 发送时被踢：发送前草稿已经清了，这句提问存起来，
+        // 登录后放回输入框。
+        saveUnsent(question);
         enterLogin(error.detail);
         return;
       }
