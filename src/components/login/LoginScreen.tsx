@@ -7,6 +7,7 @@ import {LanguageMenu} from '../language/LanguageMenu.tsx';
 export function LoginScreen({
   locale,
   error,
+  notice,
   offline,
   submitting,
   onLocale,
@@ -14,6 +15,8 @@ export function LoginScreen({
 }: {
   locale: Locale;
   error: string | null;
+  /** Neutral notice (e.g. "Please log in again after changing password"), shown in stone color, not treated as an error. */
+  notice?: string | null;
   offline: boolean;
   submitting: boolean;
   onLocale: (locale: Locale) => void;
@@ -74,6 +77,11 @@ export function LoginScreen({
             lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
           >
             {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p className="m-0 text-stone-600" lang={htmlLang[locale]}>
+            {notice}
           </p>
         ) : null}
         <button
