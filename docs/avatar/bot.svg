@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="默认头像">
+  <title>默认头像 · 机器人</title>
+  <defs>
+    <linearGradient id="b-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F2FCFB"/>
+      <stop offset="1" stop-color="#BEEBE6"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="128" fill="url(#b-bg)"/>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 68V48" stroke="#02234A" stroke-width="7"/>
+    <circle cx="128" cy="36" r="12" fill="#FFBF06"/>
+    <rect x="28" y="110" width="22" height="46" rx="11" fill="#00A9A1"/>
+    <rect x="206" y="110" width="22" height="46" rx="11" fill="#00A9A1"/>
+    <rect x="48" y="68" width="160" height="128" rx="40" fill="#FFFFFF" stroke="#00A9A1" stroke-width="7"/>
+    <circle cx="98" cy="120" r="13" fill="#02234A"/>
+    <circle cx="158" cy="120" r="13" fill="#02234A"/>
+    <circle cx="94" cy="116" r="4" fill="#FFFFFF"/>
+    <circle cx="154" cy="116" r="4" fill="#FFFFFF"/>
+    <rect x="96" y="152" width="64" height="14" rx="7" fill="#00BEB8"/>
+  </g>
+</svg>

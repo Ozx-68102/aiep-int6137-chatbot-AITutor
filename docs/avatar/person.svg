@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="默认头像">
+  <title>默认头像 · 人形剪影</title>
+  <defs>
+    <linearGradient id="a-bg" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#3ED0C6"/>
+      <stop offset="1" stop-color="#00958E"/>
+    </linearGradient>
+    <clipPath id="a-clip">
+      <circle cx="128" cy="128" r="128"/>
+    </clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="128" fill="url(#a-bg)"/>
+  <g clip-path="url(#a-clip)" fill="#FFFFFF">
+    <circle cx="128" cy="99" r="34"/>
+    <path d="M128 141c-35 0-63 28-63 63v52h126v-52c0-35-28-63-63-63z"/>
+  </g>
+  <circle cx="128" cy="128" r="127" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="2"/>
+</svg>
