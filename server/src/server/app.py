@@ -109,7 +109,7 @@ _OLD_PASSWORD_WRONG = "旧密码不正确"
 _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
 _RATE_LIMITED = "尝试次数太多，请 15 分钟后再试"
 # 限流计数分两个维度，各自锁各自的：账号和来源 IP。scope 会拼进 Redis 的键名
-# （h2botapp-ratelimit:{scope}:{identifier}，见 ratelimit.py）。
+# （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。
 _RATELIMIT_ACCOUNT_SCOPE = "password"
 _RATELIMIT_IP_SCOPE = "password:ip"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
