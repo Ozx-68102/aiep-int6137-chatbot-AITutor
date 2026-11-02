@@ -28,6 +28,19 @@
 
 登录时的查询也要改成按小写比（[server/src/server/app.py](../server/src/server/app.py) 里现在是 `Account.username == username`）。
 
+现状的坑（实测 2026-11-02，本机 PostgreSQL；2026-11-03 从 FINDINGS.md 挪来）：
+
+- **唯一约束只挡一模一样的字符串**：`account.username` 列是 `character varying(64)`、
+  默认排序规则，`'admin' = 'ADMIN'`、`'admin' = 'admin '`（多一个空格）都是 false。
+  也就是说 `admin`、`Admin`、`admin ` 在库里是三个不同的账号，`UNIQUE (username)` 挡不住。
+- **前端归一化、后端没有**：登录时页面把用户名 `trim()` 了再发
+  （`src/components/login/LoginScreen.tsx`），后端 `_login_account` 直接拿原样去比。
+  真有账号叫 `admin ` 的话，页面永远登不进去：发过去的是 `admin`。以后加注册接口，
+  两边必须用同一套归一化。
+- **撞名现在会变成 500，不是 409**：插入时违反唯一约束抛 IntegrityError，
+  被 `app.py` 里那个通用异常处理器接住，返回 `{"detail": "服务器错误"}`。
+  应用层没有先查一遍重复，全靠数据库拦。（现在库里只有 `admin` 一个账号，没有重复。）
+
 ## 注册
 
 - [ ] `POST /api/register`：用户名 + 密码 + 再输一次密码。
@@ -40,6 +53,15 @@
 强度检测器：用 zxcvbn-ts（Dropbox zxcvbn 的 TypeScript 移植）——像破解工具那样按字典加模式估猜测次数，不按长度分档（那样会把 8 位的好密码判成「弱」，逼人写更长的，记不住），score 0–4 映射到 4 档标签（太弱 / 弱 / 一般 / 强）。字典用 common（泄露密码榜 + 键盘图）+ en + zh；zh 包是带声调的拼音，匹配不上无声调连写，另补一份约 70 条的拼音常见词自定义字典（实测和依据见 [docs/FINDINGS.md](FINDINGS.md) 2026-11-03 那条）。字典懒加载，打开弹窗才拉，首屏包只多 9 kB。两条显示规则跟后端硬门槛对齐：不足 8 位、含用户名，直接「太弱」。只是建议，不拿它拦人。
 
 **分工**：前端是提示，后端是门槛。两边的硬门槛（长度、不能有空格、只收 ASCII、不能包含用户名）必须一字不差；强度评分只是建议，不拿它拦人。
+
+为什么只收连续字符（维护者定的，2026-11-03；从 FINDINGS.md 挪来）：中文密码在桌面的
+`type=password` 框里本来就打不出来（输入法不做组合），手机上贴进去、换台电脑就登不进来——
+等于把自己锁在外面（控制台重置密码还没建）。空格不收之后，NIST 推荐的 passphrase
+（`correct horse` 那种形态）不可用了；连写形式照样能拿高分（实测 `dinosaurbirthday` → 一般、
+`bananahorse42` → 强），但全常用词连写会掉档（`correct horse` 强 → `correcthorse` 弱：
+少了空格分隔，两个高频词的猜测数低）。长而好记的密码从此主要靠生僻选词和长度。
+zh 强度字典仍然有用——用户实际会输入的「中文密码」本来就是拼音
+（zxcvbn-ts 拼音字典的实测见 [docs/FINDINGS.md](FINDINGS.md) 2026-11-03 那条）。
 
 ## 修改密码（第一个做的）
 
