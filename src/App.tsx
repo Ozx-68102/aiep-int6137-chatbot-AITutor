@@ -23,7 +23,7 @@ import type {LoginResult} from './api/session.ts';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import type {WarningItem} from './components/chat/WarningBox.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
-import {ChangePasswordModal} from './components/settings/ChangePasswordModal.tsx';
+import {ChangePasswordPage} from './components/settings/ChangePasswordPage.tsx';
 import {ConfirmLogout} from './components/settings/ConfirmLogout.tsx';
 import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
@@ -88,11 +88,10 @@ export default function App() {
   const [username, setUsername] = useState<string | null>(() => cachedProfile?.username ?? null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [savingAvatar, setSavingAvatar] = useState(false);
-  const [view, setView] = useState<'chat' | 'profile'>('chat');
+  const [view, setView] = useState<'chat' | 'profile' | 'password'>('chat');
   const [composingNew, setComposingNew] = useState(false);
   const [sendingNew, setSendingNew] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [changePasswordBusy, setChangePasswordBusy] = useState(false);
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -465,7 +464,6 @@ export default function App() {
     setView('chat');
     setComposingNew(false);
     setConfirmLogout(false);
-    setChangePasswordOpen(false);
     setProfileError(null);
     setChangePasswordError(null);
     setPendingIds(new Set());
@@ -682,12 +680,10 @@ export default function App() {
       await changePassword(oldPassword, newPassword, confirmPassword);
       // 成功：服务端已经清掉本设备的 login cookie、吊销了这个账号所有设备的登录，
       // 不用再调 logout，直接带着提示回登录页。
-      setChangePasswordOpen(false);
       setLoginNotice(text.passwordChanged);
       enterLogin(null);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        setChangePasswordOpen(false);
         enterLogin(error.detail);
         return;
       }
@@ -1381,6 +1377,26 @@ export default function App() {
     );
   }
 
+  // 修改密码是独立的一页，不是弹窗：没有背景可误点，密码输一半不会丢。
+  // 取消回设置弹窗（入口在那里）。
+  if (view === 'password') {
+    return (
+      <ChangePasswordPage
+        locale={locale}
+        username={username}
+        error={changePasswordError}
+        busy={changePasswordBusy}
+        onSubmit={(oldPassword, newPassword, confirmPassword) =>
+          submitChangePassword(oldPassword, newPassword, confirmPassword)
+        }
+        onCancel={() => {
+          setChangePasswordError(null);
+          setView('profile');
+        }}
+      />
+    );
+  }
+
   return (
     <div className={chatFrameClass(narrow, sidebarOpen)}>
       <Sidebar
@@ -1454,7 +1470,7 @@ export default function App() {
         }}
         onChangePassword={() => {
           setChangePasswordError(null);
-          setChangePasswordOpen(true);
+          setView('password');
         }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {
@@ -1474,24 +1490,6 @@ export default function App() {
         }}
         onConfirm={() => {
           void signOut();
-        }}
-      />
-      <ChangePasswordModal
-        locale={locale}
-        open={changePasswordOpen}
-        username={username}
-        error={changePasswordError}
-        busy={changePasswordBusy}
-        onSubmit={(oldPassword, newPassword, confirmPassword) =>
-          submitChangePassword(oldPassword, newPassword, confirmPassword)
-        }
-        onCancel={() => {
-          setChangePasswordError(null);
-          setChangePasswordOpen(false);
-        }}
-        onClose={() => {
-          setChangePasswordError(null);
-          setChangePasswordOpen(false);
         }}
       />
       <Toast

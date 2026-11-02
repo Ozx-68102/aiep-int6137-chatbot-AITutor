@@ -1,67 +1,50 @@
 import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
-import {CloseButton} from '../close-button/CloseButton.tsx';
-import {Modal} from '../shell/Modal.tsx';
 import {PasswordStrength} from './PasswordStrength.tsx';
 
 /**
- * 设新密码的框只收英文键盘上的连续字符（可打印 ASCII，不含空格）：
- * 中文、emoji、全角符号、空格在输入时直接滤掉，不报错。中文多半是
- * 粘贴或输入法误触带进来的，静默丢掉比弹一句红字友好。
- * 旧密码那个框不过滤：它要原样对上库里存的东西。
+ * 设密码的框只收英文键盘上打得出来的连续字符（可打印 ASCII，不含空格）：
+ * 空格、中文、emoji、全角符号在输入时直接滤掉，不报错。中文多半是粘贴
+ * 或输入法误触带进来的，静默丢掉比弹一句红字友好。
  * 后端 check_password_policy 有同一条硬门槛。
  */
 function allowedChars(value: string): string {
   return value.replace(/[^\x21-\x7E]/g, '');
 }
 
-export function ChangePasswordModal({
+/**
+ * 修改密码，独立的一页，不是弹窗：弹窗点一下背景就关，密码输一半全丢
+ * （密码框的内容也不进草稿缓存，救不回来）。页面没有背景可误点，
+ * 离开只有「取消」按钮这一条显式的路。
+ *
+ * 组件随页面切换整个卸载重挂，三个输入框天然清空，不用手写清理逻辑。
+ */
+export function ChangePasswordPage({
   locale,
-  open,
   username,
   error,
   busy,
   onSubmit,
   onCancel,
-  onClose,
 }: {
   locale: Locale;
-  open: boolean;
   username: string | null;
   error: string | null;
   busy: boolean;
   onSubmit: (oldPassword: string, newPassword: string, confirmPassword: string) => Promise<void>;
   onCancel: () => void;
-  onClose: () => void;
 }) {
   const text = translations[locale];
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [wasOpen, setWasOpen] = useState(open);
   const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
 
-  // 关掉就把三个输入框清空：下次打开不带上一回输的密码。
-  // 照 Modal.tsx 的写法在渲染里调状态，不进 useEffect。
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (!open) {
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-    }
-  }
-
   return (
-    <Modal
-      open={open}
-      titleId="change-password-title"
-      panelClass="w-full max-w-md p-8"
-      onClose={onClose}
-    >
+    <main className="flex h-full items-center justify-center bg-stone-100 px-4">
       <form
-        className="flex flex-col gap-6"
+        className="flex w-full max-w-sm flex-col gap-4 rounded-xl border border-stone-300 bg-white p-6"
         onSubmit={(event) => {
           event.preventDefault();
           // busy 时按钮已经禁用，这里再挡一道，防双击。
@@ -71,10 +54,9 @@ export function ChangePasswordModal({
           void onSubmit(oldPassword, newPassword, confirmPassword);
         }}
       >
-        <CloseButton label={text.close} onClick={onClose} />
-        <h2 id="change-password-title" className="m-0 pr-10 text-xl" lang={htmlLang[locale]}>
+        <h1 className="m-0 text-lg" lang={htmlLang[locale]}>
           {text.changePassword}
-        </h2>
+        </h1>
         <label className="flex flex-col gap-1">
           {text.oldPassword}
           <input
@@ -140,6 +122,6 @@ export function ChangePasswordModal({
           </button>
         </div>
       </form>
-    </Modal>
+    </main>
   );
 }
