@@ -33,7 +33,13 @@ from server import avatar as avatar_image
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
-from server.passwords import hash_password, needs_rehash, verify_password
+from server.passwords import (
+    check_password_policy,
+    hash_password,
+    needs_rehash,
+    verify_password,
+)
+from server.ratelimit import clear_failures, is_locked, register_failure
 from server.reply_store import (
     ABORTED,
     FAILED,
@@ -61,6 +67,7 @@ from server.types import (
     LoginRequest,
     LoginResponse,
     PartialReplyResponse,
+    PasswordChange,
     ProfileResponse,
     ProfileUpdate,
     SessionCreate,
@@ -98,6 +105,13 @@ _NO_AVATAR = "没有头像"
 _DEFAULT_AVATAR_URL = "/avatar-default.svg"
 _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
+_OLD_PASSWORD_WRONG = "旧密码不正确"
+_NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
+_RATE_LIMITED = "尝试次数太多，请 15 分钟后再试"
+# 限流计数分两个维度，各自锁各自的：账号和来源 IP。scope 会拼进 Redis 的键名
+# （h2botapp-ratelimit:{scope}:{identifier}，见 ratelimit.py）。
+_RATELIMIT_ACCOUNT_SCOPE = "password"
+_RATELIMIT_IP_SCOPE = "password:ip"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
 _stop_tasks: set[asyncio.Task[None]] = set()
 # 每一轮落定以后写库的任务。单独放着：写库不能被那一轮的取消带跑。
@@ -280,6 +294,55 @@ def update_profile(
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _NO_LANGUAGE)
         language.locale = body.locale
         return _profile(account)
+
+
+@app.post("/api/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    body: PasswordChange,
+    request: Request,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> Response:
+    """改密码：验旧密码、写新哈希，把这个账号的登录全踢下线。
+
+    argon2 是 CPU 活：端点用同步的，跑在线程池里，不堵事件循环
+    （/api/login 同一个道理）。请求体里有密码，日志只记账号 id。
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    with db_session() as session:
+        account = _account_from_cookie(session, login_cookie)
+        account_id = str(account.id)
+        # 锁定期间不做验证：不然锁形同虚设，攻击者还能拿这个接口继续试旧密码。
+        locked = is_locked(_RATELIMIT_ACCOUNT_SCOPE, account_id) or is_locked(
+            _RATELIMIT_IP_SCOPE, client_ip
+        )
+        if locked:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, _RATE_LIMITED)
+
+        if not verify_password(account.password_hash, body.old_password):
+            register_failure(_RATELIMIT_ACCOUNT_SCOPE, account_id)
+            register_failure(_RATELIMIT_IP_SCOPE, client_ip)
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, _OLD_PASSWORD_WRONG)
+
+        if body.new_password != body.new_password_confirm:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, _NEW_PASSWORD_MISMATCH)
+
+        policy_error = check_password_policy(body.new_password, account.username)
+        if policy_error is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
+
+        # 写哈希和吊销令牌在同一个事务里：不留「密码改了、旧令牌还活着」的缝。
+        # 所有设备都踢，含当前这一台，重新登录。
+        account.password_hash = hash_password(body.new_password)
+        session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
+
+    # 只清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的账号在
+    # 正常改密，它们的计数不该跟着被清掉。
+    clear_failures(_RATELIMIT_ACCOUNT_SCOPE, account_id)
+    logger.info("密码已修改 %s", account_id)
+    result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_login_cookie(result)
+    return result
 
 
 @app.post("/api/avatar")
