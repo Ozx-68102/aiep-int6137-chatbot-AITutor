@@ -4,10 +4,14 @@ import {htmlLang, type Locale} from '../../type/locale.ts';
 import {PasswordStrength} from './PasswordStrength.tsx';
 
 /**
- * 设密码的框只收英文键盘上打得出来的连续字符（可打印 ASCII，不含空格）：
+ * 三个框都只收英文键盘上打得出来的连续字符（可打印 ASCII，不含空格）：
  * 空格、中文、emoji、全角符号在输入时直接滤掉，不报错。中文多半是粘贴
  * 或输入法误触带进来的，静默丢掉比弹一句红字友好。
  * 后端 check_password_policy 有同一条硬门槛。
+ *
+ * 旧密码框也过滤：库里的密码都是经过策略存进去的，不含空格和非 ASCII，
+ * 过滤不会把人锁在外面。登录页的密码框才是真不能过滤的那个——它要能
+ * 原样对上任何历史密码，所以那边不动。
  */
 function allowedChars(value: string): string {
   return value.replace(/[^\x21-\x7E]/g, '');
@@ -65,7 +69,7 @@ export function ChangePasswordPage({
             type="password"
             autoComplete="current-password"
             value={oldPassword}
-            onChange={(event) => setOldPassword(event.target.value)}
+            onChange={(event) => setOldPassword(allowedChars(event.target.value))}
           />
         </label>
         <div className="flex flex-col gap-2">
