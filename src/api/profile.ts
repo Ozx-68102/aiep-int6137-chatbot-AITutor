@@ -31,10 +31,6 @@ export async function uploadAvatar(file: File): Promise<Profile> {
   return parseProfile(await requestJson('/api/avatar', {method: 'POST', body}));
 }
 
-export async function deleteAvatar(): Promise<Profile> {
-  return parseProfile(await requestJson('/api/avatar', {method: 'DELETE'}));
-}
-
 export async function logout(): Promise<void> {
   await requestEmpty('/api/logout', {method: 'POST'});
 }

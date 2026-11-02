@@ -6,7 +6,7 @@ import {ApiError} from './api/http.ts';
 import {readPartial} from './api/partial.ts';
 import type {PartialReply} from './api/partial.ts';
 import {readStatus} from './api/status.ts';
-import {deleteAvatar, logout, readProfile, updateProfile, uploadAvatar} from './api/profile.ts';
+import {logout, readProfile, updateProfile, uploadAvatar} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {
   abortReply,
@@ -606,30 +606,6 @@ export default function App() {
     setProfileError(null);
     try {
       const profile = await uploadAvatar(file);
-      setAvatarUrl(profile.avatarUrl);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return;
-      }
-      if (connectionFailure(error)) {
-        showConnectionWarning();
-        return;
-      }
-      setProfileError(explain(error, text.connectionError));
-    } finally {
-      setSavingAvatar(false);
-    }
-  }
-
-  async function removeAvatar() {
-    if (savingAvatar) {
-      return;
-    }
-    setSavingAvatar(true);
-    setProfileError(null);
-    try {
-      const profile = await deleteAvatar();
       setAvatarUrl(profile.avatarUrl);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -1404,9 +1380,6 @@ export default function App() {
         }}
         onAvatarPick={(file) => {
           void pickAvatar(file);
-        }}
-        onAvatarRemove={() => {
-          void removeAvatar();
         }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {

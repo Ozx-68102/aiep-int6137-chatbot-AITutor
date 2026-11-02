@@ -16,7 +16,6 @@ export function SettingsModal({
   saving,
   onLocale,
   onAvatarPick,
-  onAvatarRemove,
   onLogout,
   onClose,
 }: {
@@ -30,7 +29,6 @@ export function SettingsModal({
   saving: boolean;
   onLocale: (locale: Locale) => void;
   onAvatarPick: (file: File) => void;
-  onAvatarRemove: () => void;
   onLogout: () => void;
   onClose: () => void;
 }) {
@@ -56,7 +54,6 @@ export function SettingsModal({
             busy={avatarBusy}
             custom={hasCustomAvatar}
             onPick={onAvatarPick}
-            onRemove={onAvatarRemove}
           />
           <div className="flex items-center justify-between gap-4 border-b border-stone-300 py-4">
             <p className="m-0" lang={htmlLang[locale]}>

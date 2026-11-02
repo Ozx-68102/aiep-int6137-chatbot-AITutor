@@ -270,16 +270,6 @@ def read_avatar(
     )
 
 
-@app.delete("/api/avatar")
-def delete_avatar(
-    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
-) -> ProfileResponse:
-    with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
-        account.avatar = None
-        return _profile(account)
-
-
 @app.get("/api/status")
 def read_status() -> StatusResponse:
     """页面用它做常驻提示。只报状态，不带任何内容，也不需要登录。"""

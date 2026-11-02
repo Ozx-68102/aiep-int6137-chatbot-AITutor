@@ -10,7 +10,6 @@ export function AvatarPicker({
   busy,
   custom,
   onPick,
-  onRemove,
 }: {
   locale: Locale;
   username: string | null;
@@ -18,7 +17,6 @@ export function AvatarPicker({
   busy: boolean;
   custom: boolean;
   onPick: (file: File) => void;
-  onRemove: () => void;
 }) {
   const text = translations[locale];
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,16 +60,6 @@ export function AvatarPicker({
           >
             {busy ? text.avatarSaving : custom ? text.changeAvatar : text.uploadAvatar}
           </button>
-          {custom ? (
-            <button
-              type="button"
-              className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20 disabled:opacity-50"
-              disabled={busy}
-              onClick={onRemove}
-            >
-              {text.removeAvatar}
-            </button>
-          ) : null}
         </div>
       </div>
     </div>
