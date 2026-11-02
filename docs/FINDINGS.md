@@ -592,3 +592,28 @@ cd server && uv run python -m server.db.backfill
   被 `app.py` 里那个通用异常处理器接住，返回 `{"detail": "服务器错误"}`。
   应用层没有先查一遍重复，全靠数据库拦。
   （现在库里只有 `admin` 一个账号，没有重复。）
+
+## 2026-11-02 部署的 Redis 只放行 `h2botapp-chat:*` 前缀，新键空间会静默失效
+
+给改密接口做失败限流时实测出来的：应用连的 Redis 用户是 `h2bot_app`，
+它的 ACL 只授权了 `h2botapp-chat:*` 这一个键前缀——
+
+- `h2botapp-chat:ratelimit:password:x` → 放行（SET/GET/INCR/EXPIRE/DEL/SCAN 都可以）；
+- `h2botapp-ratelimit:password:x`、`h2botapp:x`、裸键 → 一律
+  `NoPermissionError: No permissions to access a key`；
+- `ACL WHOAMI` / `ACL GETUSER` 也被禁了：应用侧**没法自查自己有哪些权限**，
+  只能像上面这样一个前缀一个前缀试。
+
+**坑在「静默」两个字**：`NoPermissionError` 是 `RedisError` 的子类，所以凡是照
+`reply_store` 那套「Redis 不通就放行并记警告」降级写法的功能，撞上 ACL 拒绝时
+不会报错、不会 500——功能直接失效，只有日志里每条请求多一坨警告栈。
+限流第一版就是这么全军覆没的：连错 5 次旧密码，第 6 次照旧放行，
+表面上接口一切正常。
+
+所以规矩是：**新的 Redis 键空间一律挂在 `h2botapp-chat:` 前缀底下**
+（维护者确认过：这个前缀指的是整个项目，不是只有聊天那一个动作），
+要另起前缀就得先请维护者放开 ACL。限流键现在是
+`h2botapp-chat:ratelimit:{scope}:{identifier}`（`server/src/server/ratelimit.py`）。
+
+顺带：验收这类「Redis 挂了要放行」的降级路径时，降级被触发这件事本身
+要从日志里主动确认一遍，不能只看接口返回——接口返回正常恰恰可能是降级在兜着。

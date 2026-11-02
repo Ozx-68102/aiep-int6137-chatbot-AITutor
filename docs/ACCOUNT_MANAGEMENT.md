@@ -43,12 +43,12 @@
 
 ## 修改密码（第一个做的）
 
-- [ ] 后端加 `POST /api/password`：旧密码 + 新密码 + 确认新密码。
-- [ ] 校验旧密码（`_password_matches` 已经有了）。
-- [ ] 写新 hash。
-- [ ] 吊销这个账号其它设备的登录 token；当前设备也踢掉，重新登录。
-- [ ] 改密码这条路径也限流。
-- [ ] 设置弹窗里加「修改密码」：[src/components/settings/SettingsModal.tsx](../src/components/settings/SettingsModal.tsx)。
+- [x] 后端加 `POST /api/password`：旧密码 + 新密码 + 确认新密码。
+- [x] 校验旧密码（`_password_matches` 已经有了；已收进 `passwords.verify_password`）。
+- [x] 写新 hash。
+- [x] 吊销这个账号其它设备的登录 token；当前设备也踢掉，重新登录。
+- [x] 改密码这条路径也限流。
+- [x] 设置弹窗里加「修改密码」：[src/components/settings/SettingsModal.tsx](../src/components/settings/SettingsModal.tsx)。
 
 ## 强制改密码
 
@@ -60,19 +60,19 @@
 
 后端抽一个 `server/src/server/passwords.py`：
 
-- [ ] `hash_password(password)`
-- [ ] `verify_password(stored_hash, password)`
-- [ ] `needs_rehash(stored_hash)`
-- [ ] `generate_password(length)`
-- [ ] `check_password_policy(password, username)` —— 返回一句中文提示
+- [x] `hash_password(password)`
+- [x] `verify_password(stored_hash, password)`
+- [x] `needs_rehash(stored_hash)`
+- [x] `generate_password(length)`
+- [x] `check_password_policy(password, username)` —— 返回一句中文提示
 
-前端也抽一个：强度检测器一个模块 + 一个组件，注册和改密两个表单复用。
+前端也抽一个：强度检测器一个模块 + 一个组件，注册和改密两个表单复用。（改密表单已经在用：`src/components/settings/password-strength.ts` + `PasswordStrength.tsx`，注册做好直接复用。）
 
 ## 后端错误信息
 
-- [ ] 所有错误都返回 `{"detail": "中文句子"}`。
-- [ ] 不要用 Pydantic 的 `Field(min_length=...)` 来报密码规则：422 的 detail 是数组，前端读不出字符串，会显示成「无法连接到服务器」（[src/api/http.ts](../src/api/http.ts)、[src/api/failure.ts](../src/api/failure.ts)）。
-- [ ] 改密接口不要把请求体写进日志（`/api/chat` 那样写日志是反面例子）。
+- [x] 所有错误都返回 `{"detail": "中文句子"}`。（422 也统一成一句中文了，见 [server/src/server/app.py](../server/src/server/app.py) 的 `_validation_error`。）
+- [x] 不要用 Pydantic 的 `Field(min_length=...)` 来报密码规则：422 的 detail 是数组，前端读不出字符串，会显示成「无法连接到服务器」（[src/api/http.ts](../src/api/http.ts)、[src/api/failure.ts](../src/api/failure.ts)）。
+- [x] 改密接口不要把请求体写进日志（`/api/chat` 那样写日志是反面例子）。
 
 ## role
 
@@ -92,9 +92,9 @@
 
 ## 基础安全
 
-- [ ] 登录失败限流：账号和 IP 两个维度，退避锁定，计数放 Redis（Redis 挂了放行并记一条警告）。
+- [ ] 登录失败限流：账号和 IP 两个维度，退避锁定，计数放 Redis（Redis 挂了放行并记一条警告）。（`ratelimit.py` 已经在了，改密这条路径已接；登录路径还没接。）
 - [ ] 停用账号：`disabled` 列，登录时给明确提示，不跟「密码错」混成一句。
-- [ ] 改密码后吊销该账号其它设备的 token。
+- [x] 改密码后吊销该账号其它设备的 token。
 - [ ] 审计表 `audit_log`：登录成功、登录失败、注册、改密码、停用启用、建账号、重置密码。里面绝不能出现密码。失败明细留 30 天。
 
 ## 会话状态通道
@@ -168,9 +168,9 @@
 
 - [ ] 页面加 `expired` 状态：聊天页原地保留，输入框上方提示「会话已过期，请重新登录」+ 一个「重新登录」按钮，登录框弹出来；不清会话列表、不清草稿。（现在的 `enterLogin` 是一把清空，[src/App.tsx](../src/App.tsx)）
 - [ ] 发送前预检：点发送先打一个轻量鉴权请求，401 就不发，把草稿保住。
-- [ ] 被踢时把输入框里的内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。
+- [x] 被踢时把输入框里的内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。（commit 6da0b34）
 - [ ] `login_token` 加 `revoked_at`：撤销的时候标记而不是删行，服务器才分得清「令牌不认识 / 被撤销 / 账号被停用」，页面也能给出对应的一句话。
-- [ ] 轮询遇到 401 要停下来并解锁输入框（现在只认 404，会每 500 毫秒空转一次，[src/session/poll.ts](../src/session/poll.ts)）。
+- [x] 轮询遇到 401 要停下来并解锁输入框（原来只认 404，会每 500 毫秒空转一次，[src/session/poll.ts](../src/session/poll.ts)）。（commit 04984de）
 - [ ] 「账号被停用」是终态：提示「账号已被停用，请联系管理员」，不给登录框（登录了也没用）。
   跟「会话过期」分开，不要混成一个状态。
 - [ ] 通知客户端这件事本身走「会话状态通道」那一节；这一节只管善后。

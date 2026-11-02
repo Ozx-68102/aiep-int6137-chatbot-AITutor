@@ -74,6 +74,8 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 ## 5. 轮询遇到 401 不会停，输入框被锁死
 
+**2026-11-02 已修**（commit 04984de）：401 和 404 一样当终止条件，停下并清 pending、解锁输入框。浏览器手点还没做。
+
 [src/session/poll.ts:23](../src/session/poll.ts#L23) 的 catch 只认 404，其余一律 `continue`。
 会话过期时 `/partial` 回 401 → 轮询每 500 毫秒继续问一次，永远不停。
 
@@ -153,6 +155,8 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 ## 10. 发送失败时，用户输入的东西被清掉
 
+**2026-11-02 已修**（commit 6da0b34）：被踢时把内容存进 `h2bot-unsent`，登录成功后放回输入框，主动退出清掉缓存。浏览器手点还没做。
+
 [src/App.tsx:852](../src/App.tsx#L852) 发送前 `clearUnsent()`、`setDraft('')`；
 请求 401 之后 [src/App.tsx:1197](../src/App.tsx#L1197) 调 `enterLogin()`，
 而 `enterLogin` 第一件事是 `setSessions([])`（[src/App.tsx:446](../src/App.tsx#L446)）。
@@ -164,6 +168,8 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 登录成功后放回输入框；主动退出登录要清掉这个缓存。
 
 ## 11. 后端的错误信息会被前端显示成「无法连接到服务器」
+
+**2026-11-02 已修**（commit db794f1）：`app.py` 里 `_validation_error` 接管 422，把校验错误拼成一句中文（字段名 + 认得的类型用中文模板，认不得的兜底用原始消息），实测六种坏请求都回 `{"detail": "中文句子"}`。
 
 前端只认 `{"detail": "字符串"}`（[src/api/http.ts:96](../src/api/http.ts#L96)）。
 FastAPI 的 422 校验错误返回 `{"detail": [...]}`，`detail` 是数组（实测确认，
