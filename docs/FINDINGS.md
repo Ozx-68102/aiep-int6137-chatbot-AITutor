@@ -565,3 +565,26 @@ cd server && uv run python -m server.db.backfill
 
 所以「Starlette 默认限制上传 1 MB」这种说法不成立。要给上传的文件限大小得自己定：
 我们读文件时只读上限加一的字节，超了直接退回去（`server/src/server/avatar.py`）。
+
+## 2026-11-02 用户名的唯一约束只挡一模一样的字符串
+
+查过本机 PostgreSQL：`account.username` 上确实有唯一索引
+（`account_username_key UNIQUE (username)`），列是 `character varying(64)`，默认排序规则。
+所以「用户名唯一」这句话只对完全一样的字符串成立：
+
+- `'admin' = 'ADMIN'` → false
+- `'admin' = 'admin '`（多一个空格）→ false
+
+也就是说 `admin`、`Admin`、`admin ` 在库里是三个不同的账号，唯一约束不拦。
+要当成同一个账号，得先归一化（去首尾空格 + 转小写）再存、再比。
+
+另外两件实测出来的事：
+
+- **前端归一化、后端没有。** 登录时页面把用户名 `trim()` 了再发
+  （`src/components/login/LoginScreen.tsx`），后端 `_login_account` 直接拿原样去比。
+  真有账号叫 `admin ` 的话，页面永远登不进去：发过去的是 `admin`。
+  以后加注册接口，两边必须用同一套归一化。
+- **撞名会变成 500，不是 409。** 插入时违反唯一约束抛 IntegrityError，
+  被 `app.py` 里那个通用异常处理器接住，返回 `{"detail": "服务器错误"}`。
+  应用层没有先查一遍重复，全靠数据库拦。
+  （现在库里只有 `admin` 一个账号，没有重复。）
