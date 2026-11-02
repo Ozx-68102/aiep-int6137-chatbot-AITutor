@@ -48,13 +48,25 @@
 - [x] 写新 hash。
 - [x] 吊销这个账号其它设备的登录 token；当前设备也踢掉，重新登录。
 - [x] 改密码这条路径也限流。
-- [x] 设置弹窗里加「修改密码」：[src/components/settings/SettingsModal.tsx](../src/components/settings/SettingsModal.tsx)。
+- [x] 设置弹窗里加「修改密码」入口：[src/components/settings/SettingsModal.tsx](../src/components/settings/SettingsModal.tsx)。
+- [x] 表单本身是独立页面（`view === 'password'`），不是弹窗：弹窗点一下背景就关，
+  密码输一半全丢（密码框不进草稿缓存）。页面没有背景可误点，离开只有「取消」一条显式的路。
+  2026-11-03 维护者定的。
 
 ## 强制改密码
 
 - [ ] `account` 加 `must_change_password` 列（init.py 里补，跟 `_ensure_avatar_column` 一个写法）。
 - [ ] 登录时为真就跳改密码页。
 - [ ] 后端兜底：除 `/api/profile` 和改密接口外，其余聊天接口返回 403「请先修改密码」。
+
+## 忘记密码
+
+- [ ] 现阶段不做自助重置：没有邮箱、短信这类验证通道，证明不了「是本人」，
+  开重置入口等于把账号送给猜得出的人（2026-11-03 维护者确认）。
+- [ ] 正路是控制台的管理员重置（见「控制台」一节）：学生找管理员，管理员重置后
+  给一次性初始密码，`must_change_password` 逼首次登录就改。
+- [ ] 登录页可以先放一句静态提示（「忘记密码请联系管理员」），不依赖验证通道；
+  加不加、什么时候加，跟控制台一起定。
 
 ## 共用的密码方法
 
