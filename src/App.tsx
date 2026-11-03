@@ -20,6 +20,7 @@ import {
   sessionsFromList,
 } from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
+import {AdminConsole} from './components/admin/AdminConsole.tsx';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import type {WarningItem} from './components/chat/WarningBox.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
@@ -68,7 +69,30 @@ function serviceNoticeText(
   return null;
 }
 
+/**
+ * 路由只干一件事：地址带 ?page=admin 就整页渲染管理员控制台，
+ * 否则渲染聊天页。控制台是完全独立的一页——聊天侧的会话和
+ * 用户信息引导流程一概不跑（ChatApp 压根不挂载），浏览器
+ * 前进后退时在 popstate 里重新认地址参数。
+ */
 export default function App() {
+  const [admin, setAdmin] = useState(() => readPageFromUrl() === 'admin');
+
+  useEffect(() => {
+    function onPopState() {
+      setAdmin(readPageFromUrl() === 'admin');
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  if (admin) {
+    return <AdminConsole />;
+  }
+  return <ChatApp />;
+}
+
+function ChatApp() {
   const [cachedProfile] = useState<CachedProfile | null>(() => readCachedProfile());
   const [locale, setLocale] = useState<Locale>(() => cachedProfile?.locale ?? localeFromSystem());
   const [auth, setAuth] = useState<'checking' | 'anonymous' | 'ready'>('checking');
