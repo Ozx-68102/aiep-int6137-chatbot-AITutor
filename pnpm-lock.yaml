@@ -57,6 +57,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.2
         version: 6.1.2(vite@8.3.5(jiti@2.7.0))
+      daisyui:
+        specifier: ^5.7.50
+        version: 5.7.50
       oxfmt:
         specifier: ^0.75.0
         version: 0.75.0
@@ -69,6 +72,9 @@ importers:
       oxlint-tsgolint:
         specifier: ^7.0.2005
         version: 7.0.2005
+      tailwind-bootstrap-grid:
+        specifier: ^7.0.0
+        version: 7.0.0(tailwindcss@4.3.3)
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -787,6 +793,9 @@ packages:
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
+  daisyui@5.7.50:
+    resolution: {integrity: sha512-+/LRqnTCoc7s/bJEKKwtJSwzeXCVdAmRdNmZeZzgHCaQ9PJyl7j+2V2U32GQDMyD+VDkP9e/+JGoC72Y1hLk7w==}
+
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
     engines: {node: '>=6.0'}
@@ -1329,6 +1338,12 @@ packages:
   style-to-object@2.0.2:
     resolution: {integrity: sha512-QmbXPUylqU80HAgTOJeEOdbA40W9KtxmjMhQy+tq+b8F2aoh3aQLuy82hh2jm2qsC9hR9eI0+eQidTMydKcqRA==}
 
+  tailwind-bootstrap-grid@7.0.0:
+    resolution: {integrity: sha512-IOpWRzwyRcU28S4h0BuCGqnLy9L6zfVgagdsGgEgrZstxUu9YmQLPyulwx1EOP8u+FY6vcRvkSRNRC8kFeGd3w==}
+    engines: {node: '>= 12.0.0'}
+    peerDependencies:
+      tailwindcss: ^4
+
   tailwindcss@4.3.3:
     resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
 
@@ -1433,6 +1448,9 @@ packages:
 
   web-namespaces@2.0.1:
     resolution: {integrity: sha512-bKr1DkiNa2krS7qxNtdrtHAmzuYGFQLiQ13TsorsdT6ULTkPLKuu5+GsFpDlg6JFjUTwX2DyhMPG2be8uPrqsQ==}
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -1843,6 +1861,8 @@ snapshots:
   commander@8.3.0: {}
 
   csstype@3.2.3: {}
+
+  daisyui@5.7.50: {}
 
   debug@4.4.3:
     dependencies:
@@ -2671,6 +2691,11 @@ snapshots:
     dependencies:
       inline-style-parser: 0.2.9
 
+  tailwind-bootstrap-grid@7.0.0(tailwindcss@4.3.3):
+    dependencies:
+      tailwindcss: 4.3.3
+      zod: 3.25.76
+
   tailwindcss@4.3.3: {}
 
   tapable@2.3.3: {}
@@ -2776,5 +2801,7 @@ snapshots:
       jiti: 2.7.0
 
   web-namespaces@2.0.1: {}
+
+  zod@3.25.76: {}
 
   zwitch@2.0.4: {}
