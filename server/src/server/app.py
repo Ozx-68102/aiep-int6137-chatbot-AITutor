@@ -35,6 +35,7 @@ from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
 from server.passwords import (
     check_password_policy,
+    generate_password,
     hash_password,
     needs_rehash,
     verify_password,
@@ -64,6 +65,8 @@ from server.types import (
     AdminAccountItem,
     AdminAccountsResponse,
     AdminLoginResponse,
+    AdminPasswordResetRequest,
+    AdminPasswordResetResponse,
     ChatRequest,
     HistoryMessageResponse,
     HistoryResponse,
@@ -117,6 +120,8 @@ _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _OLD_PASSWORD_WRONG = "旧密码不正确"
 _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
+# 控制台重置密码时报的「没有这个人」。
+_ADMIN_ACCOUNT_NOT_FOUND = "找不到这个账号"
 _RATE_LIMITED = "尝试次数太多，请 15 分钟后再试"
 # 限流计数分两个维度，各自锁各自的：账号和来源 IP。scope 会拼进 Redis 的键名
 # （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。
@@ -305,6 +310,33 @@ def admin_list_accounts(
                 for row in rows
             ],
         )
+
+
+@app.post("/api/admin/accounts/reset-password")
+def admin_reset_password(
+    body: AdminPasswordResetRequest,
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
+) -> AdminPasswordResetResponse:
+    """控制台重置某个账号的密码：生成一个新密码，把它的登录全踢下线。
+
+    对任何账号都能重置，包括管理员自己。新密码只在这一次响应里回显，
+    日志只记账号 id。
+    """
+    with db_session() as session:
+        _admin_from_cookie(session, admin_cookie)
+        account = session.scalar(
+            select(Account).where(Account.username == body.username),
+        )
+        if not isinstance(account, Account):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, _ADMIN_ACCOUNT_NOT_FOUND)
+        password = generate_password(10)
+        # 写哈希和吊销令牌在同一个事务里：不留「密码换了、旧令牌还活着」的缝。
+        account.password_hash = hash_password(password)
+        session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
+        account_id = str(account.id)
+
+    logger.info("控制台重置了密码 %s", account_id)
+    return AdminPasswordResetResponse(username=body.username, password=password)
 
 
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)

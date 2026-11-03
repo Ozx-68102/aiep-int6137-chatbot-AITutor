@@ -70,6 +70,17 @@ class AdminAccountsResponse(BaseModel):
     accounts: list[AdminAccountItem]
 
 
+class AdminPasswordResetRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+
+
+class AdminPasswordResetResponse(BaseModel):
+    """重置的结果：新密码只在这一次响应里回显，忘了就只能再重置。"""
+
+    username: str
+    password: str
+
+
 class ProfileResponse(BaseModel):
     id: UUID
     username: str
