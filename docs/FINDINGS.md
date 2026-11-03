@@ -236,10 +236,22 @@ server 的依赖是 `httpx2`（2.16.0），环境里没有 `httpx` 包。这个�
 - **1.x 没有任何修复或部分读取工具**：#511（rm/compact/prune）、#519/#485（只读打开坏 store 抢救数据）均为 open 未实现；#379（pack 写失败后 store 永久拒写）官方结论原话 "The only way out is to … delete the Store"。
 - 10月28日前合并的三个 delta 链预算修复（#472/#473/#479）早于本机 worker build（11月2日，`build-linux-222129a2…`），且修的是**写入被拒**侧（Integrity 错误），救不了**打开时** Malformed；最新 tag v1.1.0 正是在用版本——不存在「升级后就能读开」的 build。
 
-结论：这份 store 在 1.x 下不可恢复，只能删掉重建。本地目录是当初 init 的源目录、且比 LayerFS 侧更新（新装的 daisyui / tailwind-bootstrap-grid 只在本地），重建的实际损失仅限 LayerFS 侧未同步回本地的历史——store 打不开，无法列出确认有哪些。
+结论：这份 store 在 1.x 下不可恢复，只能删掉重建。（**此结论已被下一条更正：store 数据完好，死的是项目记录**。）本地目录是当初 init 的源目录、且比 LayerFS 侧更新（新装的 daisyui / tailwind-bootstrap-grid 只在本地），重建的实际损失仅限 LayerFS 侧未同步回本地的历史——store 打不开，无法列出确认有哪些。
 
 ## 2026-11-03 macOS 上 `layerfs init` 结构性损坏，重建项目必须走 harness 自己的流程
 
 上游 #513（open，2026-10-30）描述与本机实测完全一致：macOS worker 路线下（会话环境带 `LAYERFS_WORKER_ENDPOINT` 等变量），`layerfs init` 即使对全新项目名也报 `Store destination exists`。issue 指出 macOS 上唯一能工作的初始化路径是 `@layerfs/runtime` 的 `project.start_init`（它会预置卷、设置每项目 STORE_PATH），而 CLI 直接暴露 `LayerFS.init`，绕过了这层编排。维护者答复：修复排进 LayerFS 2.0（roadmap #446），当前阶段冻结。
 
 所以规矩是：**不要试图删卷后用 CLI init 手动重建**；重建项目要走 harness/GUI 自带的创建入口。相关背景：#534（open）记录了原生 macOS 路线并发 `LayerFS.open` 报 Store busy 等问题，同属「macOS 路线未修完」一族。
+
+## 2026-11-03 更正：坏的不是 store 数据，是「项目记录」；本会话的 init 探测把故障升级了
+
+default-workspace 侧做了只读深查（SQLite 直读 + 源码对照），上一条的诊断要更正三处：
+
+- **store 数据一个字节都没坏**：卷里 `store.sqlite` 的 `PRAGMA integrity_check` 返回 ok、`foreign_key_check` 0 行，22 分支 / 91 提交 / 15 层 / 25,227 对象完好（含 password-backend、console-server、split-findings 等真实开发分支）。`Malformed` 不是数据损坏，是**身份校验拒绝**：open 时用 `project.record` 里的 binding 去比对 store 存的 `binding_key`/`catalog_id`（`schema.rs` 的 `validate()`），不等就报 `Integrity` → 打印成 `pack persistence: Malformed`。
+- **死的是 home 目录里的项目记录**。时间线：~12:36 macOS 清理重建了 `tmpdir`，旧 `project.record` 随之丢失——这才是 15:25 起 `Os NotFound` 的真正原因（记录引用的 home 侧 sealed store 文件不存在）；**15:35 本会话跑的 `layerfs init` 探测生成了新的随机绑定密钥并写入新记录**，而「装进卷」一步被拒（`Store destination exists`），于是记录和卷里的老 store 成了两套身份，15:37 起每次 open 都被拒。上一条里「无法判定 init 探测是否改动了磁盘状态」现在确认：改了，而且是故障形态从「缺记录」（插件有 `noRecord` 分支可识别）恶化成「记录与 store 不匹配」（难以识别）的转折点。
+- **「不可恢复」不成立**：老 store 可以用官方恢复工具（`dsh/tools/restore-store.mjs` + `LAYERFS_READER`）只读导出；但老记录里随机生成的 `cursor_key` 只存在于丢失的那份记录里，「把老 store 原样接回」缺一块拼图。干净路径仍是走 harness 的 remove（删卷 + 删记录）再重新 Import。
+
+规矩升级：**macOS 上任何情况下都不要再跑 `layerfs init`**——即使安装被拒它也会写入新记录和新绑定密钥，主动制造身份错配。上一条的「不要删卷后 CLI init 手动重建」从「走不通」升级为「有害」。
+
+根子是插件的持久/易失不对称：绑定和 store 卷是持久的，而 home（`config.js` 默认 `tmpdir()/dsh-layerfs/home`）会被 macOS 系统清理——记录和 store 生命周期不一致。止血方案是给 layerfs-host 配稳定 home 路径（`config.js` 支持 `home` 键，如 `~/.dsh/layerfs-home`），改动在 default-workspace 的 profile 配置里做。
