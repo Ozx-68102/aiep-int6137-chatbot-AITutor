@@ -3,12 +3,12 @@ import {useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
 import {chatIdFromPath, usePathRouting} from './hooks/use-path-routing.ts';
 import {useProfileActions} from './hooks/use-profile-actions.ts';
+import {serviceNoticeText, useServiceStatus} from './hooks/use-service-status.ts';
 import {streamReply} from './api/chat.ts';
 import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {readPartial} from './api/partial.ts';
 import type {PartialReply} from './api/partial.ts';
-import {readStatus} from './api/status.ts';
 import {logout, readProfile} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {
@@ -44,26 +44,6 @@ import {visibleText} from './session/text.ts';
 import {BrowserRouter, Route, Routes, useLocation, useNavigate} from 'react-router';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
-
-const statusIntervalMs = 30000;
-
-type ServiceState = 'ok' | 'unreachable' | 'database' | 'store';
-
-function serviceNoticeText(
-  state: ServiceState,
-  copy: (typeof translations)[Locale],
-): string | null {
-  if (state === 'unreachable') {
-    return copy.connectionRetry;
-  }
-  if (state === 'database') {
-    return copy.serviceUnavailable;
-  }
-  if (state === 'store') {
-    return copy.replyStoreUnavailable;
-  }
-  return null;
-}
 
 /**
  * 路由用真实路径：/admin 整页渲染管理员控制台，其余地址交给聊天侧
@@ -120,8 +100,6 @@ function ChatApp() {
   const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
-  const [serviceState, setServiceState] = useState<ServiceState>('ok');
-  const serviceStateRef = useRef<ServiceState>('ok');
   const sendingRef = useRef<Set<string>>(new Set());
   const aborters = useRef(new Map<string, {controller: AbortController; turnId: string}>());
   const stoppers = useRef(new Map<string, Promise<void>>());
@@ -144,25 +122,6 @@ function ChatApp() {
   );
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
-  const serviceNotice = serviceNoticeText(serviceState, text);
-  const password = usePasswordChange({
-    locale,
-    onPasswordChanged: () => setLoginNotice(text.passwordChanged),
-    onEnterLogin: enterLogin,
-    onConnectionWarning: showConnectionWarning,
-  });
-  const profileApi = useProfileActions({
-    locale,
-    setLocale,
-    setUsername,
-    setAvatarUrl,
-    onEnterLogin: enterLogin,
-    onConnectionWarning: showConnectionWarning,
-  });
-  // enterLogin 会被各个效果捕获，不能直接引用 hook 返回的对象（响应式），
-  // 一律走 ref 拿最新的 API——和 navigateRef 同一套路。
-  const passwordRef = useRef(password);
-  const profileApiRef = useRef(profileApi);
   const routing = usePathRouting({
     auth,
     sessions,
@@ -174,6 +133,35 @@ function ChatApp() {
     setActiveId,
   });
   const routingRef = useRef(routing);
+  const service = useServiceStatus({
+    auth,
+    setSessions,
+    setUsername,
+    setLocale,
+    setAvatarUrl,
+    onClaimPath: (list) => routingRef.current.claimPath(list),
+    onEnterLogin: enterLogin,
+  });
+  const serviceRef = useRef(service);
+  const password = usePasswordChange({
+    locale,
+    onPasswordChanged: () => setLoginNotice(text.passwordChanged),
+    onEnterLogin: enterLogin,
+    onConnectionWarning: service.showConnectionWarning,
+  });
+  const passwordRef = useRef(password);
+  const profileApi = useProfileActions({
+    locale,
+    setLocale,
+    setUsername,
+    setAvatarUrl,
+    onEnterLogin: enterLogin,
+    onConnectionWarning: service.showConnectionWarning,
+  });
+  const profileApiRef = useRef(profileApi);
+  // enterLogin 和启动效果会被效果捕获，不能直接引用 hook 返回的对象
+  // （响应式），一律走上面这几个 ref 拿最新的 API——和 navigateRef 同一套路。
+  const serviceNotice = serviceNoticeText(service.serviceState, text);
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
@@ -215,10 +203,11 @@ function ChatApp() {
     localeRef.current = locale;
     activeIdRef.current = activeId;
     navigateRef.current = navigate;
+    routingRef.current = routing;
+    serviceRef.current = service;
     passwordRef.current = password;
     profileApiRef.current = profileApi;
-    routingRef.current = routing;
-    connectionWarningRef.current = showConnectionWarning;
+    connectionWarningRef.current = service.showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
   });
@@ -334,7 +323,7 @@ function ChatApp() {
           // 接口服务连不上：登录状态还在（cookie 还在），聊天区照常开着，
           // 只在聊天区上方报一次连不上。用户名字和语言用本地记着的那份。
           setComposingNew(true);
-          markService('unreachable');
+          serviceRef.current.markService('unreachable');
           setAuth('ready');
           return;
         }
@@ -349,63 +338,6 @@ function ChatApp() {
   }, []);
 
   useEffect(() => {
-    if (auth !== 'ready') {
-      return;
-    }
-    let stopped = false;
-    let timer = 0;
-
-    const check = async () => {
-      if (document.visibilityState === 'hidden') {
-        return;
-      }
-      try {
-        const status = await readStatus();
-        if (stopped) {
-          return;
-        }
-        const wasDown = serviceStateRef.current === 'unreachable';
-        if (status.reply_store === 'unavailable') {
-          markService('store');
-        } else if (status.database === 'unavailable') {
-          markService('database');
-        } else {
-          markService('ok');
-        }
-        if (wasDown) {
-          // 服务器刚回来：把会话列表和用户信息补上。
-          void refreshWorkspace();
-        }
-      } catch {
-        if (!stopped) {
-          markService('unreachable');
-        }
-      }
-    };
-
-    const tick = async () => {
-      await check();
-      if (!stopped) {
-        timer = window.setTimeout(tick, statusIntervalMs);
-      }
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        void check();
-      }
-    };
-
-    void tick();
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      stopped = true;
-      window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, [auth]);
-
-  useEffect(() => {
     const active = pollers.current;
     return () => {
       for (const stop of active.values()) {
@@ -414,41 +346,6 @@ function ChatApp() {
       active.clear();
     };
   }, []);
-
-  function showConnectionWarning() {
-    // 连不上服务器归到服务状态里：聊天区上方只出一个框，不重复报两遍。
-    markService('unreachable');
-  }
-
-  function markService(state: ServiceState) {
-    serviceStateRef.current = state;
-    setServiceState(state);
-  }
-
-  /** 服务器回来了：把会话列表和用户信息补上，不用用户手动刷新页面。 */
-  async function refreshWorkspace(): Promise<void> {
-    try {
-      const items = await listSessions();
-      const next = sessionsFromList(items);
-      setSessions(next);
-      // 按当前地址重新认领状态：离线期间停在 /chat/<id> 的，把会话重新打开。
-      routingRef.current.claimPath(next);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-      }
-      return;
-    }
-    try {
-      const profile = await readProfile();
-      setUsername(profile.username);
-      setLocale(profile.locale);
-      setAvatarUrl(profile.avatarUrl);
-      saveCachedProfile({username: profile.username, locale: profile.locale});
-    } catch {
-      return;
-    }
-  }
 
   function openSidebar() {
     sidebarWanted.current = true;
@@ -542,7 +439,7 @@ function ChatApp() {
       }
       if (connectionFailure(error)) {
         setLoginOffline(true);
-        showConnectionWarning();
+        service.showConnectionWarning();
         return;
       }
       setLoginDetail(explain(error, text.connectionError));
@@ -636,7 +533,7 @@ function ChatApp() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return;
       }
       profileApi.setProfileError(explain(error, text.connectionError));
@@ -675,7 +572,7 @@ function ChatApp() {
         return false;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return false;
       }
       setNotice(explain(error, text.connectionError));
@@ -696,7 +593,7 @@ function ChatApp() {
         return false;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return false;
       }
       setNotice(explain(error, text.connectionError));
@@ -714,7 +611,7 @@ function ChatApp() {
         return false;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return false;
       }
       setNotice(explain(error, text.connectionError));
@@ -746,7 +643,7 @@ function ChatApp() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return;
       }
       setNotice(explain(error, text.connectionError));
@@ -806,7 +703,7 @@ function ChatApp() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return;
       }
       if (sessionId === '') {
@@ -1213,7 +1110,7 @@ function ChatApp() {
         return;
       }
       if (connectionFailure(error)) {
-        showConnectionWarning();
+        service.showConnectionWarning();
         return;
       }
       const detail = error instanceof ApiError ? error.detail : null;
