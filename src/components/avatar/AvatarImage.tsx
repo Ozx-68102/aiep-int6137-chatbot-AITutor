@@ -18,13 +18,15 @@ export function AvatarImage({
   const url = !src || failedSrc === src ? defaultAvatarUrl : src;
 
   return (
-    <img
-      src={url}
-      alt={alt}
-      className={className}
-      onError={() => {
-        setFailedSrc(src);
-      }}
-    />
+    <div className="avatar shrink-0">
+      <img
+        src={url}
+        alt={alt}
+        className={className}
+        onError={() => {
+          setFailedSrc(src);
+        }}
+      />
+    </div>
   );
 }

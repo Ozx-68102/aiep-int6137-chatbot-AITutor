@@ -50,8 +50,8 @@ export function LanguageMenu({
         type="button"
         className={
           variant === 'current'
-            ? 'inline-flex min-w-36 items-center justify-between gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
-            : 'inline-flex size-9 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
+            ? 'btn min-w-36 justify-between border-base-300 bg-base-100 text-left hover:bg-base-200 active:bg-base-300'
+            : 'btn btn-square border-base-300 bg-base-100 text-inherit hover:bg-base-200 active:bg-base-300'
         }
         aria-label={text.language}
         aria-expanded={open}
@@ -71,7 +71,7 @@ export function LanguageMenu({
       <div
         className={
           open
-            ? 'absolute top-[calc(100%+0.35rem)] right-0 z-10 flex min-w-36 animate-in flex-col rounded-lg border border-stone-300 bg-white p-1.5 fade-in slide-in-from-top-2 duration-200'
+            ? 'absolute top-[calc(100%+0.35rem)] right-0 z-10 min-w-36 animate-in rounded-box border border-base-300 bg-base-100 shadow-lg fade-in slide-in-from-top-2 duration-200'
             : 'absolute top-[calc(100%+0.35rem)] right-0 z-10 hidden'
         }
         role="menu"
@@ -79,26 +79,25 @@ export function LanguageMenu({
         aria-hidden={!open}
         inert={!open}
       >
-        {locales.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="menuitemradio"
-            lang={htmlLang[item.id]}
-            className={
-              item.id === locale
-                ? 'rounded-md border border-emerald-900 bg-emerald-50 px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-emerald-100 enabled:active:bg-emerald-200'
-                : 'rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
-            }
-            aria-checked={item.id === locale}
-            onClick={() => {
-              onChange(item.id);
-              setOpen(false);
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
+        <ul className="menu w-full p-1.5" role="none">
+          {locales.map((item) => (
+            <li key={item.id} role="none">
+              <button
+                type="button"
+                role="menuitemradio"
+                lang={htmlLang[item.id]}
+                className={item.id === locale ? 'menu-active' : undefined}
+                aria-checked={item.id === locale}
+                onClick={() => {
+                  onChange(item.id);
+                  setOpen(false);
+                }}
+              >
+                {item.label}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

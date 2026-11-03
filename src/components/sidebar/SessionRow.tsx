@@ -99,8 +99,8 @@ export function SessionRow({
   }
 
   const rowClass = active
-    ? 'group mb-1 flex items-center rounded-lg border border-emerald-900 bg-emerald-50'
-    : 'group mb-1 flex items-center rounded-lg border border-transparent transition-colors duration-150 ease-out hover:bg-stone-900/5';
+    ? 'group mb-1 flex items-center rounded-lg border border-primary bg-primary/10'
+    : 'group mb-1 flex items-center rounded-lg border border-transparent transition-colors duration-150 ease-out hover:bg-base-content/5';
   const dotsShown = menuOpen || renameOpen || deleteOpen || active;
   const actionClass = dotsShown
     ? 'relative mr-1 shrink-0 opacity-100 transition-opacity duration-200 ease-out'
@@ -120,7 +120,7 @@ export function SessionRow({
       <div className={actionClass}>
         <button
           type="button"
-          className="inline-flex size-8 items-center justify-center rounded-lg border border-transparent bg-transparent text-inherit transition-colors duration-150 ease-out hover:bg-stone-900/15 active:bg-stone-900/25"
+          className="btn btn-ghost btn-sm btn-square text-inherit"
           ref={buttonRef}
           aria-label={text.sessionActions}
           aria-expanded={menuOpen}
@@ -135,7 +135,7 @@ export function SessionRow({
           ref={menuRef}
           className={
             menuOpen
-              ? 'fixed z-50 flex min-w-36 flex-col rounded-lg border border-stone-300 bg-white p-1.5 shadow-lg'
+              ? 'fixed z-50 min-w-36 rounded-box border border-base-300 bg-base-100 shadow-lg'
               : 'fixed z-50 hidden'
           }
           style={menuPoint ? {top: menuPoint.top, right: menuPoint.right} : undefined}
@@ -143,39 +143,45 @@ export function SessionRow({
           aria-hidden={!menuOpen}
           inert={!menuOpen}
         >
-          <button
-            type="button"
-            role="menuitem"
-            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            onClick={() => {
-              setMenuOpen(false);
-              setRenameOpen(true);
-            }}
-          >
-            {text.rename}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            onClick={() => {
-              setMenuOpen(false);
-              onPin(!session.pinned);
-            }}
-          >
-            {session.pinned ? text.unpin : text.pin}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="rounded-md border border-transparent bg-transparent px-2.5 py-1.5 text-left text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20"
-            onClick={() => {
-              setMenuOpen(false);
-              setDeleteOpen(true);
-            }}
-          >
-            {text.deleteSession}
-          </button>
+          <ul className="menu w-full p-1.5" role="none">
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setRenameOpen(true);
+                }}
+              >
+                {text.rename}
+              </button>
+            </li>
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onPin(!session.pinned);
+                }}
+              >
+                {session.pinned ? text.unpin : text.pin}
+              </button>
+            </li>
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="text-error"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDeleteOpen(true);
+                }}
+              >
+                {text.deleteSession}
+              </button>
+            </li>
+          </ul>
         </div>,
         document.body,
       )}

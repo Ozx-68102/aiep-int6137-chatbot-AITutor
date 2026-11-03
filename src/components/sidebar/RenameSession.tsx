@@ -64,7 +64,7 @@ export function RenameSession({
           {text.rename}
         </h2>
         <input
-          className="rounded-lg border border-stone-300 px-3 py-2.5"
+          className="input w-full"
           value={draft}
           lang={htmlLang[locale]}
           aria-label={text.rename}
@@ -72,33 +72,22 @@ export function RenameSession({
           onChange={(event) => setDraft(event.target.value)}
         />
         {error ? (
-          <p className="m-0 text-red-600" role="alert">
+          <p className="m-0 text-error" role="alert">
             {error}
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            onClick={onCancel}
-          >
+          <button type="button" className="btn btn-outline" onClick={onCancel}>
             {text.cancel}
           </button>
           <button
             type="submit"
-            className={
-              unchanged
-                ? 'inline-flex min-w-16 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2.5 opacity-50'
-                : 'inline-flex min-w-16 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90 disabled:opacity-60'
-            }
+            className="btn btn-primary min-w-16"
             disabled={unchanged || pending}
             aria-busy={pending}
           >
             {pending ? (
-              <span
-                className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent"
-                aria-hidden="true"
-              />
+              <span className="loading loading-spinner loading-xs" aria-hidden="true" />
             ) : (
               text.renameSave
             )}

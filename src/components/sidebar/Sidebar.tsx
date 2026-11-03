@@ -114,7 +114,7 @@ export function Sidebar({
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <button
               type="button"
-              className="shrink-0 cursor-pointer rounded-lg border-0 bg-transparent p-0 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+              className="btn btn-ghost h-auto shrink-0 p-0"
               aria-label={text.createSession}
               title={text.createSession}
               onClick={onCreate}
@@ -127,7 +127,7 @@ export function Sidebar({
           </div>
           <button
             type="button"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+            className="btn btn-square shrink-0 border-base-300 bg-base-100 text-inherit hover:bg-base-200 active:bg-base-300"
             aria-label={text.hideSidebar}
             title={text.hideSidebar}
             onClick={onClose}
@@ -135,11 +135,7 @@ export function Sidebar({
             <PanelLeftClose aria-hidden="true" />
           </button>
         </div>
-        <button
-          type="button"
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-          onClick={onCreate}
-        >
+        <button type="button" className="btn btn-primary btn-block" onClick={onCreate}>
           <SquarePlus aria-hidden="true" className="size-4 shrink-0" />
           {text.createSession}
         </button>
@@ -169,8 +165,8 @@ export function Sidebar({
           type="button"
           className={
             settingsOpen
-              ? 'flex w-full items-center gap-2 rounded-lg border border-emerald-900 bg-emerald-50 px-3 py-2 text-left transition-colors duration-150 ease-out enabled:hover:bg-emerald-100 enabled:active:bg-emerald-200'
-              : 'flex w-full items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-left transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20'
+              ? 'btn btn-block justify-start border-primary bg-primary/10 text-left hover:bg-primary/15 active:bg-primary/20'
+              : 'btn btn-block justify-start border-base-300 bg-base-100 text-left hover:bg-base-200 active:bg-base-300'
           }
           aria-current={settingsOpen ? 'page' : undefined}
           onClick={onOpenSettings}
@@ -178,7 +174,7 @@ export function Sidebar({
           <AvatarImage
             src={avatarUrl}
             alt=""
-            className="size-7 shrink-0 rounded-full border border-stone-300 bg-stone-100 object-cover"
+            className="size-7 shrink-0 rounded-full border border-base-300 bg-base-200 object-cover"
           />
           <span className="truncate">{username ?? text.profile}</span>
         </button>

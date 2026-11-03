@@ -74,8 +74,8 @@ export function Modal({
       <div
         className={
           phase === 'closing'
-            ? `relative flex flex-col rounded-xl border border-stone-300 bg-white shadow-2xl animate-out fade-out zoom-out-95 duration-150 ${panelClass}`
-            : `relative flex flex-col rounded-xl border border-stone-300 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150 ${panelClass}`
+            ? `modal-box relative flex flex-col scale-100 border border-base-300 opacity-100 animate-out fade-out zoom-out-95 duration-150 ${panelClass}`
+            : `modal-box relative flex flex-col scale-100 border border-base-300 opacity-100 animate-in fade-in zoom-in-95 duration-150 ${panelClass}`
         }
         role="dialog"
         aria-modal="true"

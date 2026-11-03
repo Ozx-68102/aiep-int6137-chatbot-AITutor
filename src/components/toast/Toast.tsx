@@ -73,8 +73,8 @@ export function Toast({
         key={shown.id}
         className={
           closing
-            ? 'm-0 animate-out rounded-lg border border-emerald-800 bg-white px-4 py-3 text-center text-emerald-900 shadow-lg fade-out zoom-out-95 duration-150'
-            : 'm-0 animate-in rounded-lg border border-emerald-800 bg-white px-4 py-3 text-center text-emerald-900 shadow-lg fade-in zoom-in-95 duration-150'
+            ? 'alert alert-success m-0 text-center shadow-lg animate-out fade-out zoom-out-95 duration-150'
+            : 'alert alert-success m-0 text-center shadow-lg animate-in fade-in zoom-in-95 duration-150'
         }
         role="status"
         lang={lang}
