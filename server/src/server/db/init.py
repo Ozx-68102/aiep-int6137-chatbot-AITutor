@@ -10,6 +10,11 @@ _INITIAL_USERNAME = "test01"
 _INITIAL_PASSWORD = "test01"
 _INITIAL_LOCALE = "zh-CN"
 
+# 控制台预设的 admin/admin 是系统初始口令，跟聊天侧的 test01/test01
+# 一样豁免密码策略，依据见 docs/PARENT_PORTAL_PRIVACY.md。
+_CONSOLE_USERNAME = "admin"
+_CONSOLE_PASSWORD = "admin"
+
 
 def init_db() -> None:
     engine = get_engine()
@@ -21,6 +26,7 @@ def init_db() -> None:
     _ensure_role_column(engine)
     with db_session() as session:
         _ensure_initial_account(session)
+        _ensure_console_admin(session)
 
 
 def _ensure_avatar_column(engine: Engine) -> None:
@@ -115,6 +121,33 @@ def _ensure_initial_account(session: Session) -> None:
             id=uuid4(),
             username=_INITIAL_USERNAME,
             password_hash=PasswordHasher().hash(_INITIAL_PASSWORD),
+            language_setting=LanguageSetting(locale=_INITIAL_LOCALE),
+        ),
+    )
+
+
+def _ensure_console_admin(session: Session) -> None:
+    """建控制台的管理员账号（admin/admin）。
+
+    先看有没有 role 是 admin 的账号，有就什么都不做；再看用户名
+    admin 是不是被占着——被聊天账号占着也不动它，不擅自改角色，
+    改名过的老库跑 init 就走到这里返回，不会重复建号。
+    两头都没有才新建一个管理员账号。
+    """
+    statement = select(Account).where(Account.role == "admin")
+    if session.scalar(statement) is not None:
+        return
+
+    statement = select(Account).where(Account.username == _CONSOLE_USERNAME)
+    if session.scalar(statement) is not None:
+        return
+
+    session.add(
+        Account(
+            id=uuid4(),
+            username=_CONSOLE_USERNAME,
+            password_hash=PasswordHasher().hash(_CONSOLE_PASSWORD),
+            role="admin",
             language_setting=LanguageSetting(locale=_INITIAL_LOCALE),
         ),
     )
