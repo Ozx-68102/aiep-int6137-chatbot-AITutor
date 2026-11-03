@@ -339,6 +339,27 @@ def admin_reset_password(
     return AdminPasswordResetResponse(username=body.username, password=password)
 
 
+@app.post("/api/admin/logout", status_code=status.HTTP_204_NO_CONTENT)
+def admin_logout(
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
+) -> Response:
+    """控制台退出：镜像 /api/logout，只是 cookie 换成 admin_login。"""
+    with db_session() as session:
+        token = _login_token(session, admin_cookie)
+        if token is None:
+            result = JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": _LOGIN_REQUIRED},
+            )
+            _clear_cookie(result, _ADMIN_COOKIE_NAME)
+            return result
+        session.delete(token)
+
+    result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_cookie(result, _ADMIN_COOKIE_NAME)
+    return result
+
+
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
