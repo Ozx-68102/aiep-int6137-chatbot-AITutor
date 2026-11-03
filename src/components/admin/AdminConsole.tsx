@@ -1,5 +1,12 @@
 import {useEffect, useState} from 'react';
-import {adminLogin, adminLogout, fetchAdminAccounts, type AdminAccount} from '../../api/admin.ts';
+import {
+  adminLogin,
+  adminLogout,
+  adminResetPassword,
+  fetchAdminAccounts,
+  type AdminAccount,
+  type ResetPasswordResult,
+} from '../../api/admin.ts';
 import {explain} from '../../api/failure.ts';
 import {ApiError} from '../../api/http.ts';
 import {translations} from '../../i18n.ts';
@@ -7,6 +14,8 @@ import {readCachedProfile} from '../../session/profile-cache.ts';
 import {htmlLang, localeFromSystem, type Locale} from '../../type/locale.ts';
 import {AdminLoginForm} from './AdminLoginForm.tsx';
 import {ConfirmAdminLogout} from './ConfirmAdminLogout.tsx';
+import {ConfirmResetPassword} from './ConfirmResetPassword.tsx';
+import {NewPasswordPanel} from './NewPasswordPanel.tsx';
 
 /**
  * 管理员控制台：地址带 ?page=admin 时整页渲染，跟聊天侧完全无关——
@@ -25,6 +34,9 @@ export function AdminConsole() {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [resetUsername, setResetUsername] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -101,7 +113,33 @@ export function AdminConsole() {
     setAccounts(null);
     setConfirmLogout(false);
     setLogoutError(null);
+    setResetUsername(null);
+    setResetError(null);
+    setResetResult(null);
     setLoginError(detail);
+  }
+
+  /** 确认弹窗里点「重置密码」。返回 true 表示弹窗可以关了。 */
+  async function confirmReset(): Promise<boolean> {
+    if (resetUsername === null) {
+      return false;
+    }
+    try {
+      const result = await adminResetPassword(resetUsername);
+      setResetUsername(null);
+      setResetError(null);
+      setResetResult(result);
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        // 登录过期：关掉弹窗，带着服务器给的说法回登录表单。
+        enterLoginForm(error.detail);
+        return true;
+      }
+      // 404「找不到这个账号」这类错误显示在弹窗里，名单原样留着。
+      setResetError(explain(error, text.connectionError));
+      return false;
+    }
   }
 
   if (checking) {
@@ -144,6 +182,9 @@ export function AdminConsole() {
             <tr className="border-b border-stone-300 bg-stone-50" lang={htmlLang[locale]}>
               <th className="px-4 py-2.5 font-medium">{text.username}</th>
               <th className="px-4 py-2.5 font-medium">{text.role}</th>
+              <th className="px-4 py-2.5">
+                <span className="sr-only">{text.resetPassword}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -153,11 +194,41 @@ export function AdminConsole() {
                 <td className="px-4 py-2.5" lang={htmlLang[locale]}>
                   {account.role === 'admin' ? text.roleAdmin : text.roleChat}
                 </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+                    onClick={() => {
+                      setResetError(null);
+                      setResetUsername(account.username);
+                    }}
+                  >
+                    <span lang={htmlLang[locale]}>{text.resetPassword}</span>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <ConfirmResetPassword
+        locale={locale}
+        open={resetUsername !== null}
+        username={resetUsername}
+        error={resetError}
+        onCancel={() => {
+          setResetError(null);
+          setResetUsername(null);
+        }}
+        onConfirm={confirmReset}
+      />
+      <NewPasswordPanel
+        locale={locale}
+        result={resetResult}
+        onClose={() => {
+          setResetResult(null);
+        }}
+      />
       <ConfirmAdminLogout
         locale={locale}
         open={confirmLogout}
