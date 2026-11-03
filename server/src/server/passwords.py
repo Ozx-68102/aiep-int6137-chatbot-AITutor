@@ -5,8 +5,8 @@
 
 学生（chat）账号的密码最小长度是 6，向香港本地学生平台的惯例靠拢
 （考评局 6–25 位、教育城至少 6 字符）；管理员（admin）账号保持 8。
-学生密码的现实风险是同学间窥屏共享，而不是离线爆破（argon2 本来就贵）。
-依据见 docs/PARENT_PORTAL_PRIVACY.md。
+学生密码的现实风险是同学间窥屏共享，而不是离线爆破（argon2 本来就贵），
+所以不强制复杂度，只靠拒绝名单挡掉极弱口令。依据见 docs/PARENT_PORTAL_PRIVACY.md。
 """
 
 import secrets
@@ -23,6 +23,34 @@ MIN_LENGTH_CHAT = 6
 MIN_LENGTH_ADMIN = 8
 _MIN_LENGTH = MIN_LENGTH_ADMIN
 _MAX_LENGTH = 128
+
+# 极弱口令拒绝名单：学生门槛降到 6 位后，把最常被猜的那批显式挡掉。
+# 比较用 password.lower()，大小写不敏感。前端有一份同样的名单，在
+# src/components/settings/password-strength.ts，改一处必须改两处。
+_WEAK_PASSWORDS = frozenset(
+    {
+        "123456",
+        "1234567",
+        "12345678",
+        "123456789",
+        "1234567890",
+        "111111",
+        "000000",
+        "666666",
+        "888888",
+        "password",
+        "passw0rd",
+        "abc123",
+        "a123456",
+        "123abc",
+        "qwerty",
+        "qwertyuiop",
+        "123123",
+        "112233",
+        "admin123",
+        "iloveyou",
+    }
+)
 
 _hasher = PasswordHasher()
 
@@ -86,6 +114,8 @@ def check_password_policy(
         return "密码只能用英文键盘上的字符"
     if len(password) < effective_min or len(password) > _MAX_LENGTH:
         return f"密码长度要在 {effective_min} 到 {_MAX_LENGTH} 之间"
+    if password.lower() in _WEAK_PASSWORDS:
+        return "这个密码太常见了，换一个"
     if username != "" and username.lower() in password.lower():
         return "密码不能包含用户名"
     return None
