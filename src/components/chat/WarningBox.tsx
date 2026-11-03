@@ -26,18 +26,14 @@ export function WarningBox({
 }) {
   return (
     <div
-      className={
-        tone === 'error'
-          ? 'mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800'
-          : 'mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900'
-      }
+      className={tone === 'error' ? 'alert alert-error mb-3' : 'alert alert-warning mb-3'}
       role={tone === 'error' ? 'alert' : 'status'}
     >
       <span className="min-w-0 flex-1 wrap-break-word">{text}</span>
       {onDismiss === undefined ? null : (
         <button
           type="button"
-          className="-mr-1 shrink-0 cursor-pointer rounded p-0.5 opacity-60 transition-opacity duration-150 hover:opacity-100"
+          className="btn btn-ghost btn-square btn-xs ml-auto shrink-0"
           aria-label={dismissLabel}
           title={dismissLabel}
           onClick={onDismiss}

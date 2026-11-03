@@ -18,19 +18,18 @@ export function FailedReply({
   onRetry: () => void;
   onAnimationEnd: () => void;
 }) {
+  const classes = bubbleClass('error', entering);
   return (
-    <div className="mb-3 w-fit max-w-[600px]">
-      <p className={bubbleClass('error', entering)} onAnimationEnd={onAnimationEnd}>
+    <div className={classes.wrap}>
+      <p className={classes.bubble} onAnimationEnd={onAnimationEnd}>
         {text}
       </p>
-      <button
-        type="button"
-        className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-sm transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-        onClick={onRetry}
-      >
-        <RotateCcw className="size-4" aria-hidden="true" />
-        {retryLabel}
-      </button>
+      <div className="chat-footer">
+        <button type="button" className="btn btn-sm btn-outline btn-error" onClick={onRetry}>
+          <RotateCcw className="size-4" aria-hidden="true" />
+          {retryLabel}
+        </button>
+      </div>
     </div>
   );
 }

@@ -9,22 +9,23 @@ export function ThinkingBubble({
   label: string;
   onAnimationEnd: () => void;
 }) {
+  const classes = bubbleClass('assistant', entering);
   return (
-    <p
-      className={bubbleClass('assistant', entering)}
-      role="status"
-      aria-label={label}
-      onAnimationEnd={onAnimationEnd}
-    >
-      <span
-        className="flex items-center gap-1"
-        aria-hidden="true"
-        onAnimationEnd={(event) => event.stopPropagation()}
+    <div className={classes.wrap}>
+      <p
+        className={classes.bubble}
+        role="status"
+        aria-label={label}
+        onAnimationEnd={onAnimationEnd}
       >
-        <span className="size-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:0ms] motion-reduce:animate-none" />
-        <span className="size-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:150ms] motion-reduce:animate-none" />
-        <span className="size-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:300ms] motion-reduce:animate-none" />
-      </span>
-    </p>
+        <span
+          className="flex items-center gap-1 text-stone-400"
+          aria-hidden="true"
+          onAnimationEnd={(event) => event.stopPropagation()}
+        >
+          <span className="loading loading-dots" />
+        </span>
+      </p>
+    </div>
   );
 }

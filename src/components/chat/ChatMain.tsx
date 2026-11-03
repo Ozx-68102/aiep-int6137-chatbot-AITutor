@@ -52,7 +52,7 @@ export function ChatMain({
         {sidebarOpen ? null : (
           <button
             type="button"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+            className="btn btn-ghost btn-square btn-sm shrink-0"
             aria-label={text.showSidebar}
             title={text.showSidebar}
             onClick={onShowSidebar}
@@ -97,15 +97,18 @@ export function ChatMain({
               }
               if (message.role === 'assistant') {
                 const entering = enteringIds.includes(message.id);
+                const classes = bubbleClass(message.role, entering);
                 return (
                   <div key={message.id}>
                     {textShown === '' ? null : (
-                      <div
-                        lang={message.locale ? htmlLang[message.locale] : undefined}
-                        className={bubbleClass(message.role, entering)}
-                        onAnimationEnd={() => onAnimationEnd(message.id)}
-                      >
-                        <MarkdownText text={textShown} />
+                      <div className={classes.wrap}>
+                        <div
+                          lang={message.locale ? htmlLang[message.locale] : undefined}
+                          className={classes.bubble}
+                          onAnimationEnd={() => onAnimationEnd(message.id)}
+                        >
+                          <MarkdownText text={textShown} />
+                        </div>
                       </div>
                     )}
                     {message.aborted === true ? (
@@ -126,15 +129,17 @@ export function ChatMain({
               // TODO：每一轮下面加一个小的「编辑」按钮，点开是修改框
               //（右下角「取消」「发送」），改完发出去等于把这一轮重问一遍，
               //用户视角跟「重试」一样。设计和待定的问题写在 docs/EDIT_MESSAGE.md。
+              const classes = bubbleClass(message.role, enteringIds.includes(message.id));
               return (
-                <p
-                  key={message.id}
-                  lang={message.locale ? htmlLang[message.locale] : undefined}
-                  className={bubbleClass(message.role, enteringIds.includes(message.id))}
-                  onAnimationEnd={() => onAnimationEnd(message.id)}
-                >
-                  {textShown}
-                </p>
+                <div key={message.id} className={classes.wrap}>
+                  <p
+                    lang={message.locale ? htmlLang[message.locale] : undefined}
+                    className={classes.bubble}
+                    onAnimationEnd={() => onAnimationEnd(message.id)}
+                  >
+                    {textShown}
+                  </p>
+                </div>
               );
             })
           : null}
@@ -154,11 +159,7 @@ export function ChatMain({
         ))}
         <form className="flex items-center gap-2" onSubmit={onSubmit}>
           <input
-            className={
-              inputLocked
-                ? 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5 opacity-50'
-                : 'min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2.5'
-            }
+            className="input min-w-0 flex-1"
             value={draft}
             placeholder={text.placeholder}
             aria-label={text.placeholder}
@@ -168,7 +169,7 @@ export function ChatMain({
           {pending ? (
             <button
               type="button"
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+              className="btn btn-ghost btn-square btn-sm shrink-0"
               aria-label={text.stop}
               title={text.stop}
               onClick={onStop}
@@ -180,8 +181,8 @@ export function ChatMain({
               type="submit"
               className={
                 sendLocked || draft.trim() === ''
-                  ? 'inline-flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg border border-stone-300 bg-white text-inherit opacity-50'
-                  : 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-900 bg-emerald-900 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
+                  ? 'btn btn-square btn-sm shrink-0'
+                  : 'btn btn-primary btn-square btn-sm shrink-0'
               }
               aria-label={text.send}
               title={text.send}

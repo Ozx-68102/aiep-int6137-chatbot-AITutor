@@ -1,17 +1,36 @@
 import type {Message} from '../../type/chat.ts';
 
-export function bubbleClass(role: Message['role'], entering: boolean): string {
+/**
+ * daisyUI chat 体系需要两层：外层包装（.chat .chat-start/.chat-end，grid 定位），
+ * 内层气泡（.chat-bubble + 语义色）。进场动画（tw-animate-css）留在气泡上，
+ * 跟 onAnimationEnd 同元素，事件行为不变。
+ */
+export type BubbleClass = {
+  wrap: string;
+  bubble: string;
+};
+
+export function bubbleClass(role: Message['role'], entering: boolean): BubbleClass {
   if (role === 'user') {
-    return entering
-      ? 'mb-3 ml-auto w-fit max-w-[600px] animate-in rounded-xl bg-emerald-900 px-3.5 py-2.5 whitespace-pre-wrap break-words text-white fade-in slide-in-from-bottom-2 duration-200'
-      : 'mb-3 ml-auto w-fit max-w-[600px] rounded-xl bg-emerald-900 px-3.5 py-2.5 whitespace-pre-wrap break-words text-white';
+    return {
+      wrap: 'chat chat-end',
+      bubble: entering
+        ? 'chat-bubble chat-bubble-primary max-w-[600px] animate-in whitespace-pre-wrap break-words fade-in slide-in-from-bottom-2 duration-200'
+        : 'chat-bubble chat-bubble-primary max-w-[600px] whitespace-pre-wrap break-words',
+    };
   }
   if (role === 'error') {
-    return entering
-      ? 'mb-3 w-fit max-w-[600px] animate-in rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2.5 whitespace-pre-wrap break-words text-red-600 fade-in slide-in-from-bottom-2 duration-200'
-      : 'mb-3 w-fit max-w-[600px] rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2.5 whitespace-pre-wrap break-words text-red-600';
+    return {
+      wrap: 'chat chat-start',
+      bubble: entering
+        ? 'chat-bubble chat-bubble-error max-w-[600px] animate-in whitespace-pre-wrap break-words fade-in slide-in-from-bottom-2 duration-200'
+        : 'chat-bubble chat-bubble-error max-w-[600px] whitespace-pre-wrap break-words',
+    };
   }
-  return entering
-    ? 'mb-3 w-fit max-w-[600px] animate-in rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap break-words fade-in slide-in-from-bottom-2 duration-200'
-    : 'mb-3 w-fit max-w-[600px] animate-in rounded-xl bg-stone-100 px-3.5 py-2.5 whitespace-pre-wrap break-words fade-in duration-300 motion-reduce:animate-none';
+  return {
+    wrap: 'chat chat-start',
+    bubble: entering
+      ? 'chat-bubble max-w-[600px] animate-in whitespace-pre-wrap break-words fade-in slide-in-from-bottom-2 duration-200'
+      : 'chat-bubble max-w-[600px] animate-in whitespace-pre-wrap break-words fade-in duration-300 motion-reduce:animate-none',
+  };
 }
