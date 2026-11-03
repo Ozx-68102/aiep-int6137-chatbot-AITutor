@@ -313,3 +313,39 @@ zh 字典仍然有用——用户实际会输入的「中文密码」本来就�
 
 （另：`banana42` 这类 8 位小写加数字，zxcvbn 评「弱」——这是它按猜测次数给的老实判断，
 不是按长度卡人。原来的手搓版本给「一般」是虚高。8 位仍然能过、能用，只是提示老实了。）
+
+## 2026-11-03 LayerFS 的读取和列目录都是分页的，校验脚本必须拼接
+
+`fs.read` 一次调用只回一个窗口（返回体带 `truncated`/`nextLine`），大文件拿到的是前缀。
+这批做同步校验时没翻页，md5 对不上，差点误判成「main 上的 App.tsx 和 pnpm-lock.yaml
+没同步」——其实文件是完整的，是读被截断了。`fs.list` 同样分页，不拼会漏条目
+（曾把 `.env.example` 误报成 LayerFS 里不存在）。凡是拿内容做比对的脚本，
+都要循环读到 `truncated` 为假再算哈希。
+
+## 2026-11-03 LayerFS 的 fs.apply 不能写不存在的目录
+
+往新目录里写文件报 `NoSuchPath`，得先建目录再写。副作用是会产生一个「纯目录、零文件」
+的提交；git 没有空目录的概念，用 commit-tree 复刻时这种提交只能跳过
+（LayerFS 侧痕迹保留，git 侧提交数比那边少一个，属预期）。
+
+## 2026-11-03 LayerFS 合并提交的父指针跟 git 惯例相反
+
+merge 产生的提交里 `parent` = 源分支 tip，`secondParent` = 合并目标当时的 **layer id**
+（不是 commit id）；git 惯例正好相反（p1 是发起合并的一侧）。且 `list_commits` 只走
+first-parent 链，从合并结果分支看不到 main 一侧的历史。要把 main 的合并链复刻进 git，
+得按发布顺序逐个取合并提交（每个合并结果分支的 head），main 侧的父提交按已知顺序推；
+publish 输出的 `publishedLayer.id` 与合并 head 一一对应，可用来校验 `secondParent`。
+
+## 2026-11-03 httpx2 的 ASGITransport 只挂 AsyncClient
+
+server 的依赖是 `httpx2`（2.16.0），环境里没有 `httpx` 包。这个版本的 `ASGITransport`
+不支持同步 `Client`，进程内接口测试要用 asyncio + `AsyncClient` 写。
+另外 per-request 的 `cookies=` 参数已被标记弃用（警告归警告，行为还是对的）。
+
+## 2026-11-03 oxfmt 会把「一行多个元素」的数组炸开
+
+`password-strength.ts` 是早前版本 oxfmt 写的（`PINYIN_COMMON` 一行多个元素），
+在当前 node_modules 的 oxfmt 0.75.0 下过不了 `--check`——main 上带了这个失配一段时间，
+`pnpm check` 一直是红的。2026-11-03 合并批次落地后用 `pnpm fmt` 重排（唯一受影响的
+就是这个文件；把 diff 的去空白结果逐字符比对过，确认纯排版），单独提交成 style。
+教训：写完就跑 `pnpm check`，别跨工具版本变动留尾巴。
