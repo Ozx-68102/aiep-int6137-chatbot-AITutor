@@ -218,3 +218,28 @@ server 的依赖是 `httpx2`（2.16.0），环境里没有 `httpx` 包。这个�
 ## 2026-11-03 oxfmt 会把「一行多个元素」的数组炸开
 
 `password-strength.ts` 是早前版本 oxfmt 写的（`PINYIN_COMMON` 一行多个元素），在当前 node_modules 的 oxfmt 0.75.0 下过不了 `--check`——main 上带了这个失配一段时间，`pnpm check` 一直是红的。2026-11-03 合并批次落地后用 `pnpm fmt` 重排（唯一受影响的就是这个文件；把 diff 的去空白结果逐字符比对过，确认纯排版），单独提交成 style。教训：写完就跑 `pnpm check`，别跨工具版本变动留尾巴。
+
+## 2026-11-03 LayerFS 项目 store 损坏：两条独立访问路径同报 Malformed，1.x 无修复工具，只能重建
+
+症状与证据（本会话实测）：
+
+- 会话的 LayerFS worker 起初没在运行（endpoint.json 缺失）；harness 于 15:26 自动拉起 `layerfs-worker` 容器，端口映射和 endpoint.json 会自动改写，GUI 重启后容器仍存活。
+- worker 起来后，所有项目调用（`project list_branches`、`fs read`，**连不存在的项目名也一样**）在约 5ms 内报 `Failed: Os NotFound`——失败发生在项目查找之前。而 store 卷 `layerfs-aiep-int6137-chatbot-aitutor-store-mvzakkdi` 本身完好：`global/store.sqlite` 114MB、SQLite 文件头有效、最后写入当天 11:53；worker 容器内 bundle、daemon、native 模块、卷内 store 全部可见。
+- 按文档允许的 `layerfs init` 做了一次探测，被拒 `Store install: Store destination exists`（未写入数据）；此后 `sandbox create` / `project list_sandboxes` 的报错变为 `Store open: physical Store I/O: pack persistence: Malformed`。无法判定是 init 探测改动了磁盘状态，还是两类调用走到了 open 路径的不同深度。
+- **GUI 侧边栏 LayerFS 面板显示一字不差的同一句 Malformed**——它是与会话 CLI 独立的访问路径，但走同一个 worker 和同一个卷。所以损坏在 store 数据本身，**与会话模式无关**（「LayerFS × DSH minimalist」vs「标准模式」）；标准模式会话能看 Work/History，是因为那两页读会话记录，不开项目 store。
+- 重启 GUI、重启 worker 容器均无效（数据和卷跨重启存活）。
+
+上游对照（Ephemeral-AI-Lab/layerfs，公开仓库，浅克隆 `35d3657` 核对源码）：
+
+- `PersistenceError::Malformed` 定义在 `core/crates/layerfs-storage/src/port/persistence.rs`，语义是「后端响应违反存储格式的文法或边界」；`Store open:` 前缀来自 `engine/crates/layerfs-store-service`。即打开 store 时读到的 pack/元数据自身不一致——结合先出现的 NotFound，推测是上午会话之后 pack 数据部分丢失，sqlite 元数据引用了不存在或越界的东西。
+- 精确短语 `"pack persistence: Malformed"` 在 GitHub 全站 issue 搜索 0 命中，无同款报告。
+- **1.x 没有任何修复或部分读取工具**：#511（rm/compact/prune）、#519/#485（只读打开坏 store 抢救数据）均为 open 未实现；#379（pack 写失败后 store 永久拒写）官方结论原话 "The only way out is to … delete the Store"。
+- 10月28日前合并的三个 delta 链预算修复（#472/#473/#479）早于本机 worker build（11月2日，`build-linux-222129a2…`），且修的是**写入被拒**侧（Integrity 错误），救不了**打开时** Malformed；最新 tag v1.1.0 正是在用版本——不存在「升级后就能读开」的 build。
+
+结论：这份 store 在 1.x 下不可恢复，只能删掉重建。本地目录是当初 init 的源目录、且比 LayerFS 侧更新（新装的 daisyui / tailwind-bootstrap-grid 只在本地），重建的实际损失仅限 LayerFS 侧未同步回本地的历史——store 打不开，无法列出确认有哪些。
+
+## 2026-11-03 macOS 上 `layerfs init` 结构性损坏，重建项目必须走 harness 自己的流程
+
+上游 #513（open，2026-10-30）描述与本机实测完全一致：macOS worker 路线下（会话环境带 `LAYERFS_WORKER_ENDPOINT` 等变量），`layerfs init` 即使对全新项目名也报 `Store destination exists`。issue 指出 macOS 上唯一能工作的初始化路径是 `@layerfs/runtime` 的 `project.start_init`（它会预置卷、设置每项目 STORE_PATH），而 CLI 直接暴露 `LayerFS.init`，绕过了这层编排。维护者答复：修复排进 LayerFS 2.0（roadmap #446），当前阶段冻结。
+
+所以规矩是：**不要试图删卷后用 CLI init 手动重建**；重建项目要走 harness/GUI 自带的创建入口。相关背景：#534（open）记录了原生 macOS 路线并发 `LayerFS.open` 报 Store busy 等问题，同属「macOS 路线未修完」一族。
