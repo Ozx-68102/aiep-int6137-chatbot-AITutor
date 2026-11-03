@@ -3,6 +3,7 @@ import {useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
 import {chatIdFromPath, usePathRouting} from './hooks/use-path-routing.ts';
 import {useProfileActions} from './hooks/use-profile-actions.ts';
+import {useSessionActions} from './hooks/use-session-actions.ts';
 import {serviceNoticeText, useServiceStatus} from './hooks/use-service-status.ts';
 import {streamReply} from './api/chat.ts';
 import {connectionFailure, explain} from './api/failure.ts';
@@ -14,12 +15,9 @@ import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {
   abortReply,
   createSession,
-  deleteSession,
   emptySession,
   listSessions,
   login,
-  pinSession,
-  renameSession,
   sessionsFromList,
 } from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
@@ -103,7 +101,6 @@ function ChatApp() {
   const sendingRef = useRef<Set<string>>(new Set());
   const aborters = useRef(new Map<string, {controller: AbortController; turnId: string}>());
   const stoppers = useRef(new Map<string, Promise<void>>());
-  const titleSaves = useRef(new Map<string, Promise<void>>());
   const pollers = useRef(new Map<string, () => void>());
   const sessionsRef = useRef(sessions);
   const draftRef = useRef(draft);
@@ -159,6 +156,19 @@ function ChatApp() {
     onConnectionWarning: service.showConnectionWarning,
   });
   const profileApiRef = useRef(profileApi);
+  const sessionActions = useSessionActions({
+    locale,
+    activeId,
+    setSessions,
+    setNotice,
+    onShowToast: showToast,
+    onEnterLogin: enterLogin,
+    onConnectionWarning: service.showConnectionWarning,
+    showNewChat,
+    onStopPolling: stopPolling,
+    onClearPending: clearPending,
+  });
+  const sessionActionsRef = useRef(sessionActions);
   // enterLogin 和启动效果会被效果捕获，不能直接引用 hook 返回的对象
   // （响应式），一律走上面这几个 ref 拿最新的 API——和 navigateRef 同一套路。
   const serviceNotice = serviceNoticeText(service.serviceState, text);
@@ -207,6 +217,7 @@ function ChatApp() {
     serviceRef.current = service;
     passwordRef.current = password;
     profileApiRef.current = profileApi;
+    sessionActionsRef.current = sessionActions;
     connectionWarningRef.current = service.showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -397,7 +408,7 @@ function ChatApp() {
     setHistoryLoadingId(null);
     loadedThreads.current.clear();
     threadFlight.current.clear();
-    titleSaves.current.clear();
+    sessionActionsRef.current.titleSaves.current.clear();
     for (const stop of pollers.current.values()) {
       stop();
     }
@@ -542,114 +553,6 @@ function ChatApp() {
     }
   }
 
-  async function renameOpenSession(id: string, title: string): Promise<boolean> {
-    const trimmed = title.trim();
-    if (trimmed === '') {
-      return false;
-    }
-    const pendingTitle = titleSaves.current.get(id);
-    if (pendingTitle) {
-      await pendingTitle;
-    }
-    try {
-      const item = await renameSession(id, trimmed);
-      showToast(text.renameDone);
-      setSessions((current) =>
-        current.map((session) => {
-          if (session.id !== id) {
-            return session;
-          }
-          return {
-            ...session,
-            title: item.title,
-          };
-        }),
-      );
-      return true;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return false;
-      }
-      if (connectionFailure(error)) {
-        service.showConnectionWarning();
-        return false;
-      }
-      setNotice(explain(error, text.connectionError));
-      return false;
-    }
-  }
-
-  async function saveTitle(sessionId: string, title: string): Promise<boolean> {
-    try {
-      await renameSession(sessionId, title);
-      return true;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        return false;
-      }
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return false;
-      }
-      if (connectionFailure(error)) {
-        service.showConnectionWarning();
-        return false;
-      }
-      setNotice(explain(error, text.connectionError));
-      return false;
-    }
-  }
-
-  async function removeSession(id: string): Promise<boolean> {
-    const wasCurrent = activeId === id;
-    try {
-      await deleteSession(id);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return false;
-      }
-      if (connectionFailure(error)) {
-        service.showConnectionWarning();
-        return false;
-      }
-      setNotice(explain(error, text.connectionError));
-      return false;
-    }
-    setSessions((current) => current.filter((session) => session.id !== id));
-    showToast(text.deleteDone);
-    stopPolling(id);
-    clearPending(id);
-    if (!wasCurrent) {
-      return true;
-    }
-    showNewChat();
-    void navigate('/', {replace: true});
-    return true;
-  }
-
-  async function pinOpenSession(id: string, pinned: boolean) {
-    try {
-      const item = await pinSession(id, pinned, pinned ? new Date().toISOString() : null);
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === id ? {...session, pinned: item.pinned, pinnedAt: item.pinned_at} : session,
-        ),
-      );
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return;
-      }
-      if (connectionFailure(error)) {
-        service.showConnectionWarning();
-        return;
-      }
-      setNotice(explain(error, text.connectionError));
-    }
-  }
-
   function addSession() {
     if (composingNew) {
       setView('chat');
@@ -756,16 +659,16 @@ function ChatApp() {
     }));
     markEntering(userMessage.id);
     if (missingTitle) {
-      const saving = saveTitle(sessionId, title)
+      const saving = sessionActions.saveTitle(sessionId, title)
         .then((saved) => {
           if (!saved) {
             updateSession(sessionId, (session) => ({...session, title: null}));
           }
         })
         .finally(() => {
-          titleSaves.current.delete(sessionId);
+          sessionActions.titleSaves.current.delete(sessionId);
         });
-      titleSaves.current.set(sessionId, saving);
+      sessionActions.titleSaves.current.set(sessionId, saving);
     }
     void sendQuestion(sessionId, question, turnId);
   }
@@ -1272,10 +1175,10 @@ function ChatApp() {
           closeSidebar();
         }}
         onOpenSession={openSession}
-        onRename={(id, title) => renameOpenSession(id, title)}
-        onDelete={(id) => removeSession(id)}
+        onRename={(id, title) => sessionActions.renameOpenSession(id, title)}
+        onDelete={(id) => sessionActions.removeSession(id)}
         onPin={(id, pinned) => {
-          void pinOpenSession(id, pinned);
+          void sessionActions.pinOpenSession(id, pinned);
         }}
         onOpenSettings={() => {
           setConfirmLogout(false);
