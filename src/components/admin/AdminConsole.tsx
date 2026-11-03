@@ -18,7 +18,7 @@ import {ConfirmResetPassword} from './ConfirmResetPassword.tsx';
 import {NewPasswordPanel} from './NewPasswordPanel.tsx';
 
 /**
- * 管理员控制台：地址带 ?page=admin 时整页渲染，跟聊天侧完全无关——
+ * 管理员控制台：地址是 /admin 时整页渲染，跟聊天侧完全无关——
  * 不拉 /api/profile、不进聊天视图，登录态是 admin_login cookie 自己的。
  *
  * 挂载时先拉一次账号列表：cookie 还有效就直接进列表，401 就显示登录表单。
