@@ -26,6 +26,7 @@
 - FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)。聊天流、停止、
   重试和 `message` 表：[docs/INTERRUPTED_REPLY.md](docs/INTERRUPTED_REPLY.md)
 - 界面上的提示（警示框、消息里的错误、表单里的红字）放在哪里：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
+- 控制台/家长端的定位决定和香港私隐法规依据：[docs/PARENT_PORTAL_PRIVACY.md](docs/PARENT_PORTAL_PRIVACY.md)
 - 后端特有的规矩和命令：[server/AGENTS.md](server/AGENTS.md)
 
 ## 守则
