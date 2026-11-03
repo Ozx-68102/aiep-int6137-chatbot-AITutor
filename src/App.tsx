@@ -525,6 +525,9 @@ function ChatApp() {
     // 改密页的地址参数跟着登录态一起清掉：重新登录后该回到聊天，
     // 不该又弹回改密页。
     replacePageOutOfUrl();
+    // 旧的 session id 也一并清掉：退出后地址回到根路径，不再留在地址栏、
+    // 浏览器历史和复制出去的链接里；下次登录也不会静默跳回旧会话。
+    replaceSessionToUrl(null);
     passwordPushed.current = false;
     setComposingNew(false);
     setConfirmLogout(false);
