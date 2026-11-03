@@ -307,8 +307,7 @@ def admin_list_accounts(
         rows = session.scalars(select(Account).order_by(Account.username))
         return AdminAccountsResponse(
             accounts=[
-                AdminAccountItem(username=row.username, role=row.role)
-                for row in rows
+                AdminAccountItem(username=row.username, role=row.role) for row in rows
             ],
         )
 
