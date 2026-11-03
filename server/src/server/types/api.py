@@ -59,6 +59,17 @@ class AdminLoginResponse(BaseModel):
     username: str
 
 
+class AdminAccountItem(BaseModel):
+    """控制台账号列表里的一行。"""
+
+    username: str
+    role: str
+
+
+class AdminAccountsResponse(BaseModel):
+    accounts: list[AdminAccountItem]
+
+
 class ProfileResponse(BaseModel):
     id: UUID
     username: str

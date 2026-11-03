@@ -61,6 +61,8 @@ from server.reply_store import (
 from server.settings import load_settings
 from server.types import (
     AbortRequest,
+    AdminAccountItem,
+    AdminAccountsResponse,
     AdminLoginResponse,
     ChatRequest,
     HistoryMessageResponse,
@@ -287,6 +289,22 @@ def admin_login(body: LoginRequest, response: Response) -> AdminLoginResponse:
 
     _set_cookie(response, _ADMIN_COOKIE_NAME, token)
     return AdminLoginResponse(username=username)
+
+
+@app.get("/api/admin/accounts")
+def admin_list_accounts(
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
+) -> AdminAccountsResponse:
+    """控制台的账号列表：全部账号，按用户名排序。"""
+    with db_session() as session:
+        _admin_from_cookie(session, admin_cookie)
+        rows = session.scalars(select(Account).order_by(Account.username))
+        return AdminAccountsResponse(
+            accounts=[
+                AdminAccountItem(username=row.username, role=row.role)
+                for row in rows
+            ],
+        )
 
 
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
