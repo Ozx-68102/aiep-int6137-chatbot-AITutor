@@ -396,7 +396,8 @@ function ChatApp() {
   // 格式，认出来就就地重定向到对应的真实路径。不带 id 的 /chat、未知路径和
   // 多余的参数也在这里一并归位。
   useEffect(() => {
-    const {pathname, search} = location;
+    const pathname = location.pathname;
+    const search = location.search;
     if (search !== '') {
       const params = new URLSearchParams(search);
       const page = params.get('page');
