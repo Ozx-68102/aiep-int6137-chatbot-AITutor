@@ -27,6 +27,7 @@ npm install -g pnpm
 
 - 构建：Vite 8.3.5，插件 @vitejs/plugin-react 6.1.2
 - UI：React 19.3.1、react-dom 19.3.1
+- 路由：react-router 8.5.1，BrowserRouter 真实路径：聊天 `/`、会话 `/chat/:id`、改密 `/password`、登录入口 `/login`、控制台 `/admin`。登录本身是状态不是路由：未登录时任何路径就地渲染登录屏，登录成功后路由自动认领原地址。旧的查询参数地址（`?session=`、`?page=`）在 `src/App.tsx` 里兼容重定向
 - 图标：lucide-react 1.61.0
 - 样式：Tailwind CSS 4.3.3，插件 @tailwindcss/vite 4.3.3
 - 组件库：daisyUI 5.7.50（Tailwind 插件，`src/index.css` 里用 `@plugin` 接线）。内置主题已关掉，只用自定义 `aiep` 主题：语义变量（base-*、primary、error 等）与 stone/emerald 色板同值。组件类按需生成，源码里没出现的类不会进产物
@@ -36,6 +37,7 @@ npm install -g pnpm
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
 - 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint 加 oxfmt --check 一起跑
 - 类型检查和打包：`pnpm build`，等于 `pnpm exec tsc --noEmit && vite build`。产物在 `dist/`，已被忽略
+- 部署：真实路径路由要求托管方配 SPA 回落（任何未知路径返回 index.html），Nginx 配置和故障排查见 [NGINX_SPA_DEPLOYMENT_GUIDE.md](NGINX_SPA_DEPLOYMENT_GUIDE.md)
 - `pnpm test` 是占位脚本，会直接失败。仓库里没有自动化测试
 
 ## 后端
