@@ -1167,6 +1167,19 @@ def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
     return token.account
 
 
+def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
+    """控制台接口只认 admin_login cookie 里的 admin 账号。
+
+    镜像 _account_from_cookie。token 无效或者账号不是 admin，都回
+    「未登录」（401）：这个 cookie 只有控制台登录接口自己种，
+    不像登录那样需要把「密码对了但角色不对」分开说。
+    """
+    token = _login_token(session, admin_cookie)
+    if token is None or token.account.role != _ROLE_ADMIN:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+    return token.account
+
+
 def _login_token(session: Session, login_cookie: str | None) -> LoginToken | None:
     if login_cookie is None or login_cookie == "":
         return None
