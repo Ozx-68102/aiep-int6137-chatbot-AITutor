@@ -1,6 +1,7 @@
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
 import {useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
+import {chatIdFromPath, usePathRouting} from './hooks/use-path-routing.ts';
 import {useProfileActions} from './hooks/use-profile-actions.ts';
 import {streamReply} from './api/chat.ts';
 import {connectionFailure, explain} from './api/failure.ts';
@@ -40,7 +41,7 @@ import {titleFromQuestion} from './session/title.ts';
 import {loadThread} from './session/thread.ts';
 import {startPartialPolling} from './session/poll.ts';
 import {visibleText} from './session/text.ts';
-import {BrowserRouter, matchPath, Route, Routes, useLocation, useNavigate} from 'react-router';
+import {BrowserRouter, Route, Routes, useLocation, useNavigate} from 'react-router';
 import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
@@ -79,12 +80,6 @@ export default function App() {
       </Routes>
     </BrowserRouter>
   );
-}
-
-/** /chat/:id 里的会话 id；其它路径（含不带 id 的 /chat）返回 null。 */
-function chatIdFromPath(pathname: string): string | null {
-  const matched = matchPath('/chat/:id', pathname);
-  return matched?.params.id ?? null;
 }
 
 function ChatApp() {
@@ -136,17 +131,9 @@ function ChatApp() {
   const draftRef = useRef(draft);
   const localeRef = useRef(locale);
   const activeIdRef = useRef(activeId);
-  const authRef = useRef(auth);
-  const locationRef = useRef(location);
   // 异步回调和旧有效果调用的函数统一从 ref 里拿 navigate：走 ref 就不会
   // 成为各个效果的响应式依赖，和 connectionWarningRef 是同一套路。
   const navigateRef = useRef(navigate);
-  // 改密页是怎么进来的：'push' = 从设置里点进来（压过一条历史，取消等于浏览器后退）；
-  // 'direct' = 刷新、贴地址或前进后退直接打开（没有可退的，取消就地替换路径）；
-  // null = 当前不在改密页。
-  const passwordEntry = useRef<'push' | 'direct' | null>(null);
-  // 上一次渲染时的路径：路径同步效果靠它判断「刚离开改密页」。
-  const prevPathRef = useRef('');
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
   const connectionWarningRef = useRef<() => void>(() => undefined);
@@ -176,6 +163,17 @@ function ChatApp() {
   // 一律走 ref 拿最新的 API——和 navigateRef 同一套路。
   const passwordRef = useRef(password);
   const profileApiRef = useRef(profileApi);
+  const routing = usePathRouting({
+    auth,
+    sessions,
+    activeId,
+    showSession,
+    showNewChat,
+    setView,
+    setComposingNew,
+    setActiveId,
+  });
+  const routingRef = useRef(routing);
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
@@ -216,11 +214,10 @@ function ChatApp() {
     draftRef.current = draft;
     localeRef.current = locale;
     activeIdRef.current = activeId;
-    authRef.current = auth;
-    locationRef.current = location;
     navigateRef.current = navigate;
     passwordRef.current = password;
     profileApiRef.current = profileApi;
+    routingRef.current = routing;
     connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -316,7 +313,7 @@ function ChatApp() {
           return;
         }
         setSessions(next);
-        claimPath(next);
+        routingRef.current.claimPath(next);
         if (profile) {
           setUsername(profile.username);
           setLocale(profile.locale);
@@ -408,68 +405,6 @@ function ChatApp() {
     };
   }, [auth]);
 
-  // 路径归位：只认 /、/login、/password、/chat/:id 四类地址，不带 id 的
-  // /chat 和未知路径一律送回根路径。
-  useEffect(() => {
-    const pathname = location.pathname;
-    if (pathname === '/' || pathname === '/login' || pathname === '/password') {
-      return;
-    }
-    if (chatIdFromPath(pathname) === null) {
-      void navigate('/', {replace: true});
-    }
-  }, [location.pathname, navigate]);
-
-  // 路径驱动聊天状态：前进后退或代码导航在 / 与 /chat/:id 之间切换时，
-  // 把对应的会话带到台前。取代原来手写的历史监听。
-  useEffect(() => {
-    const pathname = location.pathname;
-    if (authRef.current !== 'ready') {
-      prevPathRef.current = pathname;
-      return;
-    }
-    if (pathname === '/password') {
-      if (passwordEntry.current === null) {
-        // 浏览器前进后退回到改密页：历史里这一条本来就是压进去的。
-        passwordEntry.current = 'push';
-      }
-      prevPathRef.current = pathname;
-      return;
-    }
-    passwordEntry.current = null;
-    const leavingPassword = prevPathRef.current === '/password';
-    prevPathRef.current = pathname;
-    if (leavingPassword) {
-      setView('chat');
-    }
-    if (pathname === '/login') {
-      // 已登录还站在 /login：送回根路径是 claimPath 的事，这里不动聊天状态。
-      return;
-    }
-    const wanted = chatIdFromPath(pathname);
-    if (wanted === null) {
-      if (pathname === '/') {
-        showNewChat();
-      }
-      return;
-    }
-    const found = sessionsRef.current.find((session) => session.id === wanted);
-    if (found === undefined) {
-      // 地址里的会话不存在（被删了，或换账号重登）：回根路径重新来过。
-      showNewChat();
-      void navigate('/', {replace: true});
-      return;
-    }
-    if (leavingPassword && wanted === activeIdRef.current) {
-      // 从改密页退回来、会话没变：只切视图，不走 showSession/showNewChat，
-      // 输入框里没发出去的字原样留着。
-      return;
-    }
-    if (wanted !== activeIdRef.current) {
-      showSession(found.id);
-    }
-  }, [location.pathname, navigate]);
-
   useEffect(() => {
     const active = pollers.current;
     return () => {
@@ -479,38 +414,6 @@ function ChatApp() {
       active.clear();
     };
   }, []);
-
-  /** 登录或引导完成后按当前路径认领状态：打开哪个会话、停在改密页还是回根路径。 */
-  function claimPath(list: Session[]): void {
-    const {pathname} = locationRef.current;
-    if (pathname === '/password') {
-      // 直接以 /password 打开、或在改密页上刷新：留在改密页。
-      // 这种进入方式历史里没有我们压的那一条，取消走就地替换的路。
-      passwordEntry.current = 'direct';
-      return;
-    }
-    if (pathname === '/login') {
-      // 已经登录了，规范登录入口没有存在的意义：回根路径，
-      // 聊天状态交给路径同步效果收拾。
-      void navigateRef.current('/', {replace: true});
-      return;
-    }
-    const wanted = chatIdFromPath(pathname);
-    if (wanted === null) {
-      setComposingNew(true);
-      setActiveId(null);
-      return;
-    }
-    const found = list.find((session) => session.id === wanted);
-    if (found === undefined) {
-      void navigateRef.current('/', {replace: true});
-      setComposingNew(true);
-      setActiveId(null);
-      return;
-    }
-    setComposingNew(false);
-    setActiveId(found.id);
-  }
 
   function showConnectionWarning() {
     // 连不上服务器归到服务状态里：聊天区上方只出一个框，不重复报两遍。
@@ -529,7 +432,7 @@ function ChatApp() {
       const next = sessionsFromList(items);
       setSessions(next);
       // 按当前地址重新认领状态：离线期间停在 /chat/<id> 的，把会话重新打开。
-      claimPath(next);
+      routingRef.current.claimPath(next);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(error.detail);
@@ -588,7 +491,7 @@ function ChatApp() {
     if (detail === null) {
       void navigateRef.current('/login', {replace: true});
     }
-    passwordEntry.current = null;
+    routingRef.current.passwordEntry.current = null;
     setComposingNew(false);
     setConfirmLogout(false);
     profileApiRef.current.setProfileError(null);
@@ -654,7 +557,7 @@ function ChatApp() {
     }
     let next = sessionsFromList(result.sessions);
     setSessions(next);
-    claimPath(next);
+    routingRef.current.claimPath(next);
     // 被踢时存下的那句话放回输入框；放回就消费掉，别带去再下一次登录。
     const unsent = readUnsent();
     setDraft(unsent);
@@ -1434,7 +1337,7 @@ function ChatApp() {
         onSubmit={password.submit}
         onCancel={() => {
           password.setError(null);
-          if (passwordEntry.current === 'push') {
+          if (routing.passwordEntry.current === 'push') {
             // 入口压过一条历史：取消就是后退，路径效果会把视图跟着地址带回去。
             void navigate(-1);
             return;
@@ -1530,7 +1433,7 @@ function ChatApp() {
         onChangePassword={() => {
           password.setError(null);
           // 真页面：地址变成 /password，压一条历史，浏览器后退就能回来。
-          passwordEntry.current = 'push';
+          routing.passwordEntry.current = 'push';
           void navigate('/password');
         }}
         onLogout={() => setConfirmLogout(true)}
