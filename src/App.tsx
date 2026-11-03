@@ -64,10 +64,9 @@ function serviceNoticeText(
 
 /**
  * 路由用真实路径：/admin 整页渲染管理员控制台，其余地址交给聊天侧
- * （ChatApp），由它再认 /、/chat/:id、/password 和 /login。旧的查询参数
- * 地址（?session=、?page=）由 ChatApp 里的兼容效果重定向到新路径。
- * 控制台是完全独立的一页——聊天侧的会话和用户信息引导流程一概不跑
- * （ChatApp 压根不挂载）。
+ * （ChatApp），由它再认 /、/chat/:id、/password 和 /login；不带 id 的
+ * /chat 和未知路径一律归位到根路径。控制台是完全独立的一页——聊天侧
+ * 的会话和用户信息引导流程一概不跑（ChatApp 压根不挂载）。
  */
 export default function App() {
   return (
@@ -392,34 +391,17 @@ function ChatApp() {
     };
   }, [auth]);
 
-  // 旧地址兼容：?page=admin、?page=password、?session=<id> 都是旧的查询参数
-  // 格式，认出来就就地重定向到对应的真实路径。不带 id 的 /chat、未知路径和
-  // 多余的参数也在这里一并归位。
+  // 路径归位：只认 /、/login、/password、/chat/:id 四类地址，不带 id 的
+  // /chat 和未知路径一律送回根路径。
   useEffect(() => {
     const pathname = location.pathname;
-    const search = location.search;
-    if (search !== '') {
-      const params = new URLSearchParams(search);
-      const page = params.get('page');
-      const session = params.get('session');
-      if (page === 'admin') {
-        void navigate('/admin', {replace: true});
-      } else if (page === 'password') {
-        void navigate('/password', {replace: true});
-      } else if (session !== null && session !== '') {
-        void navigate(`/chat/${session}`, {replace: true});
-      } else {
-        void navigate(pathname, {replace: true});
-      }
-      return;
-    }
     if (pathname === '/' || pathname === '/login' || pathname === '/password') {
       return;
     }
     if (chatIdFromPath(pathname) === null) {
       void navigate('/', {replace: true});
     }
-  }, [location.pathname, location.search, navigate]);
+  }, [location.pathname, navigate]);
 
   // 路径驱动聊天状态：前进后退或代码导航在 / 与 /chat/:id 之间切换时，
   // 把对应的会话带到台前。取代原来手写的历史监听。
@@ -1535,7 +1517,7 @@ function ChatApp() {
     );
   }
 
-  // 已登录却站在 /login、或站在即将被兼容效果归位的地址（裸 /chat、未知路径）：
+  // 已登录却站在 /login、或站在即将被归位效果送走的地址（裸 /chat、未知路径）：
   // 效果马上会把地址送去该去的地方，先放个占位，别闪一帧聊天框。
   if (location.pathname !== '/' && chatIdFromPath(location.pathname) === null) {
     return <div className="h-full bg-stone-100" />;
