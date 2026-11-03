@@ -142,6 +142,9 @@ function ChatApp() {
   const activeIdRef = useRef(activeId);
   const authRef = useRef(auth);
   const locationRef = useRef(location);
+  // 异步回调和旧有效果调用的函数统一从 ref 里拿 navigate：走 ref 就不会
+  // 成为各个效果的响应式依赖，和 connectionWarningRef 是同一套路。
+  const navigateRef = useRef(navigate);
   // 改密页是怎么进来的：'push' = 从设置里点进来（压过一条历史，取消等于浏览器后退）；
   // 'direct' = 刷新、贴地址或前进后退直接打开（没有可退的，取消就地替换路径）；
   // null = 当前不在改密页。
@@ -201,6 +204,7 @@ function ChatApp() {
     activeIdRef.current = activeId;
     authRef.current = auth;
     locationRef.current = location;
+    navigateRef.current = navigate;
     connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -392,19 +396,19 @@ function ChatApp() {
   // 格式，认出来就就地重定向到对应的真实路径。不带 id 的 /chat、未知路径和
   // 多余的参数也在这里一并归位。
   useEffect(() => {
-    const {pathname, search} = locationRef.current;
+    const {pathname, search} = location;
     if (search !== '') {
       const params = new URLSearchParams(search);
       const page = params.get('page');
       const session = params.get('session');
       if (page === 'admin') {
-        navigate('/admin', {replace: true});
+        void navigate('/admin', {replace: true});
       } else if (page === 'password') {
-        navigate('/password', {replace: true});
+        void navigate('/password', {replace: true});
       } else if (session !== null && session !== '') {
-        navigate(`/chat/${session}`, {replace: true});
+        void navigate(`/chat/${session}`, {replace: true});
       } else {
-        navigate(pathname, {replace: true});
+        void navigate(pathname, {replace: true});
       }
       return;
     }
@@ -412,14 +416,14 @@ function ChatApp() {
       return;
     }
     if (chatIdFromPath(pathname) === null) {
-      navigate('/', {replace: true});
+      void navigate('/', {replace: true});
     }
-  }, [location.pathname, location.search]);
+  }, [location.pathname, location.search, navigate]);
 
   // 路径驱动聊天状态：前进后退或代码导航在 / 与 /chat/:id 之间切换时，
   // 把对应的会话带到台前。取代原来手写的历史监听。
   useEffect(() => {
-    const pathname = locationRef.current.pathname;
+    const pathname = location.pathname;
     if (authRef.current !== 'ready') {
       prevPathRef.current = pathname;
       return;
@@ -453,7 +457,7 @@ function ChatApp() {
     if (found === undefined) {
       // 地址里的会话不存在（被删了，或换账号重登）：回根路径重新来过。
       showNewChat();
-      navigate('/', {replace: true});
+      void navigate('/', {replace: true});
       return;
     }
     if (leavingPassword && wanted === activeIdRef.current) {
@@ -464,7 +468,7 @@ function ChatApp() {
     if (wanted !== activeIdRef.current) {
       showSession(found.id);
     }
-  }, [location.pathname]);
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     const active = pollers.current;
@@ -488,7 +492,7 @@ function ChatApp() {
     if (pathname === '/login') {
       // 已经登录了，规范登录入口没有存在的意义：回根路径，
       // 聊天状态交给路径同步效果收拾。
-      navigate('/', {replace: true});
+      void navigateRef.current('/', {replace: true});
       return;
     }
     const wanted = chatIdFromPath(pathname);
@@ -499,7 +503,7 @@ function ChatApp() {
     }
     const found = list.find((session) => session.id === wanted);
     if (found === undefined) {
-      navigate('/', {replace: true});
+      void navigateRef.current('/', {replace: true});
       setComposingNew(true);
       setActiveId(null);
       return;
@@ -582,7 +586,7 @@ function ChatApp() {
     // 重新登录后也不会又弹回改密页。被 401 踢出时地址不动：登录界面
     // 就地渲染，重新登录后由路由自动认领回原会话。
     if (detail === null) {
-      navigate('/login', {replace: true});
+      void navigateRef.current('/login', {replace: true});
     }
     passwordEntry.current = null;
     setComposingNew(false);
@@ -708,7 +712,7 @@ function ChatApp() {
       return;
     }
     showSession(id);
-    navigate(`/chat/${id}`);
+    void navigate(`/chat/${id}`);
   }
 
   async function changeLocale(next: Locale) {
@@ -903,7 +907,7 @@ function ChatApp() {
       return true;
     }
     showNewChat();
-    navigate('/', {replace: true});
+    void navigate('/', {replace: true});
     return true;
   }
 
@@ -934,7 +938,7 @@ function ChatApp() {
       return;
     }
     showNewChat();
-    navigate('/');
+    void navigate('/');
   }
 
   async function sendFirstMessage(question: string) {
@@ -945,7 +949,7 @@ function ChatApp() {
       const title = titleFromQuestion(question);
       const created = emptySession(await createSession(title));
       sessionId = created.id;
-      navigate(`/chat/${created.id}`, {replace: true});
+      void navigate(`/chat/${created.id}`, {replace: true});
       loadedThreads.current.add(sessionId);
       const turnId = crypto.randomUUID();
       const userMessage: Message = {
@@ -1516,13 +1520,13 @@ function ChatApp() {
           setChangePasswordError(null);
           if (passwordEntry.current === 'push') {
             // 入口压过一条历史：取消就是后退，路径效果会把视图跟着地址带回去。
-            navigate(-1);
+            void navigate(-1);
             return;
           }
           // 直接以 /password 打开（刷新、贴地址），历史里没有可退的：
           // 就地把路径换掉回聊天。
           setView('chat');
-          navigate(activeIdRef.current === null ? '/' : `/chat/${activeIdRef.current}`, {
+          void navigate(activeIdRef.current === null ? '/' : `/chat/${activeIdRef.current}`, {
             replace: true,
           });
         }}
@@ -1611,7 +1615,7 @@ function ChatApp() {
           setChangePasswordError(null);
           // 真页面：地址变成 /password，压一条历史，浏览器后退就能回来。
           passwordEntry.current = 'push';
-          navigate('/password');
+          void navigate('/password');
         }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {
