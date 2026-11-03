@@ -26,7 +26,7 @@
 
 - 信息不足先问：需求、接口、字段、配置不清楚时停下来问并说明理解，不猜、不臆造
 - **不推送**；提交自己做（维护者给了常驻许可），发现问题了再补一个提交，不改写已推送的历史。改写历史、强推、删文件等破坏性操作一律先要许可。推送只能维护者做：上游推送后禁止删除和改写提交树，模型推上去的东西一旦有问题就再也改不了
-- 不擅自加依赖、换包管理器、改目录结构，如有需要直接提出来，不要静默绕过这些问题。依赖目前只能由维护者装：agent 沙箱里 pnpm 会把 store 切到 `node_modules/.pnpm-store`，维护者终端里用的是 `~/Library/pnpm/store`，两边对不上，pnpm 报 ERR_PNPM_UNEXPECTED_STORE。沙箱里装一次，维护者下一次 `pnpm add` 就撞上这个错。store 目录固定下来之后这条可以放开，细节见 [docs/FINDINGS.md](docs/FINDINGS.md) 里 2026-10-31 那条
+- 不擅自加依赖、换包管理器、改目录结构，如有需要直接提出来，不要静默绕过这些问题。依赖优先于手搓：成熟三方库能做的事，就点名那个库、让维护者装，不要因为自己装不了依赖就宁应手写一份实现凑合——装不装由维护者定，该说的必须说。依赖目前只能由维护者装：agent 沙箱里 pnpm 会把 store 切到 `node_modules/.pnpm-store`，维护者终端里用的是 `~/Library/pnpm/store`，两边对不上，pnpm 报 ERR_PNPM_UNEXPECTED_STORE。沙箱里装一次，维护者下一次 `pnpm add` 就撞上这个错。store 目录固定下来之后这条可以放开，细节见 [docs/FINDINGS.md](docs/FINDINGS.md) 里 2026-10-31 那条
 - 聊天页面在 `src/`，接口服务在 `server/`。浏览器只访问本仓库的接口，不直连 FastGPT。FastGPT 的工作流和知识库不在本仓库改，那边的事找 FastGPT 的维护者。我们这个 FastGPT 是内部部署的 **v4.14.5** 基线，接口以官方源码为准，不要照文档站抄（见 [server/AGENTS.md](server/AGENTS.md) 的「FastGPT 的版本基线」）
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts` 里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上 `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
 - 用户名和语言另外记在 localStorage 的 `h2bot-profile` 里（`src/session/profile-cache.ts`）：接口服务连不上的时候靠它撑住「我是谁、我用哪种语言」，退出登录要清掉。别当成冗余删了
