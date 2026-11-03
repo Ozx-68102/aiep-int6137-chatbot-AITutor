@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from server.db import Account, Base, LanguageSetting, db_session, get_engine
 
-_INITIAL_USERNAME = "admin"
-_INITIAL_PASSWORD = "admin"
+_INITIAL_USERNAME = "test01"
+_INITIAL_PASSWORD = "test01"
 _INITIAL_LOCALE = "zh-CN"
 
 
@@ -20,7 +20,7 @@ def init_db() -> None:
     _ensure_avatar_column(engine)
     _ensure_role_column(engine)
     with db_session() as session:
-        _ensure_admin(session)
+        _ensure_initial_account(session)
 
 
 def _ensure_avatar_column(engine: Engine) -> None:
@@ -98,7 +98,13 @@ def _ensure_login_token_expiry(engine: Engine) -> None:
         )
 
 
-def _ensure_admin(session: Session) -> None:
+def _ensure_initial_account(session: Session) -> None:
+    """建初始的聊天账号（test01/test01）。
+
+    这个账号原来叫 admin，现在 admin 留给控制台的管理员，聊天侧的
+    初始账号改叫 test01。这里只认用户名：查得到 test01 就直接返回，
+    所以老库改过名之后再跑 init，不会重复建号，也不动已有的密码。
+    """
     statement = select(Account).where(Account.username == _INITIAL_USERNAME)
     existing = session.scalar(statement)
     if existing is not None:
