@@ -18,6 +18,7 @@
 - 实测到的反直觉行为（浏览器、库、平台层）：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
 - FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)。聊天流、停止、重试和 `message` 表：[docs/INTERRUPTED_REPLY.md](docs/INTERRUPTED_REPLY.md)
 - 界面上的提示（警示框、消息里的错误、表单里的红字）放在哪里：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
+- UI 组件体系：daisyUI 5（类名速查 daisyui.com/components）；主题变量和插件接线在 `src/index.css`
 - 控制台/家长端的定位决定和香港私隐法规依据：[docs/PARENT_PORTAL_PRIVACY.md](docs/PARENT_PORTAL_PRIVACY.md)
 - 后端特有的规矩和命令：[server/AGENTS.md](server/AGENTS.md)
 
@@ -30,6 +31,10 @@
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts` 里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上 `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
 - 用户名和语言另外记在 localStorage 的 `h2bot-profile` 里（`src/session/profile-cache.ts`）：接口服务连不上的时候靠它撑住「我是谁、我用哪种语言」，退出登录要清掉。别当成冗余删了
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
+- 界面一律用 daisyUI 5 的组件类（btn、input、card、alert、chat、table、menu、avatar、loading 等），不再手写「描边 + 圆角 + hover 变色」这类 utility 组合。颜色优先用语义类（btn-primary、text-error、bg-base-200），它们在 `aiep` 主题下与 stone/emerald 色板同值。类名的权威参考是 `node_modules/daisyui/components/*.css`（按钮在 button.css，不在 btn.css），别凭记忆猜。聊天气泡是 `.chat` 包装 + `.chat-bubble` 双层结构（`src/components/chat/message-class.ts`），气泡下方的按钮要包 `.chat-footer`，否则会被 grid 定位挤歪
+- `src/components/shell/Modal.tsx` 面板上的 `opacity-100 scale-100` 两个类是在反制 `.modal-box` 的默认隐藏态：daisyUI 靠 `.modal-open` 父级解锁可见，而本项目用的是自建 portal 外壳、没有那个父级。删掉这两个类，所有弹窗会直接隐形
+- 会话行和语言菜单的浮层保持 createPortal 结构，不要换成 daisyUI 的 dropdown：dropdown 依赖行内定位，会被行上动画的 transform 层叠上下文困住（原理见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-10-31 那条）
+- CSS 注释里不要出现 `col-*/offset-*` 这种带 `*/` 的写法：注释会提前终止，后面的 `@plugin` 块被静默丢弃——构建照常成功，只有一条 `Unexpected token` 警告，产物却少了整个插件（2026-11-03 踩过）
 - 格式交给工具：写完跑对应的 fmt 命令，不要手动跟格式较劲
 - 文档和对话都用平常话，不用自造词和行话
 - 说话用陈述语气，少用问句：全程平等探讨，可以列出下一步能做的事，但不要在结尾用「要不要…」「需要吗…」这种问句逼我拍板，也不要把选项包装成二选一或多选一，更不要推销
@@ -47,6 +52,7 @@
 - 一次逻辑改动一个提交；改完自己提交，不用等许可；不改写已推送的历史，不强推
 - 远端开着禁止删除和禁止强推，别去关它。要改已经推送的内容，用新提交、`git revert` 或 `git commit-tree`；推送之后不要强推，要解除这两条规则先问维护者
 - 提交说明用英文写成 `feat: add session pinning` 这种样子：类型、冒号、一句话；类型后面不要加括号（`feat(server): ...` 会被钩子拒绝）
+- 类型按语义选：用户能感知到的界面或能力变化（含视觉改版）用 feat；纯代码排版用 style；行为不变的重构用 refactor；依赖增删用 chore
 - 分支名遵循 Conventional Branch（https://conventionalbranch.org）：`main`、`master`、`develop` 不用前缀；其余写成 `<type>/<description>`。类型只用 feature、feat、bugfix、fix、hotfix、release、chore，以及 ai、copilot、cursor、claude、codex。描述只用小写字母、数字、连字符和点，例如 `feature/add-login-page`。推送前由 `.githooks/pre-push` 检查，正则是 https://conventionalbranch.org/v1.1.0/spec.json 里的那条，用 Perl 匹配
 - 远端 GitHub 已经导入同一份分支名规则集（https://conventionalbranch.org/enforce/#rulesets）。不合规的分支名推不上去，本地用 `--no-verify` 跳过钩子也绕不过
 - 用 LayerFS 并行开发时，最终合并在 LayerFS 里做：0 冲突才落地 git——用 `git commit-tree` 把那边的分支和提交复刻过来，拓扑、每个提交的时间戳、每一步的改动痕迹都照搬；分支名和提交信息按上面两条钩子规矩写（commit-tree 是底层命令，不触发钩子，所以要逐条拿 `.githooks/commit-msg` 预检）。复刻出来的合并提交，信息里引用的分支名要用 git 侧的合规名（`feature/password-relax` 这种），不要照抄 LayerFS 的合并消息——LayerFS 分支名不允许斜杠，照抄过来必不合规（2026-11-03 踩过）。有冲突就停下来问维护者怎么合，不自己拍板
