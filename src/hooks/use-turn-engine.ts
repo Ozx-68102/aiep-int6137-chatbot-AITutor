@@ -135,7 +135,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       id: messageId,
       role: 'assistant',
       text: '',
-      depsRef.current.locale: depsRef.current.locale,
+      locale: depsRef.current.locale,
       waiting: true,
       turnId,
     };
@@ -171,7 +171,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
           id: turnId,
           role: 'assistant',
           text: partial.text,
-          depsRef.current.locale: depsRef.current.locale,
+          locale: depsRef.current.locale,
           turnId,
           waiting: partial.status === 'streaming',
         };
@@ -275,7 +275,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       id: crypto.randomUUID(),
       role: 'error',
       text: content,
-      depsRef.current.locale: messageLocale,
+      locale: messageLocale,
       turnId,
     };
     depsRef.current.updateSession(sessionId, (session) => ({

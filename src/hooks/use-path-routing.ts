@@ -140,5 +140,20 @@ export function usePathRouting(deps: PathRoutingDeps) {
     current.setActiveId(found.id);
   }
 
-  return {claimPath, passwordEntry};
+  /** 从设置里进改密页：压了一条历史，取消等于浏览器后退。 */
+  function markPasswordPushed() {
+    passwordEntry.current = 'push';
+  }
+
+  /** 改密页是不是压过历史进来的：决定取消走后退还是就地替换。 */
+  function isPasswordPushed(): boolean {
+    return passwordEntry.current === 'push';
+  }
+
+  /** 退出登录/被踢回登录页：清掉改密页的进入方式记录。 */
+  function resetPasswordEntry() {
+    passwordEntry.current = null;
+  }
+
+  return {claimPath, markPasswordPushed, isPasswordPushed, resetPasswordEntry};
 }

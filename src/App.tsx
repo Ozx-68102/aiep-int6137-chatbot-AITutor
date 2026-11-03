@@ -310,7 +310,7 @@ function ChatApp() {
     if (detail === null) {
       void navigateRef.current('/login', {replace: true});
     }
-    routingRef.current.passwordEntry.current = null;
+    routingRef.current.resetPasswordEntry();
     setComposingNew(false);
     setConfirmLogout(false);
     profileApiRef.current.setProfileError(null);
@@ -608,7 +608,7 @@ function ChatApp() {
         onSubmit={password.submit}
         onCancel={() => {
           password.setError(null);
-          if (routing.passwordEntry.current === 'push') {
+          if (routing.isPasswordPushed()) {
             // 入口压过一条历史：取消就是后退，路径效果会把视图跟着地址带回去。
             void navigate(-1);
             return;
@@ -704,7 +704,7 @@ function ChatApp() {
         onChangePassword={() => {
           password.setError(null);
           // 真页面：地址变成 /password，压一条历史，浏览器后退就能回来。
-          routing.passwordEntry.current = 'push';
+          routing.markPasswordPushed();
           void navigate('/password');
         }}
         onLogout={() => setConfirmLogout(true)}
