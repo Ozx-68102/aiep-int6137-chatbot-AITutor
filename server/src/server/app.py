@@ -35,7 +35,9 @@ from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
 from server.passwords import (
     check_password_policy,
+    generate_password,
     hash_password,
+    min_length_for_role,
     needs_rehash,
     verify_password,
 )
@@ -61,7 +63,11 @@ from server.reply_store import (
 from server.settings import load_settings
 from server.types import (
     AbortRequest,
+    AdminAccountItem,
+    AdminAccountsResponse,
     AdminLoginResponse,
+    AdminPasswordResetRequest,
+    AdminPasswordResetResponse,
     ChatRequest,
     HistoryMessageResponse,
     HistoryResponse,
@@ -115,6 +121,8 @@ _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _OLD_PASSWORD_WRONG = "旧密码不正确"
 _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
+# 控制台重置密码时报的「没有这个人」。
+_ADMIN_ACCOUNT_NOT_FOUND = "找不到这个账号"
 _RATE_LIMITED = "尝试次数太多，请 15 分钟后再试"
 # 限流计数分两个维度，各自锁各自的：账号和来源 IP。scope 会拼进 Redis 的键名
 # （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。
@@ -289,6 +297,69 @@ def admin_login(body: LoginRequest, response: Response) -> AdminLoginResponse:
     return AdminLoginResponse(username=username)
 
 
+@app.get("/api/admin/accounts")
+def admin_list_accounts(
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
+) -> AdminAccountsResponse:
+    """控制台的账号列表：全部账号，按用户名排序。"""
+    with db_session() as session:
+        _admin_from_cookie(session, admin_cookie)
+        rows = session.scalars(select(Account).order_by(Account.username))
+        return AdminAccountsResponse(
+            accounts=[
+                AdminAccountItem(username=row.username, role=row.role) for row in rows
+            ],
+        )
+
+
+@app.post("/api/admin/accounts/reset-password")
+def admin_reset_password(
+    body: AdminPasswordResetRequest,
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
+) -> AdminPasswordResetResponse:
+    """控制台重置某个账号的密码：生成一个新密码，把它的登录全踢下线。
+
+    对任何账号都能重置，包括管理员自己。新密码只在这一次响应里回显，
+    日志只记账号 id。
+    """
+    with db_session() as session:
+        _admin_from_cookie(session, admin_cookie)
+        account = session.scalar(
+            select(Account).where(Account.username == body.username),
+        )
+        if not isinstance(account, Account):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, _ADMIN_ACCOUNT_NOT_FOUND)
+        password = generate_password(10)
+        # 写哈希和吊销令牌在同一个事务里：不留「密码换了、旧令牌还活着」的缝。
+        account.password_hash = hash_password(password)
+        session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
+        account_id = str(account.id)
+
+    logger.info("控制台重置了密码 %s", account_id)
+    return AdminPasswordResetResponse(username=body.username, password=password)
+
+
+@app.post("/api/admin/logout", status_code=status.HTTP_204_NO_CONTENT)
+def admin_logout(
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
+) -> Response:
+    """控制台退出：镜像 /api/logout，只是 cookie 换成 admin_login。"""
+    with db_session() as session:
+        token = _login_token(session, admin_cookie)
+        if token is None:
+            result = JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": _LOGIN_REQUIRED},
+            )
+            _clear_cookie(result, _ADMIN_COOKIE_NAME)
+            return result
+        session.delete(token)
+
+    result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_cookie(result, _ADMIN_COOKIE_NAME)
+    return result
+
+
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
@@ -336,16 +407,18 @@ def change_password(
     body: PasswordChange,
     request: Request,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
 ) -> Response:
     """改密码：验旧密码、写新哈希，把这个账号的登录全踢下线。
 
     argon2 是 CPU 活：端点用同步的，跑在线程池里，不堵事件循环
     （/api/login 同一个道理）。请求体里有密码，日志只记账号 id。
+    管理员改自己的密码也走这里：聊天页和控制台共用这一个端点。
     """
     client_ip = request.client.host if request.client else "unknown"
 
     with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
+        account = _password_account(session, login_cookie, admin_cookie)
         account_id = str(account.id)
         # 锁定期间不做验证：不然锁形同虚设，攻击者还能拿这个接口继续试旧密码。
         locked = is_locked(_RATELIMIT_ACCOUNT_SCOPE, account_id) or is_locked(
@@ -362,7 +435,11 @@ def change_password(
         if body.new_password != body.new_password_confirm:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, _NEW_PASSWORD_MISMATCH)
 
-        policy_error = check_password_policy(body.new_password, account.username)
+        policy_error = check_password_policy(
+            body.new_password,
+            account.username,
+            min_length=min_length_for_role(account.role),
+        )
         if policy_error is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
 
@@ -376,7 +453,9 @@ def change_password(
     clear_failures(_RATELIMIT_ACCOUNT_SCOPE, account_id)
     logger.info("密码已修改 %s", account_id)
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    # 令牌已经全吊销：两个 cookie 都清掉，不管这次是从哪一边来的。
     _clear_cookie(result, _COOKIE_NAME)
+    _clear_cookie(result, _ADMIN_COOKIE_NAME)
     return result
 
 
@@ -1165,6 +1244,38 @@ def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
     _require_role(token.account, _ROLE_CHAT)
     return token.account
+
+
+def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
+    """控制台接口只认 admin_login cookie 里的 admin 账号。
+
+    镜像 _account_from_cookie。token 无效或者账号不是 admin，都回
+    「未登录」（401）：这个 cookie 只有控制台登录接口自己种，
+    不像登录那样需要把「密码对了但角色不对」分开说。
+    """
+    token = _login_token(session, admin_cookie)
+    if token is None or token.account.role != _ROLE_ADMIN:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+    return token.account
+
+
+def _password_account(
+    session: Session,
+    login_cookie: str | None,
+    admin_cookie: str | None,
+) -> Account:
+    """改密端点两边都认：聊天 cookie 里的 chat 账号，或控制台 cookie 里的 admin 账号。
+
+    管理员改自己的密码也走 /api/password，所以不能只用 _account_from_cookie。
+    两边都对不上就是没登录。
+    """
+    token = _login_token(session, login_cookie)
+    if token is not None and token.account.role == _ROLE_CHAT:
+        return token.account
+    token = _login_token(session, admin_cookie)
+    if token is not None and token.account.role == _ROLE_ADMIN:
+        return token.account
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
 
 
 def _login_token(session: Session, login_cookie: str | None) -> LoginToken | None:

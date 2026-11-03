@@ -1,6 +1,10 @@
 from server.types.api import (
     AbortRequest,
+    AdminAccountItem,
+    AdminAccountsResponse,
     AdminLoginResponse,
+    AdminPasswordResetRequest,
+    AdminPasswordResetResponse,
     ChatRequest,
     HistoryMessageResponse,
     HistoryResponse,
@@ -20,7 +24,11 @@ from server.types.env import Settings, empty_fastgpt_fields
 
 __all__ = [
     "AbortRequest",
+    "AdminAccountItem",
+    "AdminAccountsResponse",
     "AdminLoginResponse",
+    "AdminPasswordResetRequest",
+    "AdminPasswordResetResponse",
     "ChatRequest",
     "HistoryMessageResponse",
     "HistoryResponse",
