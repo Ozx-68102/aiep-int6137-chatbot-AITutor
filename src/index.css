@@ -3,6 +3,60 @@
 @import 'katex/dist/katex.min.css';
 @import './components/chat/markdown.css';
 
+/* daisyUI：不带入内置 light/dark 主题（dark 会在系统深色模式下盖掉下面的
+   aiep 变量），只用我们自己的 aiep。组件类按需生成，不影响未迁移的手写组件。 */
+@plugin 'daisyui' {
+  logs: false;
+  themes: false;
+}
+
+/* aiep 主题：语义变量映射到现有 stone/emerald 色板（oklch 值取自
+   tailwindcss/theme.css），迁移期间新旧组件观感一致。 */
+@plugin 'daisyui/theme' {
+  name: 'aiep';
+  default: true;
+  color-scheme: light;
+
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(97% 0.001 106.424);
+  --color-base-300: oklch(92.3% 0.003 48.717);
+  --color-base-content: oklch(21.6% 0.006 56.043);
+  --color-primary: oklch(37.8% 0.077 168.94);
+  --color-primary-content: oklch(100% 0 0);
+  --color-secondary: oklch(37.4% 0.01 67.558);
+  --color-secondary-content: oklch(98.5% 0.001 106.423);
+  --color-accent: oklch(50.8% 0.118 165.612);
+  --color-accent-content: oklch(100% 0 0);
+  --color-neutral: oklch(26.8% 0.007 34.298);
+  --color-neutral-content: oklch(98.5% 0.001 106.423);
+  --color-info: oklch(44.4% 0.011 73.639);
+  --color-info-content: oklch(98.5% 0.001 106.423);
+  --color-success: oklch(59.6% 0.145 163.225);
+  --color-success-content: oklch(100% 0 0);
+  --color-warning: oklch(76.9% 0.188 70.08);
+  --color-warning-content: oklch(41.4% 0.112 45.904);
+  --color-error: oklch(57.7% 0.245 27.325);
+  --color-error-content: oklch(100% 0 0);
+
+  /* 现有组件：气泡/弹窗 rounded-xl，按钮 rounded-lg */
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* Bootstrap 12 栏栅格（row、col-N、offset-N、g-N 间距类）。container 交给
+   Tailwind 的 max-w 体系，关掉插件生成，避免两套 container 语义打架。 */
+@plugin 'tailwind-bootstrap-grid' {
+  generate_container: false;
+  /* Bootstrap 惯用的 g-0..g-5 间距档位 */
+  grid_gutters: '0', '0', '1', '0.25rem', '2', '0.5rem', '3', '1rem', '4', '1.5rem', '5', '3rem';
+}
+
 html,
 body,
 #root {
@@ -11,8 +65,8 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-stone-100);
-  color: var(--color-stone-900);
+  background: var(--color-base-200);
+  color: var(--color-base-content);
 }
 
 :lang(en) {
