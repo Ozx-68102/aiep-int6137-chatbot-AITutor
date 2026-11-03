@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {PasswordStrength} from './PasswordStrength.tsx';
+import {isWeakPassword} from './password-strength.ts';
 
 /**
  * 三个框都只收英文键盘上打得出来的连续字符（可打印 ASCII，不含空格）：
@@ -15,6 +16,24 @@ import {PasswordStrength} from './PasswordStrength.tsx';
  */
 function allowedChars(value: string): string {
   return value.replace(/[^\x21-\x7E]/g, '');
+}
+
+/**
+ * 客户端硬门槛，提交前拦截：消息跟后端 check_password_policy 一字不差
+ * （分工见 docs/ACCOUNT_MANAGEMENT.md，前端是提示、后端是门槛；能在本地
+ * 判定的提前拦掉，省一个来回，后端仍然会再拦一道）。这个页面是聊天侧
+ * 学生用的，最小长度 6。空格和非 ASCII 在输入时就被 allowedChars 滤掉了，
+ * 到不了这里；含用户名由后端拦，它的消息经 error 原样显示。
+ * 弱口令拒绝名单从 password-strength.ts 导入，不在这里再写一份。
+ */
+function newPasswordRejected(password: string): string | null {
+  if (password.length < 6 || password.length > 128) {
+    return '密码长度要在 6 到 128 之间';
+  }
+  if (isWeakPassword(password)) {
+    return '这个密码太常见了，换一个';
+  }
+  return null;
 }
 
 /**
@@ -43,7 +62,10 @@ export function ChangePasswordPage({
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [gateError, setGateError] = useState<string | null>(null);
   const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
+  // 门槛错误优先于可能残留的服务端错误：它是最近一次提交尝试的结果。
+  const shownError = gateError ?? error;
 
   return (
     <main className="flex h-full items-center justify-center bg-stone-100 px-4">
@@ -55,6 +77,13 @@ export function ChangePasswordPage({
           if (blocked) {
             return;
           }
+          // 客户端硬门槛：本地就能判定的拒绝，不发请求。
+          const rejected = newPasswordRejected(newPassword);
+          if (rejected !== null) {
+            setGateError(rejected);
+            return;
+          }
+          setGateError(null);
           void onSubmit(oldPassword, newPassword, confirmPassword);
         }}
       >
@@ -100,13 +129,13 @@ export function ChangePasswordPage({
             onChange={(event) => setConfirmPassword(allowedChars(event.target.value))}
           />
         </label>
-        {error ? (
+        {shownError ? (
           <p
             className="m-0 text-red-600"
             role="alert"
-            lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+            lang={shownError === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
           >
-            {error}
+            {shownError}
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
