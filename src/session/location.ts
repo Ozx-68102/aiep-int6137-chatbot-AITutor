@@ -17,7 +17,7 @@ export function replaceSessionToUrl(sessionId: string | null): void {
   writeSessionToUrl(sessionId, 'replace');
 }
 
-/** 地址里的页面参数。目前只有 'password'（修改密码页）一个取值。 */
+/** 地址里的页面参数。目前有 'password'（修改密码页）和 'admin'（管理员控制台）两个取值。 */
 export function readPageFromUrl(): string | null {
   const value = new URLSearchParams(window.location.search).get(pageParameter);
   if (value === null || value === '') {
