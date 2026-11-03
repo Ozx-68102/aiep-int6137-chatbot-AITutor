@@ -1,13 +1,14 @@
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
 import {useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
+import {useProfileActions} from './hooks/use-profile-actions.ts';
 import {streamReply} from './api/chat.ts';
 import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {readPartial} from './api/partial.ts';
 import type {PartialReply} from './api/partial.ts';
 import {readStatus} from './api/status.ts';
-import {logout, readProfile, updateProfile, uploadAvatar} from './api/profile.ts';
+import {logout, readProfile} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {
   abortReply,
@@ -114,13 +115,10 @@ function ChatApp() {
   );
   const [username, setUsername] = useState<string | null>(() => cachedProfile?.username ?? null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [savingAvatar, setSavingAvatar] = useState(false);
   const [view, setView] = useState<'chat' | 'profile'>('chat');
   const [composingNew, setComposingNew] = useState(false);
   const [sendingNew, setSendingNew] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [savingLocale, setSavingLocale] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
@@ -166,9 +164,18 @@ function ChatApp() {
     onEnterLogin: enterLogin,
     onConnectionWarning: showConnectionWarning,
   });
-  // enterLogin 会被各个效果捕获，不能直接引用 password（响应式对象），
-  // 一律走这个 ref 拿最新的 API——和 navigateRef 同一套路。
+  const profileApi = useProfileActions({
+    locale,
+    setLocale,
+    setUsername,
+    setAvatarUrl,
+    onEnterLogin: enterLogin,
+    onConnectionWarning: showConnectionWarning,
+  });
+  // enterLogin 会被各个效果捕获，不能直接引用 hook 返回的对象（响应式），
+  // 一律走 ref 拿最新的 API——和 navigateRef 同一套路。
   const passwordRef = useRef(password);
+  const profileApiRef = useRef(profileApi);
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
@@ -213,6 +220,7 @@ function ChatApp() {
     locationRef.current = location;
     navigateRef.current = navigate;
     passwordRef.current = password;
+    profileApiRef.current = profileApi;
     connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -583,7 +591,7 @@ function ChatApp() {
     passwordEntry.current = null;
     setComposingNew(false);
     setConfirmLogout(false);
-    setProfileError(null);
+    profileApiRef.current.setProfileError(null);
     passwordRef.current.setError(null);
     setPendingIds(new Set());
     setHistoryLoadingId(null);
@@ -707,63 +715,12 @@ function ChatApp() {
     void navigate(`/chat/${id}`);
   }
 
-  async function changeLocale(next: Locale) {
-    if (next === locale || savingLocale) {
-      return;
-    }
-    setSavingLocale(true);
-    setProfileError(null);
-    try {
-      const profile = await updateProfile(next);
-      setUsername(profile.username);
-      setLocale(profile.locale);
-      setAvatarUrl(profile.avatarUrl);
-      saveCachedProfile({username: profile.username, locale: profile.locale});
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return;
-      }
-      if (connectionFailure(error)) {
-        showConnectionWarning();
-        return;
-      }
-      setProfileError(explain(error, text.connectionError));
-    } finally {
-      setSavingLocale(false);
-    }
-  }
-
-  async function pickAvatar(file: File) {
-    if (savingAvatar) {
-      return;
-    }
-    setSavingAvatar(true);
-    setProfileError(null);
-    try {
-      const profile = await uploadAvatar(file);
-      setAvatarUrl(profile.avatarUrl);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        enterLogin(error.detail);
-        return;
-      }
-      if (connectionFailure(error)) {
-        showConnectionWarning();
-        return;
-      }
-      setProfileError(explain(error, text.connectionError));
-    } finally {
-      setSavingAvatar(false);
-    }
-  }
-
   async function signOut() {
     if (loggingOut) {
       return;
     }
     setLoggingOut(true);
-    setProfileError(null);
+    profileApi.setProfileError(null);
     try {
       await logout();
       enterLogin(null);
@@ -779,7 +736,7 @@ function ChatApp() {
         showConnectionWarning();
         return;
       }
-      setProfileError(explain(error, text.connectionError));
+      profileApi.setProfileError(explain(error, text.connectionError));
     } finally {
       setLoggingOut(false);
     }
@@ -1522,7 +1479,7 @@ function ChatApp() {
         }}
         onOpenSettings={() => {
           setConfirmLogout(false);
-          setProfileError(null);
+          profileApi.setProfileError(null);
           setView('profile');
         }}
       />
@@ -1560,15 +1517,15 @@ function ChatApp() {
         open={view === 'profile'}
         username={username}
         avatarUrl={avatarUrl}
-        avatarBusy={savingAvatar}
+        avatarBusy={profileApi.savingAvatar}
         hasCustomAvatar={avatarUrl !== null && !avatarUrl.startsWith(defaultAvatarUrl)}
-        error={confirmLogout ? null : profileError}
-        saving={savingLocale}
+        error={confirmLogout ? null : profileApi.profileError}
+        saving={profileApi.savingLocale}
         onLocale={(next) => {
-          void changeLocale(next);
+          void profileApi.changeLocale(next);
         }}
         onAvatarPick={(file) => {
-          void pickAvatar(file);
+          void profileApi.pickAvatar(file);
         }}
         onChangePassword={() => {
           password.setError(null);
@@ -1579,17 +1536,17 @@ function ChatApp() {
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {
           setConfirmLogout(false);
-          setProfileError(null);
+          profileApi.setProfileError(null);
           setView('chat');
         }}
       />
       <ConfirmLogout
         locale={locale}
         open={confirmLogout}
-        error={profileError}
+        error={profileApi.profileError}
         loggingOut={loggingOut}
         onCancel={() => {
-          setProfileError(null);
+          profileApi.setProfileError(null);
           setConfirmLogout(false);
         }}
         onConfirm={() => {
