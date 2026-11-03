@@ -56,6 +56,8 @@
 - 分支名遵循 Conventional Branch（https://conventionalbranch.org）：`main`、`master`、`develop` 不用前缀；其余写成 `<type>/<description>`。类型只用 feature、feat、bugfix、fix、hotfix、release、chore，以及 ai、copilot、cursor、claude、codex。描述只用小写字母、数字、连字符和点，例如 `feature/add-login-page`。推送前由 `.githooks/pre-push` 检查，正则是 https://conventionalbranch.org/v1.1.0/spec.json 里的那条，用 Perl 匹配
 - 远端 GitHub 已经导入同一份分支名规则集（https://conventionalbranch.org/enforce/#rulesets）。不合规的分支名推不上去，本地用 `--no-verify` 跳过钩子也绕不过
 - 用 LayerFS 并行开发时，最终合并在 LayerFS 里做：0 冲突才落地 git——用 `git commit-tree` 把那边的分支和提交复刻过来，拓扑、每个提交的时间戳、每一步的改动痕迹都照搬；分支名和提交信息按上面两条钩子规矩写（commit-tree 是底层命令，不触发钩子，所以要逐条拿 `.githooks/commit-msg` 预检）。复刻出来的合并提交，信息里引用的分支名要用 git 侧的合规名（`feature/password-relax` 这种），不要照抄 LayerFS 的合并消息——LayerFS 分支名不允许斜杠，照抄过来必不合规（2026-11-03 踩过）。有冲突就停下来问维护者怎么合，不自己拍板
+- 反方向（本地 git 领先 LayerFS，要灌回去）走这套：fork 分支 → 按 git 提交逐个 `fs.apply`（文件内容取 `git show <hash>:<path>`，提交信息照抄，保留中间态）→ 全量文件 md5 对比复验零差异 → 沙箱里构建验证 → `branch publish`。不要用 `layerfs init` 重建（macOS 上它结构性损坏且会写坏项目记录，见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-11-03 两条）
+- LayerFS 沙箱里前端命令可用：`pnpm install`、`tsc --noEmit`、`vite build` 都实测通过（main 的 node_modules 已于 2026-11-03 按 Linux 重建并发布）。沙箱里遇到 `Unable to resolve @typescript/typescript-linux-*` 说明挂到的是旧 darwin 树，`rm -rf node_modules && CI=true pnpm install --frozen-lockfile` 重建即可，不要据此得出「命令不可用」的结论；npm 不能在 pnpm 树里跑（`catalog:` 协议报错），细节都在 FINDINGS 同日条目里
 - 复刻落地之后，把本轮在 git 里建的分支删掉（`git branch -d` 只删已合并的，删不丢内容；这一步属于常驻许可，不用再问）
 - 上面这套仪式防的是真有重叠的那天：文件不相交时线性提交的信息一样全，但两条线改了同一个文件时，线性重放会静默覆盖掉一边的改动，只有真合并会把冲突报出来
 - 新克隆后执行一次 `bash scripts/setup-hooks.sh`

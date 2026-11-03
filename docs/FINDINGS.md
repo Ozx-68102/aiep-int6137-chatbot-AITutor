@@ -255,3 +255,21 @@ default-workspace 侧做了只读深查（SQLite 直读 + 源码对照），上�
 规矩升级：**macOS 上任何情况下都不要再跑 `layerfs init`**——即使安装被拒它也会写入新记录和新绑定密钥，主动制造身份错配。上一条的「不要删卷后 CLI init 手动重建」从「走不通」升级为「有害」。
 
 根子是插件的持久/易失不对称：绑定和 store 卷是持久的，而 home（`config.js` 默认 `tmpdir()/dsh-layerfs/home`）会被 macOS 系统清理——记录和 store 生命周期不一致。止血方案是给 layerfs-host 配稳定 home 路径（`config.js` 支持 `home` 键，如 `~/.dsh/layerfs-home`），改动在 default-workspace 的 profile 配置里做。
+
+## 2026-11-03 LayerFS store 已恢复；沙箱里 pnpm/tsc/vite 可用——前提是 node_modules 按 Linux 重建
+
+傍晚 default-workspace 侧把老 store 救了回来（22 分支 / 91 提交重新可读；修复发生在记录层，数据本体从头到尾没坏，诊断见上一条）。当时本地 git 领先 LayerFS 8 个提交，灌回按下面流程走完，可复现：
+
+1. **diff**：117 个 git 跟踪文件逐个从 main 分页读出（`fs.read` 带 `nextLine` 循环，pnpm-lock.yaml 超过单窗口 48KiB）、md5 对比本地——差异集恰好是 8 个提交涉及的 32 个文件，无缺失；
+2. **复刻**：fork 分支 `daisyui-migration`，把 8 个 git 提交逐个 `fs.apply` 上去（每个文件的内容取 `git show <hash>:<path>`，提交信息照抄，FINDINGS.md 两步演进这类中间态也保留）；
+3. **复验**：对分支重跑第 1 步的 diff，117/117 零差异才继续；
+4. **沙箱构建**：node_modules 按 Linux 重建后验证 `tsc --noEmit` 和 `vite build`（见下）；
+5. **发布**：`branch publish` 更新 main，抽查关键文件收尾。
+
+**更正一个流传的旧结论**：「LayerFS 内所有的 uv run 以及 pnpm 命令都不可用」不成立（前端这半被实测证伪）。真正的坑是 **store 里的 node_modules 是从 macOS 导入的，原生二进制全是 darwin 的**：TypeScript 7 的原生 tsc 要 `@typescript/typescript-linux-arm64`，vite 8（rolldown）和 Tailwind v4（oxide）同理，所以沙箱里直接跑会报 `Unable to resolve @typescript/typescript-linux-arm64`。命令本身没问题——在沙箱里 `rm -rf node_modules && CI=true pnpm install --frozen-lockfile` 重建后，实测 `tsc --noEmit` exit 0、`vite build` 487ms 通过。重建后的树已提交并随 publish 进了 main，之后的沙箱挂载即可直接构建。（后端 `uv run` 这次没测，那半个结论既不成立也不被证伪。）
+
+重建过程踩到的三个具体坑：
+
+- **增量安装不补平台包**：在既有 darwin 树上直接 `pnpm install --frozen-lockfile`，5.9 秒报 Done，但 Linux 平台包依然缺——pnpm 认为树是最新的，跳过了平台可选依赖。必须 `rm -rf node_modules` 全量重建（重建只要 3.9 秒，镜像里有热缓存）。
+- **npm 不能在 pnpm 树里跑**：npm 11 在项目根 `npm i` 会报 `EUNSUPPORTEDPROTOCOL "catalog:"`——它扫描现有 node_modules 树时读到了 pnpm 的 `catalog:` 协议残留，`--no-save` 也躲不开。要用 npm 就在隔离目录装（`/tmp` 下 `npm init -y` + `npm i`，再把包目录 `cp -R` 回来），或者干脆用 pnpm。
+- **沙箱生命周期**：最后一个 workspace 卸载 2 分钟后沙箱自动关闭，再调用报 `NoSuchSandbox`，重新 `sandbox create` 即可；镜像里自带 pnpm 11.28.5（本机是 12.16.1），lockfileVersion 9.0 两者都认；沙箱有外网（npm registry 可达，实测 4 个包 1 秒装完）。
