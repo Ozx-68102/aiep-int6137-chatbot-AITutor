@@ -37,6 +37,7 @@ from server.passwords import (
     check_password_policy,
     generate_password,
     hash_password,
+    min_length_for_role,
     needs_rehash,
     verify_password,
 )
@@ -407,16 +408,18 @@ def change_password(
     body: PasswordChange,
     request: Request,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+    admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
 ) -> Response:
     """改密码：验旧密码、写新哈希，把这个账号的登录全踢下线。
 
     argon2 是 CPU 活：端点用同步的，跑在线程池里，不堵事件循环
     （/api/login 同一个道理）。请求体里有密码，日志只记账号 id。
+    管理员改自己的密码也走这里：聊天页和控制台共用这一个端点。
     """
     client_ip = request.client.host if request.client else "unknown"
 
     with db_session() as session:
-        account = _account_from_cookie(session, login_cookie)
+        account = _password_account(session, login_cookie, admin_cookie)
         account_id = str(account.id)
         # 锁定期间不做验证：不然锁形同虚设，攻击者还能拿这个接口继续试旧密码。
         locked = is_locked(_RATELIMIT_ACCOUNT_SCOPE, account_id) or is_locked(
@@ -433,7 +436,11 @@ def change_password(
         if body.new_password != body.new_password_confirm:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, _NEW_PASSWORD_MISMATCH)
 
-        policy_error = check_password_policy(body.new_password, account.username)
+        policy_error = check_password_policy(
+            body.new_password,
+            account.username,
+            min_length=min_length_for_role(account.role),
+        )
         if policy_error is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
 
@@ -447,7 +454,9 @@ def change_password(
     clear_failures(_RATELIMIT_ACCOUNT_SCOPE, account_id)
     logger.info("密码已修改 %s", account_id)
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    # 令牌已经全吊销：两个 cookie 都清掉，不管这次是从哪一边来的。
     _clear_cookie(result, _COOKIE_NAME)
+    _clear_cookie(result, _ADMIN_COOKIE_NAME)
     return result
 
 
@@ -1249,6 +1258,25 @@ def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
     if token is None or token.account.role != _ROLE_ADMIN:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
     return token.account
+
+
+def _password_account(
+    session: Session,
+    login_cookie: str | None,
+    admin_cookie: str | None,
+) -> Account:
+    """改密端点两边都认：聊天 cookie 里的 chat 账号，或控制台 cookie 里的 admin 账号。
+
+    管理员改自己的密码也走 /api/password，所以不能只用 _account_from_cookie。
+    两边都对不上就是没登录。
+    """
+    token = _login_token(session, login_cookie)
+    if token is not None and token.account.role == _ROLE_CHAT:
+        return token.account
+    token = _login_token(session, admin_cookie)
+    if token is not None and token.account.role == _ROLE_ADMIN:
+        return token.account
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
 
 
 def _login_token(session: Session, login_cookie: str | None) -> LoginToken | None:
