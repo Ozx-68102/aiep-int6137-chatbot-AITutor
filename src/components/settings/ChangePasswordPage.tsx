@@ -68,9 +68,9 @@ export function ChangePasswordPage({
   const shownError = gateError ?? error;
 
   return (
-    <main className="flex h-full items-center justify-center bg-stone-100 px-4">
+    <main className="flex h-full items-center justify-center bg-base-200 px-4">
       <form
-        className="flex w-full max-w-sm flex-col gap-4 rounded-xl border border-stone-300 bg-white p-6"
+        className="card w-full max-w-sm border border-base-300 bg-base-100"
         onSubmit={(event) => {
           event.preventDefault();
           // busy 时按钮已经禁用，这里再挡一道，防双击。
@@ -87,72 +87,66 @@ export function ChangePasswordPage({
           void onSubmit(oldPassword, newPassword, confirmPassword);
         }}
       >
-        <h1 className="m-0 text-lg" lang={htmlLang[locale]}>
-          {text.changePassword}
-        </h1>
-        <label className="flex flex-col gap-1">
-          {text.oldPassword}
-          <input
-            className="rounded-lg border border-stone-300 px-3 py-2.5"
-            name="old-password"
-            type="password"
-            autoComplete="current-password"
-            value={oldPassword}
-            onChange={(event) => setOldPassword(allowedChars(event.target.value))}
-          />
-        </label>
-        <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1">
-            {text.newPassword}
+        <div className="card-body gap-4">
+          <h1 className="card-title" lang={htmlLang[locale]}>
+            {text.changePassword}
+          </h1>
+          <label className="fieldset">
+            <span className="fieldset-label">{text.oldPassword}</span>
             <input
-              className="rounded-lg border border-stone-300 px-3 py-2.5"
-              name="new-password"
+              className="input w-full"
+              name="old-password"
               type="password"
-              autoComplete="new-password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(allowedChars(event.target.value))}
+              autoComplete="current-password"
+              value={oldPassword}
+              onChange={(event) => setOldPassword(allowedChars(event.target.value))}
             />
           </label>
-          <p className="m-0 text-xs text-stone-500" lang={htmlLang[locale]}>
-            {text.passwordHint}
-          </p>
-          <PasswordStrength locale={locale} password={newPassword} username={username} />
-        </div>
-        <label className="flex flex-col gap-1">
-          {text.confirmPassword}
-          <input
-            className="rounded-lg border border-stone-300 px-3 py-2.5"
-            name="new-password-confirm"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(allowedChars(event.target.value))}
-          />
-        </label>
-        {shownError ? (
-          <p
-            className="m-0 text-red-600"
-            role="alert"
-            lang={shownError === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
-          >
-            {shownError}
-          </p>
-        ) : null}
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            onClick={onCancel}
-          >
-            {text.cancel}
-          </button>
-          <button
-            type="submit"
-            className="rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90 disabled:opacity-50"
-            disabled={blocked}
-          >
-            {text.changePassword}
-          </button>
+          <fieldset className="fieldset gap-2">
+            <label className="fieldset">
+              <span className="fieldset-label">{text.newPassword}</span>
+              <input
+                className="input w-full"
+                name="new-password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(allowedChars(event.target.value))}
+              />
+            </label>
+            <p className="m-0 text-xs text-stone-500" lang={htmlLang[locale]}>
+              {text.passwordHint}
+            </p>
+            <PasswordStrength locale={locale} password={newPassword} username={username} />
+          </fieldset>
+          <label className="fieldset">
+            <span className="fieldset-label">{text.confirmPassword}</span>
+            <input
+              className="input w-full"
+              name="new-password-confirm"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(allowedChars(event.target.value))}
+            />
+          </label>
+          {shownError ? (
+            <p
+              className="m-0 text-error"
+              role="alert"
+              lang={shownError === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+            >
+              {shownError}
+            </p>
+          ) : null}
+          <div className="card-actions justify-end">
+            <button type="button" className="btn btn-outline" onClick={onCancel}>
+              {text.cancel}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={blocked}>
+              {text.changePassword}
+            </button>
+          </div>
         </div>
       </form>
     </main>

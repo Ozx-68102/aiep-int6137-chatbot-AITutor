@@ -7,10 +7,11 @@ import {
   passwordStrengthReady,
 } from './password-strength.ts';
 
-// 每档的配色跟着仓库的 stone/emerald 体系走：太弱用报错的红，弱是中性灰，
+// 每档的配色走 daisyUI 语义色（aiep 主题下 error=red-600、success=emerald-600、
+// primary=emerald-900，跟原值一致）：太弱用报错的红，弱是中性灰，
 // 一般和强用深浅两档 emerald。
-const segmentClasses = ['bg-red-600', 'bg-stone-400', 'bg-emerald-600', 'bg-emerald-900'];
-const labelClasses = ['text-red-600', 'text-stone-500', 'text-emerald-600', 'text-emerald-900'];
+const segmentClasses = ['bg-error', 'bg-stone-400', 'bg-success', 'bg-primary'];
+const labelClasses = ['text-error', 'text-stone-500', 'text-success', 'text-primary'];
 
 /**
  * 密码强度表：4 格条 + 档位标签，亮起 score + 1 格。
@@ -61,7 +62,7 @@ export function PasswordStrength({
   const labels = [text.strengthTooWeak, text.strengthWeak, text.strengthFair, text.strengthStrong];
   const filled = `h-1.5 w-full rounded-full transition-colors duration-150 ease-out motion-reduce:transition-none ${segmentClasses[score]}`;
   const empty =
-    'h-1.5 w-full rounded-full bg-stone-200 transition-colors duration-150 ease-out motion-reduce:transition-none';
+    'h-1.5 w-full rounded-full bg-base-300 transition-colors duration-150 ease-out motion-reduce:transition-none';
 
   return (
     <div className="flex items-center gap-2" role="status">

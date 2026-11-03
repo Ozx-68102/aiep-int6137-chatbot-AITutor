@@ -22,11 +22,11 @@ export function AvatarPicker({
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="flex items-start gap-4 border-b border-stone-300 py-4">
+    <div className="flex items-start gap-4 border-b border-base-300 py-4">
       <AvatarImage
         src={avatarUrl}
         alt={text.avatar}
-        className="size-20 shrink-0 rounded-full border border-stone-300 bg-stone-100 object-cover"
+        className="size-20 shrink-0 rounded-full border border-base-300 bg-base-200 object-cover"
       />
       <div className="flex min-w-0 flex-col items-start">
         {username ? (
@@ -52,7 +52,7 @@ export function AvatarPicker({
           />
           <button
             type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20 disabled:opacity-50"
+            className="btn btn-sm btn-outline"
             disabled={busy}
             onClick={() => {
               inputRef.current?.click();

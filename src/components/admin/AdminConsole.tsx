@@ -143,7 +143,7 @@ export function AdminConsole() {
   }
 
   if (checking) {
-    return <div className="h-full bg-stone-100" />;
+    return <div className="h-full bg-base-200" />;
   }
 
   if (accounts === null) {
@@ -167,7 +167,7 @@ export function AdminConsole() {
         </h1>
         <button
           type="button"
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+          className="btn btn-outline"
           onClick={() => {
             setLogoutError(null);
             setConfirmLogout(true);
@@ -176,28 +176,28 @@ export function AdminConsole() {
           <span lang={htmlLang[locale]}>{text.logOut}</span>
         </button>
       </header>
-      <div className="overflow-x-auto rounded-xl border border-stone-300 bg-white">
-        <table className="w-full border-collapse text-left">
+      <div className="card overflow-x-auto border border-base-300 bg-base-100">
+        <table className="table table-zebra">
           <thead>
-            <tr className="border-b border-stone-300 bg-stone-50" lang={htmlLang[locale]}>
-              <th className="px-4 py-2.5 font-medium">{text.username}</th>
-              <th className="px-4 py-2.5 font-medium">{text.role}</th>
-              <th className="px-4 py-2.5">
+            <tr lang={htmlLang[locale]}>
+              <th>{text.username}</th>
+              <th>{text.role}</th>
+              <th>
                 <span className="sr-only">{text.resetPassword}</span>
               </th>
             </tr>
           </thead>
           <tbody>
             {accounts.map((account) => (
-              <tr key={account.username} className="border-b border-stone-200 last:border-b-0">
-                <td className="px-4 py-2.5 break-all">{account.username}</td>
-                <td className="px-4 py-2.5" lang={htmlLang[locale]}>
+              <tr key={account.username}>
+                <td className="break-all">{account.username}</td>
+                <td lang={htmlLang[locale]}>
                   {account.role === 'admin' ? text.roleAdmin : text.roleChat}
                 </td>
-                <td className="px-4 py-2.5 text-right">
+                <td className="text-right">
                   <button
                     type="button"
-                    className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
+                    className="btn btn-sm btn-outline"
                     onClick={() => {
                       setResetError(null);
                       setResetUsername(account.username);

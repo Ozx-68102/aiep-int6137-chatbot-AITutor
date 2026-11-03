@@ -32,7 +32,7 @@ export function ConfirmLogout({
         </p>
         {error ? (
           <p
-            className="m-0 text-red-600"
+            className="m-0 text-error"
             role="alert"
             lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
           >
@@ -40,19 +40,10 @@ export function ConfirmLogout({
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            onClick={onCancel}
-          >
+          <button type="button" className="btn btn-outline" onClick={onCancel}>
             {text.cancel}
           </button>
-          <button
-            type="button"
-            className="rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20 disabled:border-red-600 disabled:text-red-600"
-            disabled={loggingOut}
-            onClick={onConfirm}
-          >
+          <button type="button" className="btn btn-error" disabled={loggingOut} onClick={onConfirm}>
             {text.logOut}
           </button>
         </div>

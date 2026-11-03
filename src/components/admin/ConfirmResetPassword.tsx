@@ -65,7 +65,7 @@ export function ConfirmResetPassword({
         </p>
         {error ? (
           <p
-            className="m-0 text-red-600"
+            className="m-0 text-error"
             role="alert"
             lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
           >
@@ -73,16 +73,12 @@ export function ConfirmResetPassword({
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-            onClick={onCancel}
-          >
+          <button type="button" className="btn btn-outline" onClick={onCancel}>
             {text.cancel}
           </button>
           <button
             type="button"
-            className="inline-flex min-w-16 items-center justify-center rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20 disabled:opacity-60"
+            className="btn btn-error min-w-16"
             disabled={pending}
             aria-busy={pending}
             onClick={() => {
@@ -90,10 +86,7 @@ export function ConfirmResetPassword({
             }}
           >
             {pending ? (
-              <span
-                className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent"
-                aria-hidden="true"
-              />
+              <span className="loading loading-spinner loading-sm" aria-hidden="true" />
             ) : (
               text.resetPassword
             )}

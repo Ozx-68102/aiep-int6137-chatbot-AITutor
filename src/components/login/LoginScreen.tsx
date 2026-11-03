@@ -28,9 +28,9 @@ export function LoginScreen({
   const blocked = offline || submitting || username.trim() === '' || password === '';
 
   return (
-    <main className="flex h-full items-center justify-center bg-stone-100 px-4">
+    <main className="flex h-full items-center justify-center bg-base-200 px-4">
       <form
-        className="flex w-full max-w-sm flex-col gap-4 rounded-xl border border-stone-300 bg-white p-6"
+        className="card w-full max-w-sm border border-base-300 bg-base-100"
         onSubmit={(event) => {
           event.preventDefault();
           if (blocked) {
@@ -39,62 +39,56 @@ export function LoginScreen({
           onSubmit(username.trim(), password);
         }}
       >
-        <div className="flex items-center gap-2">
-          <img src={logoUrl} alt="" className="h-12 w-auto" />
-          <p lang="en" className="min-w-0 text-xs leading-tight text-stone-600">
-            Help × Higher Understanding
-          </p>
-          <LanguageMenu locale={locale} onChange={onLocale} />
+        <div className="card-body gap-4">
+          <div className="flex items-center gap-2">
+            <img src={logoUrl} alt="" className="h-12 w-auto" />
+            <p lang="en" className="min-w-0 text-xs leading-tight text-stone-600">
+              Help × Higher Understanding
+            </p>
+            <LanguageMenu locale={locale} onChange={onLocale} />
+          </div>
+          <h1 className="card-title" lang={htmlLang[locale]}>
+            {text.logIn}
+          </h1>
+          <label className="fieldset">
+            <span className="fieldset-label">{text.username}</span>
+            <input
+              className="input w-full"
+              name="username"
+              autoComplete="username"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+            />
+          </label>
+          <label className="fieldset">
+            <span className="fieldset-label">{text.password}</span>
+            <input
+              className="input w-full"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          {error ? (
+            <p
+              className="m-0 text-error"
+              role="alert"
+              lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+            >
+              {error}
+            </p>
+          ) : null}
+          {notice ? (
+            <p className="m-0 text-info" lang={htmlLang[locale]}>
+              {notice}
+            </p>
+          ) : null}
+          <button type="submit" className="btn btn-primary btn-block" disabled={blocked}>
+            {text.logIn}
+          </button>
         </div>
-        <h1 className="m-0 text-lg" lang={htmlLang[locale]}>
-          {text.logIn}
-        </h1>
-        <label className="flex flex-col gap-1">
-          {text.username}
-          <input
-            className="rounded-lg border border-stone-300 px-3 py-2.5"
-            name="username"
-            autoComplete="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          {text.password}
-          <input
-            className="rounded-lg border border-stone-300 px-3 py-2.5"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-        {error ? (
-          <p
-            className="m-0 text-red-600"
-            role="alert"
-            lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
-          >
-            {error}
-          </p>
-        ) : null}
-        {notice ? (
-          <p className="m-0 text-stone-600" lang={htmlLang[locale]}>
-            {notice}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          className={
-            blocked
-              ? 'rounded-lg border border-stone-300 bg-white px-3 py-2.5 opacity-50'
-              : 'rounded-lg border border-emerald-900 bg-emerald-900 px-3 py-2.5 text-white transition-[filter] duration-150 ease-out enabled:hover:brightness-95 enabled:active:brightness-90'
-          }
-          disabled={blocked}
-        >
-          {text.logIn}
-        </button>
       </form>
     </main>
   );

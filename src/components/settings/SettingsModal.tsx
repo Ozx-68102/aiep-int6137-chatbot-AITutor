@@ -57,7 +57,7 @@ export function SettingsModal({
             custom={hasCustomAvatar}
             onPick={onAvatarPick}
           />
-          <div className="flex items-center justify-between gap-4 border-b border-stone-300 py-4">
+          <div className="flex items-center justify-between gap-4 border-b border-base-300 py-4">
             <p className="m-0" lang={htmlLang[locale]}>
               {text.language}
             </p>
@@ -72,30 +72,22 @@ export function SettingsModal({
               }}
             />
           </div>
-          <div className="border-b border-stone-300 py-4">
-            <button
-              type="button"
-              className="w-fit rounded-lg border border-stone-300 bg-white px-3 py-2.5 transition-colors duration-150 ease-out enabled:hover:bg-stone-900/10 enabled:active:bg-stone-900/20"
-              onClick={onChangePassword}
-            >
+          <div className="border-b border-base-300 py-4">
+            <button type="button" className="btn btn-outline w-fit" onClick={onChangePassword}>
               {text.changePassword}
             </button>
           </div>
           <div className="py-4">
             {error ? (
               <p
-                className="mb-3 text-red-600"
+                className="mb-3 text-error"
                 role="alert"
                 lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
               >
                 {error}
               </p>
             ) : null}
-            <button
-              type="button"
-              className="w-fit rounded-lg border border-red-600 bg-white px-3 py-2.5 text-red-600 transition-colors duration-150 ease-out enabled:hover:bg-red-600/10 enabled:active:bg-red-600/20"
-              onClick={onLogout}
-            >
+            <button type="button" className="btn btn-error w-fit" onClick={onLogout}>
               {text.logOut}
             </button>
           </div>
