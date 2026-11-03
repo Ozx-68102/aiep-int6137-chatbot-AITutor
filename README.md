@@ -44,6 +44,4 @@ Python 命令统一在 `server/` 目录下用 `uv run` 执行，不要在仓库�
 
 ## 第三方数据署名
 
-密码强度检测用 [zxcvbn-ts](https://github.com/zxcvbn-ts/zxcvbn)（MIT）。它的中文字典
-（`@zxcvbn-ts/language-zh`）数据来自 OpenSubtitles 2024，经 [OPUS](https://opus.nlpl.eu/)
-（Helsinki-NLP）提供，许可为 ODC-BY；原数据归字幕贡献者和版权方所有。
+密码强度检测用 [zxcvbn-ts](https://github.com/zxcvbn-ts/zxcvbn)（MIT）。它的中文字典（`@zxcvbn-ts/language-zh`）数据来自 OpenSubtitles 2024，经 [OPUS](https://opus.nlpl.eu/)（Helsinki-NLP）提供，许可为 ODC-BY；原数据归字幕贡献者和版权方所有。

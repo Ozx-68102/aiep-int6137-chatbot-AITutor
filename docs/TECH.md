@@ -32,8 +32,7 @@ npm install -g pnpm
 - 动画：tw-animate-css 1.4.0
 - 语言：TypeScript 7.0.2
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
-- 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。
-  `pnpm check` 是 oxlint 加 oxfmt --check 一起跑
+- 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint 加 oxfmt --check 一起跑
 - 类型检查和打包：`pnpm build`，等于 `pnpm exec tsc --noEmit && vite build`。产物在 `dist/`，已被忽略
 - `pnpm test` 是占位脚本，会直接失败。仓库里没有自动化测试
 
@@ -48,9 +47,7 @@ npm install -g pnpm
 - 密码：argon2-cffi 25.1.0（Argon2id）
 - 半截回答：Redis 服务器 8.10.2（Homebrew）。Python 库 redis 8.1.0
 - 检查：ruff 0.17.2
-- 格式化：ruff format，规则在 `server/pyproject.toml` 的 `[tool.ruff.format]`。
-  `uv run ruff format .` 改格式，`uv run ruff format --check .` 只查不改。
-  在仓库根目录跑 `bash scripts/check-server.sh` 是这两项检查加 ruff check 一起
+- 格式化：ruff format，规则在 `server/pyproject.toml` 的 `[tool.ruff.format]`。`uv run ruff format .` 改格式，`uv run ruff format --check .` 只查不改。在仓库根目录跑 `bash scripts/check-server.sh` 是这两项检查加 ruff check 一起
 
 `uv run server` 是 pyproject 里登记的命令，等价于起一个 uvicorn 进程听 127.0.0.1:3001。
 
@@ -80,19 +77,13 @@ uv run python -m server.db.init
 
 ## 环境变量
 
-FastGPT 的访问地址、API 密钥和应用 ID，等上游的读超时（`FASTGPT_READ_TIMEOUT_SECONDS`，
-默认 30 秒，管「等上游第一个字节」和「两块字之间」），PostgreSQL 和 Redis 的连接信息，
-以及 `DEBUG`，写在仓库根目录的 `.env`。这个文件已被忽略，不会提交。
-`.env.example` 只说明每一项该填什么。
+FastGPT 的访问地址、API 密钥和应用 ID，等上游的读超时（`FASTGPT_READ_TIMEOUT_SECONDS`，默认 30 秒，管「等上游第一个字节」和「两块字之间」），PostgreSQL 和 Redis 的连接信息，以及 `DEBUG`，写在仓库根目录的 `.env`。这个文件已被忽略，不会提交。`.env.example` 只说明每一项该填什么。
 
 变量名不要以 `VITE_` 开头。Vite 会把 `VITE_` 开头的变量放进浏览器能下载到的页面里，密钥就会暴露。这些项只给服务端读取，页面代码不要读。服务端在 `server/src/server/settings.py` 读取仓库根目录的 `.env`。配置模型和接口模型在 `server/src/server/types`。
 
 ## Git
 
-提交说明由 `.githooks/commit-msg` 检查：英文，类型加冒号加一句话，类型后面不带括号。
-分支名在推送前由 `.githooks/pre-push` 检查。正则是
-[Conventional Branch 1.1.0](https://conventionalbranch.org/v1.1.0/spec.json) 里的那条，用 Perl 匹配。
-具体写法见 [AGENTS.md](../AGENTS.md) 的「Git」一节。
+提交说明由 `.githooks/commit-msg` 检查：英文，类型加冒号加一句话，类型后面不带括号。分支名在推送前由 `.githooks/pre-push` 检查。正则是 [Conventional Branch 1.1.0](https://conventionalbranch.org/v1.1.0/spec.json) 里的那条，用 Perl 匹配。具体写法见 [AGENTS.md](../AGENTS.md) 的「Git」一节。
 
 克隆本仓库后需要在仓库根目录执行一次：
 

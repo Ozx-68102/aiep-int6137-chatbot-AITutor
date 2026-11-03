@@ -8,10 +8,8 @@
 
 1. 先做「修改密码」。（已完成）
 2. 再加 role 列，登录按 role 分流（聊天页和控制台两个登录接口、两个 cookie）。（已完成）
-3. 再把旧的 `admin` 账号改名成 `test01`。（已完成，2026-11-03：用户名和密码都改成
-   `test01`，另建控制台账号 `admin`/`admin`，见「改名」一节）
-4. 最后做控制台界面。（架子已完成，2026-11-03：登录、账号列表、重置密码、退出；
-   定位与家长端远期见 [PARENT_PORTAL_PRIVACY.md](PARENT_PORTAL_PRIVACY.md)）
+3. 再把旧的 `admin` 账号改名成 `test01`。（已完成，2026-11-03：用户名和密码都改成 `test01`，另建控制台账号 `admin`/`admin`，见「改名」一节）
+4. 最后做控制台界面。（架子已完成，2026-11-03：登录、账号列表、重置密码、退出；定位与家长端远期见 [PARENT_PORTAL_PRIVACY.md](PARENT_PORTAL_PRIVACY.md)）
 
 先做改密码的好处：它不依赖 role，做完就能用；`admin`/`admin` 这个账号正好是第一个测试对象——改密码做完，密码这一半就完成了。
 
@@ -32,22 +30,13 @@
 
 现状的坑（实测 2026-11-02，本机 PostgreSQL；2026-11-03 从 FINDINGS.md 挪来）：
 
-- **唯一约束只挡一模一样的字符串**：`account.username` 列是 `character varying(64)`、
-  默认排序规则，`'admin' = 'ADMIN'`、`'admin' = 'admin '`（多一个空格）都是 false。
-  也就是说 `admin`、`Admin`、`admin ` 在库里是三个不同的账号，`UNIQUE (username)` 挡不住。
-- **前端归一化、后端没有**：登录时页面把用户名 `trim()` 了再发
-  （`src/components/login/LoginScreen.tsx`），后端 `_login_account` 直接拿原样去比。
-  真有账号叫 `admin ` 的话，页面永远登不进去：发过去的是 `admin`。以后加注册接口，
-  两边必须用同一套归一化。
-- **撞名现在会变成 500，不是 409**：插入时违反唯一约束抛 IntegrityError，
-  被 `app.py` 里那个通用异常处理器接住，返回 `{"detail": "服务器错误"}`。
-  应用层没有先查一遍重复，全靠数据库拦。（现在库里两个账号：`test01`/chat 和 `admin`/admin。）
+- **唯一约束只挡一模一样的字符串**：`account.username` 列是 `character varying(64)`、默认排序规则，`'admin' = 'ADMIN'`、`'admin' = 'admin '`（多一个空格）都是 false。也就是说 `admin`、`Admin`、`admin ` 在库里是三个不同的账号，`UNIQUE (username)` 挡不住。
+- **前端归一化、后端没有**：登录时页面把用户名 `trim()` 了再发（`src/components/login/LoginScreen.tsx`），后端 `_login_account` 直接拿原样去比。真有账号叫 `admin ` 的话，页面永远登不进去：发过去的是 `admin`。以后加注册接口，两边必须用同一套归一化。
+- **撞名现在会变成 500，不是 409**：插入时违反唯一约束抛 IntegrityError，被 `app.py` 里那个通用异常处理器接住，返回 `{"detail": "服务器错误"}`。应用层没有先查一遍重复，全靠数据库拦。（现在库里两个账号：`test01`/chat 和 `admin`/admin。）
 
 ## 注册
 
-学生账号以学校统一发放 + 控制台管理员重置为主通道，自助注册优先级放低
-（2026-11-03 决定，依据见 [PARENT_PORTAL_PRIVACY.md](PARENT_PORTAL_PRIVACY.md)）。
-下面的 spec 保留备用。
+学生账号以学校统一发放 + 控制台管理员重置为主通道，自助注册优先级放低（2026-11-03 决定，依据见 [PARENT_PORTAL_PRIVACY.md](PARENT_PORTAL_PRIVACY.md)）。下面的 spec 保留备用。
 
 - [ ] `POST /api/register`：用户名 + 密码 + 再输一次密码。
 - [ ] 后端收 `password` 和 `password_confirm` 两个字段，自己比一次。
@@ -60,14 +49,7 @@
 
 **分工**：前端是提示，后端是门槛。两边的硬门槛（按角色的长度、不能有空格、只收 ASCII、弱口令名单、不能包含用户名）必须一字不差；强度评分只是建议，不拿它拦人。
 
-为什么只收连续字符（维护者定的，2026-11-03；从 FINDINGS.md 挪来）：中文密码在桌面的
-`type=password` 框里本来就打不出来（输入法不做组合），手机上贴进去、换台电脑就登不进来——
-等于把自己锁在外面（控制台重置密码 2026-11-03 已经建好）。空格不收之后，NIST 推荐的 passphrase
-（`correct horse` 那种形态）不可用了；连写形式照样能拿高分（实测 `dinosaurbirthday` → 一般、
-`bananahorse42` → 强），但全常用词连写会掉档（`correct horse` 强 → `correcthorse` 弱：
-少了空格分隔，两个高频词的猜测数低）。长而好记的密码从此主要靠生僻选词和长度。
-zh 强度字典仍然有用——用户实际会输入的「中文密码」本来就是拼音
-（zxcvbn-ts 拼音字典的实测见 [docs/FINDINGS.md](FINDINGS.md) 2026-11-03 那条）。
+为什么只收连续字符（维护者定的，2026-11-03；从 FINDINGS.md 挪来）：中文密码在桌面的 `type=password` 框里本来就打不出来（输入法不做组合），手机上贴进去、换台电脑就登不进来——等于把自己锁在外面（控制台重置密码 2026-11-03 已经建好）。空格不收之后，NIST 推荐的 passphrase（`correct horse` 那种形态）不可用了；连写形式照样能拿高分（实测 `dinosaurbirthday` → 一般、`bananahorse42` → 强），但全常用词连写会掉档（`correct horse` 强 → `correcthorse` 弱：少了空格分隔，两个高频词的猜测数低）。长而好记的密码从此主要靠生僻选词和长度。zh 强度字典仍然有用——用户实际会输入的「中文密码」本来就是拼音（zxcvbn-ts 拼音字典的实测见 [docs/FINDINGS.md](FINDINGS.md) 2026-11-03 那条）。
 
 ## 修改密码（第一个做的）
 
@@ -77,15 +59,9 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 - [x] 吊销这个账号其它设备的登录 token；当前设备也踢掉，重新登录。
 - [x] 改密码这条路径也限流。
 - [x] 设置弹窗里加「修改密码」入口：[src/components/settings/SettingsModal.tsx](../src/components/settings/SettingsModal.tsx)。
-- [x] 表单本身是独立页面，不是弹窗：弹窗点一下背景就关，密码输一半全丢
-  （密码框不进草稿缓存）。页面地址带 `?page=password`（原有的 `session` 参数保留），
-  能刷新、能用浏览器后退；「取消」就是后退，直接贴地址打开时没有可退的历史，
-  就地换掉参数回聊天。2026-11-03 维护者定的。
-- [x] 管理员改自己的密码也走这个端点（认 `admin_login` cookie，门槛按角色取 8 位；
-  控制台里的界面入口是后续批次）。2026-11-03。
-- [x] 学生门槛放宽到 6 位：`check_password_policy` 加 `min_length` 关键字参数，
-  `min_length_for_role` 按角色取值；极弱口令静态拒绝名单前后端各一份（改一处必须改两处）。
-  客户端提交前硬门槛与后端消息逐字一致。2026-11-03。
+- [x] 表单本身是独立页面，不是弹窗：弹窗点一下背景就关，密码输一半全丢（密码框不进草稿缓存）。页面地址带 `?page=password`（原有的 `session` 参数保留），能刷新、能用浏览器后退；「取消」就是后退，直接贴地址打开时没有可退的历史，就地换掉参数回聊天。2026-11-03 维护者定的。
+- [x] 管理员改自己的密码也走这个端点（认 `admin_login` cookie，门槛按角色取 8 位；控制台里的界面入口是后续批次）。2026-11-03。
+- [x] 学生门槛放宽到 6 位：`check_password_policy` 加 `min_length` 关键字参数，`min_length_for_role` 按角色取值；极弱口令静态拒绝名单前后端各一份（改一处必须改两处）。客户端提交前硬门槛与后端消息逐字一致。2026-11-03。
 
 ## 强制改密码
 
@@ -95,14 +71,10 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ## 忘记密码
 
-- [ ] 现阶段不做自助重置：没有邮箱、短信这类验证通道，证明不了「是本人」，
-  开重置入口等于把账号送给猜得出的人（2026-11-03 维护者确认）。
-- [x] 正路是控制台的管理员重置（见「控制台」一节）：学生找管理员，管理员重置后
-  给一次性初始密码。（重置接口和界面 2026-11-03 已建）
-- [ ] `must_change_password` 逼首次登录就改（列还没加，见「强制改密码」一节）；
-  在那之前，一次性密码靠人工督促修改。
-- [ ] 登录页可以先放一句静态提示（「忘记密码请联系管理员」），不依赖验证通道；
-  加不加、什么时候加，跟控制台一起定。
+- [ ] 现阶段不做自助重置：没有邮箱、短信这类验证通道，证明不了「是本人」，开重置入口等于把账号送给猜得出的人（2026-11-03 维护者确认）。
+- [x] 正路是控制台的管理员重置（见「控制台」一节）：学生找管理员，管理员重置后给一次性初始密码。（重置接口和界面 2026-11-03 已建）
+- [ ] `must_change_password` 逼首次登录就改（列还没加，见「强制改密码」一节）；在那之前，一次性密码靠人工督促修改。
+- [ ] 登录页可以先放一句静态提示（「忘记密码请联系管理员」），不依赖验证通道；加不加、什么时候加，跟控制台一起定。
 
 ## 共用的密码方法
 
@@ -124,39 +96,27 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ## role
 
-- [x] `account` 加 `role` 列，取值 `chat`（只能进聊天页）和 `admin`（只能进控制台）。没有第三种。
-  数据库加了 `account_role_check` 约束，已有行一律填 `chat`（`init.py` 的 `_ensure_role_column`）。
+- [x] `account` 加 `role` 列，取值 `chat`（只能进聊天页）和 `admin`（只能进控制台）。没有第三种。数据库加了 `account_role_check` 约束，已有行一律填 `chat`（`init.py` 的 `_ensure_role_column`）。
 - [x] 登录先验密码再判 role：密码不对一律回「用户名或密码不正确」；密码对了但 role 不对，回 403 说明这个账号不能进这一边。
-- [x] role 的判断放在 `_account_from_cookie` 那一层（[server/src/server/app.py](../server/src/server/app.py)）：聊天接口只认 `chat`，`/api/admin/*` 只认 `admin`。
-  聊天侧已经盖全；`/api/admin/*` 目前只有 `POST /api/admin/login`（发 `admin_login` cookie），
-  控制台其余接口和界面是顺序第 4 步。
+- [x] role 的判断放在 `_account_from_cookie` 那一层（[server/src/server/app.py](../server/src/server/app.py)）：聊天接口只认 `chat`，`/api/admin/*` 只认 `admin`。聊天侧已经盖全；`/api/admin/*` 目前只有 `POST /api/admin/login`（发 `admin_login` cookie），控制台其余接口和界面是顺序第 4 步。
 
 ## 控制台
 
-定位（2026-11-03 维护者定）：「家长端 + 超级管理员」结合的平台；当前作业重心在聊天侧，
-控制台只搭架子。私隐依据与家长端远期清单见 [PARENT_PORTAL_PRIVACY.md](PARENT_PORTAL_PRIVACY.md)。
-原「待定」两项已决：只管账号层、不看会话内容；管理员账号沿用 `admin`/`admin`，就 1 个
-（「新建 + 随机密码打印一次」的方案作废，由 init.py 幂等创建）。
+定位（2026-11-03 维护者定）：「家长端 + 超级管理员」结合的平台；当前作业重心在聊天侧，控制台只搭架子。私隐依据与家长端远期清单见 [PARENT_PORTAL_PRIVACY.md](PARENT_PORTAL_PRIVACY.md)。原「待定」两项已决：只管账号层、不看会话内容；管理员账号沿用 `admin`/`admin`，就 1 个（「新建 + 随机密码打印一次」的方案作废，由 init.py 幂等创建）。
 
 架子（2026-11-03 已落地，接口经进程内测试全绿；界面没浏览器工具，未手点）：
 
-- [x] 独立入口：地址 `?page=admin`（同源单页应用里的路由，没做 `/admin/` 独立入口）；
-  `admin_login` 独立 cookie；接口 `/api/admin/*` 前缀。聊天页不留任何入口痕迹。
+- [x] 独立入口：地址 `?page=admin`（同源单页应用里的路由，没做 `/admin/` 独立入口）；`admin_login` 独立 cookie；接口 `/api/admin/*` 前缀。聊天页不留任何入口痕迹。
 - [x] `GET /api/admin/accounts`：账号列表（username + role，按 username 排序）。
-- [x] `POST /api/admin/accounts/reset-password`：`generate_password(10)` 随机密码只回显一次；
-  同一事务里改哈希 + 吊销该账号全部 token；对任何账号可用，含管理员自己。
+- [x] `POST /api/admin/accounts/reset-password`：`generate_password(10)` 随机密码只回显一次；同一事务里改哈希 + 吊销该账号全部 token；对任何账号可用，含管理员自己。
 - [x] `POST /api/admin/logout`。
-- [x] 界面（三语）：登录表单、账号表、重置确认、一次性密码面板、退出确认；
-  `page=admin` 时聊天侧引导流程完全不挂载。
+- [x] 界面（三语）：登录表单、账号表、重置确认、一次性密码面板、退出确认；`page=admin` 时聊天侧引导流程完全不挂载。
 
 后续批次（未排期）：
 
-- [ ] 建号界面：「建议以 test 开头」只是提示，不强制。（本轮决定建号维持现状——
-  init.py 预设 + 数据操作，界面等有需要再做）
+- [ ] 建号界面：「建议以 test 开头」只是提示，不强制。（本轮决定建号维持现状——init.py 预设 + 数据操作，界面等有需要再做）
 - [ ] 禁用词规则只管聊天侧注册；控制台管理员账号由 init.py 建，不走注册。
-- [ ] 重置密码弹窗精修：三行大字、右侧复制按钮、点背景不能关（现有的 Modal 点背景会关，
-  [src/components/shell/Modal.tsx](../src/components/shell/Modal.tsx)）；关闭后无法再查看。
-  架子是简版面板。
+- [ ] 重置密码弹窗精修：三行大字、右侧复制按钮、点背景不能关（现有的 Modal 点背景会关，[src/components/shell/Modal.tsx](../src/components/shell/Modal.tsx)）；关闭后无法再查看。架子是简版面板。
 - [ ] 重置密码时置 `must_change_password`（列还没加，见「强制改密码」一节）。
 - [ ] 管理员在控制台改自己密码的界面入口（后端 `/api/password` 已认 `admin_login`）。
 
@@ -169,8 +129,7 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ## 会话状态通道
 
-「改密码或被禁用之后，客户端要立刻知道并刷新状态，不能等用户输入、发送之后才发现。」
-这是这块最核心的一条，做法是给客户端一条常驻的通道。
+「改密码或被禁用之后，客户端要立刻知道并刷新状态，不能等用户输入、发送之后才发现。」这是这块最核心的一条，做法是给客户端一条常驻的通道。
 
 三层，各管一段：
 
@@ -200,8 +159,7 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
   data: {"valid": false, "reason": "disabled", "message": "账号已被停用，请联系管理员"}
 ```
 
-**连上先发一次状态**这一条最要紧：客户端断线期间错过了推送，重连时立刻补齐。
-这就是「刷新状态」——不是客户端去刷新服务器，是服务器把最新状态主动推过来。
+**连上先发一次状态**这一条最要紧：客户端断线期间错过了推送，重连时立刻补齐。这就是「刷新状态」——不是客户端去刷新服务器，是服务器把最新状态主动推过来。
 
 ### 三个触发点
 
@@ -211,28 +169,23 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ### 服务器这边
 
-- [ ] 一个进程内的事件总线：`account_id → 一组订阅队列`。
-  服务器本来就必须单进程跑（见 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 第 12 条），进程内总线够用，不用 Redis pub/sub。
+- [ ] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 第 12 条），进程内总线够用，不用 Redis pub/sub。
 - [ ] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。
 - [ ] 每 15 秒发一个心跳注释帧（`: ping`），免得连接被中间的代理当空闲掐掉。
-- [ ] 吊销令牌的地方统一走一个函数 `revoke_tokens(account_id, reason)`：删/标记令牌 + 推事件。
-  现在吊销散在改密码、控制台重置、退出登录三处；统一之后以后加新的踢人方式不会漏掉推送。
+- [ ] 吊销令牌的地方统一走一个函数 `revoke_tokens(account_id, reason)`：删/标记令牌 + 推事件。现在吊销散在改密码、控制台重置、退出登录三处；统一之后以后加新的踢人方式不会漏掉推送。
 
 浏览器自带的 `EventSource` 就够用：同一源请求会自动带 cookie，断线自动重连，不用自己写 SSE 解析。
 
 ### 客户端这边
 
-- [ ] 多两个状态：`expired`（会话过期）和 `disabled`（账号被停用）。
-  收到 `valid: false` → 聊天页**原地保留**，会话列表、正在打的那段字、页面状态全都不动；
-  输入框上方挂一条常驻提示，输入框禁用。
+- [ ] 多两个状态：`expired`（会话过期）和 `disabled`（账号被停用）。收到 `valid: false` → 聊天页**原地保留**，会话列表、正在打的那段字、页面状态全都不动；输入框上方挂一条常驻提示，输入框禁用。
 - [ ] `expired` 给一个「重新登录」按钮 → 弹登录框（不是把整页换成登录页）→ 登录成功后 `openAccount` 那套照旧重新拉会话列表和用户信息，页面状态原样恢复。
 - [ ] `disabled` **不给登录框**：登录了也没用，提示「账号已被停用，请联系管理员」。
 - [ ] 事件通道的连接管理：App 起来就连，掉线靠 `EventSource` 自己重连；重连时自动收到一次当前状态，天然完成状态同步。
 
 ### 和下一节的关系
 
-下一节讲「过期时别把用户的东西弄丢」，这一节讲「怎么让客户端立刻知道」。
-两块要一起做：通道负责通知，丢东西的那些措施负责善后。
+下一节讲「过期时别把用户的东西弄丢」，这一节讲「怎么让客户端立刻知道」。两块要一起做：通道负责通知，丢东西的那些措施负责善后。
 
 ## 会话过期时别把用户的东西弄丢
 
@@ -241,8 +194,7 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 - [x] 被踢时把输入框里的内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。（commit 6da0b34）
 - [ ] `login_token` 加 `revoked_at`：撤销的时候标记而不是删行，服务器才分得清「令牌不认识 / 被撤销 / 账号被停用」，页面也能给出对应的一句话。
 - [x] 轮询遇到 401 要停下来并解锁输入框（原来只认 404，会每 500 毫秒空转一次，[src/session/poll.ts](../src/session/poll.ts)）。（commit 04984de）
-- [ ] 「账号被停用」是终态：提示「账号已被停用，请联系管理员」，不给登录框（登录了也没用）。
-  跟「会话过期」分开，不要混成一个状态。
+- [ ] 「账号被停用」是终态：提示「账号已被停用，请联系管理员」，不给登录框（登录了也没用）。跟「会话过期」分开，不要混成一个状态。
 - [ ] 通知客户端这件事本身走「会话状态通道」那一节；这一节只管善后。
 
 ## 数据库要加的
@@ -255,11 +207,8 @@ zh 强度字典仍然有用——用户实际会输入的「中文密码」本�
 
 ## 改名
 
-- [x] `UPDATE account SET username = 'test01' WHERE username = 'admin';` —— 2026-11-03 执行
-  （维护者确认过）：密码同时重设为 `test01`；账号 id 不变，历史会话原样跟着走；
-  另插入控制台账号 `admin`/`admin`（role=admin，带 zh-CN 语言设置）。
-- [x] [server/src/server/db/init.py](../server/src/server/db/init.py) 里的 `_INITIAL_USERNAME` / `_INITIAL_PASSWORD` 改成 `test01` / `test01`；
-  另加 `_ensure_console_admin`：库里没有任何 admin 角色账号时幂等创建 `admin`/`admin`。
+- [x] `UPDATE account SET username = 'test01' WHERE username = 'admin';` —— 2026-11-03 执行（维护者确认过）：密码同时重设为 `test01`；账号 id 不变，历史会话原样跟着走；另插入控制台账号 `admin`/`admin`（role=admin，带 zh-CN 语言设置）。
+- [x] [server/src/server/db/init.py](../server/src/server/db/init.py) 里的 `_INITIAL_USERNAME` / `_INITIAL_PASSWORD` 改成 `test01` / `test01`；另加 `_ensure_console_admin`：库里没有任何 admin 角色账号时幂等创建 `admin`/`admin`。
 - [x] [README.md](../README.md) 里「初始账号」那句改成两个预设账号的说明。
 
 ## 验收
