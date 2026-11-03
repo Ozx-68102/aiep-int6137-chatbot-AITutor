@@ -5,17 +5,32 @@
  * 评分用 zxcvbn-ts（Dropbox zxcvbn 的 TypeScript 移植）：像破解工具那样
  * 拿字典（泄露密码榜、词、姓名、拼音）加模式（键盘序、连续、重复、日期、
  * l33t）估猜测次数，score 0–4，映射到我们的四档（0→太弱、1→弱、2→一般、
- * 3 和 4→强）。不按长度分档：8 位的好密码不该被判弱，长而好记的口令该得高分。
+ * 3 和 4→强）。不按长度分档：6 位的好密码不该被判弱，长而好记的口令该得高分。
  *
  * 字典有好几 MB，动态 import 懒加载：打开改密弹窗才开始拉，不进首屏包。
  *
- * 两条显示规则跟后端硬门槛对齐（后端会拒的，提示不能骗人）：
- * 不足 8 位、包含用户名，直接「太弱」。
+ * 三条显示规则跟后端硬门槛对齐（后端会拒的，提示不能骗人）：
+ * 不足 6 位、包含用户名、命中弱口令拒绝名单，直接「太弱」。
  */
 
 import type {ZxcvbnFactory} from '@zxcvbn-ts/core';
 
 export type StrengthScore = 0 | 1 | 2 | 3;
+
+/**
+ * 弱口令拒绝名单：命中直接「太弱」，改密页提交前也拿它做硬拦截。
+ * 跟 server/src/server/passwords.py 的 _WEAK_PASSWORDS 保持一致，改一处必须改两处。
+ */
+const WEAK_PASSWORDS: ReadonlySet<string> = new Set([
+  '123456', '1234567', '12345678', '123456789', '1234567890', '111111', '000000',
+  '666666', '888888', 'password', 'passw0rd', 'abc123', 'a123456', '123abc', 'qwerty',
+  'qwertyuiop', '123123', '112233', 'admin123', 'iloveyou',
+]);
+
+/** 是不是命中弱口令拒绝名单（大小写不敏感，跟后端同一套比法）。 */
+export function isWeakPassword(password: string): boolean {
+  return WEAK_PASSWORDS.has(password.toLowerCase());
+}
 
 /**
  * 拼音常见密码的小字典，补官方字典的盲区：language-zh 的词条是带声调的
@@ -87,11 +102,14 @@ export function passwordStrength(password: string, username: string | null): Str
     return 0;
   }
   // 后端硬门槛之下，直接「太弱」：不用等字典，也不能让字典把它抬上去。
-  if (password.length < 8) {
+  if (password.length < 6) {
     return 0;
   }
   const named = username !== null && username !== '';
   if (named && password.toLowerCase().includes((username ?? '').toLowerCase())) {
+    return 0;
+  }
+  if (isWeakPassword(password)) {
     return 0;
   }
   if (checker === null) {
