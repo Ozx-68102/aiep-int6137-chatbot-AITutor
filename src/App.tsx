@@ -166,6 +166,9 @@ function ChatApp() {
     onEnterLogin: enterLogin,
     onConnectionWarning: showConnectionWarning,
   });
+  // enterLogin 会被各个效果捕获，不能直接引用 password（响应式对象），
+  // 一律走这个 ref 拿最新的 API——和 navigateRef 同一套路。
+  const passwordRef = useRef(password);
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
@@ -209,6 +212,7 @@ function ChatApp() {
     authRef.current = auth;
     locationRef.current = location;
     navigateRef.current = navigate;
+    passwordRef.current = password;
     connectionWarningRef.current = showConnectionWarning;
     connectionCopyRef.current = text.connectionError;
     resumePartialRef.current = resumePartial;
@@ -580,7 +584,7 @@ function ChatApp() {
     setComposingNew(false);
     setConfirmLogout(false);
     setProfileError(null);
-    password.setError(null);
+    passwordRef.current.setError(null);
     setPendingIds(new Set());
     setHistoryLoadingId(null);
     loadedThreads.current.clear();

@@ -1,4 +1,4 @@
-import {useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {connectionFailure, explain} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {changePassword} from '../api/profile.ts';
@@ -21,8 +21,11 @@ export function usePasswordChange(deps: PasswordChangeDeps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 提交是异步流程，可能跨渲染：回调放进 ref，永远拿最新的一份。
+  // 镜像放在效果里做：渲染期间写 ref 是被禁止的（react/refs）。
   const depsRef = useRef(deps);
-  depsRef.current = deps;
+  useEffect(() => {
+    depsRef.current = deps;
+  });
 
   async function submit(oldPassword: string, newPassword: string, confirmPassword: string) {
     if (busy) {
