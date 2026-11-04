@@ -5,7 +5,10 @@
 这个文件只收**浏览器、库和平台层**的实测反直觉行为。别的内容各有各的家，不要写进来：
 
 - FastGPT 上游的接口与行为事实：[FASTGPT_API.md](FASTGPT_API.md)（本文件原有的十几条上游条目 2026-11-03 移到那里）
-- 聊天流、停止、重试、`message` 表：[INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)
+- 聊天流协议与轮次生命周期（停止、重试、刷新续传、`message` 表）：[CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)
+- 登录态、令牌与限流：[LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)
+- 轮次日志与排查：[TURN_LOGGING_AND_DIAGNOSTICS.md](TURN_LOGGING_AND_DIAGNOSTICS.md)
+- 聊天页面行为：[CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)
 - 消息操作区（脚注）：停止/失败提示、重试、编辑重发（第一至三期已实现）：[MESSAGE_ACTIONS.md](MESSAGE_ACTIONS.md)
 - 环境变量和工具版本：[TECH.md](TECH.md)
 - 账号和密码：[ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)
@@ -55,7 +58,7 @@
 
 日志能对上：20:15:33 发出提问，20:15:34、20:15:35、20:15:36 连续三次刷新，每次都是先读 `/partial` 再读 `/messages`，而那一刻 `/messages` 拿不到这一轮；20:15:40 上游整段到达，20:15:41 `[DONE]`；20:15:42 再刷新，页面才完整。
 
-现在改成：每一轮有自己的编号，Redis 里连着提问一起存着，服务器把「正在写的那一轮」接在历史后面一起返回，页面按编号认消息，不再靠文字猜。详见 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)。
+现在改成：每一轮有自己的编号，Redis 里连着提问一起存着，服务器把「正在写的那一轮」接在历史后面一起返回，页面按编号认消息，不再靠文字猜。详见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)。
 
 ## 2026-10-30 刷新得太急，上游会被打垮，日志会被撑爆
 

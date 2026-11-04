@@ -171,7 +171,7 @@
 
 ### 服务器这边
 
-- [ ] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 第 12 条），进程内总线够用，不用 Redis pub/sub。
+- [ ] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」一节），进程内总线够用，不用 Redis pub/sub。
 - [ ] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。
 - [ ] 每 15 秒发一个心跳注释帧（`: ping`），免得连接被中间的代理当空闲掐掉。
 - [ ] 吊销令牌的地方统一走一个函数 `revoke_tokens(account_id, reason)`：删/标记令牌 + 推事件。现在吊销散在改密码、控制台重置、退出登录三处；统一之后以后加新的踢人方式不会漏掉推送。

@@ -4,7 +4,7 @@
 
 ## 概览
 
-**读了哪些文件**：/package.json、/pnpm-workspace.yaml、/vite.config.ts、/tsconfig.json、/.oxlintrc.json、/.oxfmtrc.json、/index.html、/.gitignore、/.nvmrc、/.lww、/.env.example、/src/vite-env.d.ts、/src/index.css、/server/pyproject.toml、/server/.python-version、/server/AGENTS.md；/scripts/ 全部 3 个脚本（check-server.sh、setup-hooks.sh、start-server.sh）；/.githooks/ 两个钩子（commit-msg、pre-push）；/README.md、/AGENTS.md；/docs/ 全部文件（TECH、FINDINGS、UI_WARNINGS、ACCOUNT_MANAGEMENT、CHAT_STREAM_KNOWN_ISSUES、MESSAGE_ACTIONS、FASTGPT_API、INTERRUPTED_REPLY、NGINX_SPA_DEPLOYMENT_GUIDE、PARENT_PORTAL_PRIVACY）与开发手册全部 4 篇；/public/、/dist/、/src/assets/ 目录清单与 dist 各 chunk 的实测大小；用 glob 统计了 src 下约 59 个 .ts/.tsx 文件，用范围限定的 grep 实测了 console.*、TODO、FIXME、@ts-expect-error、any 等在 /src 与 /server/src 两个范围的密度。未读取 /.env 与 /logs/server.log 的内容（敏感），只确认了它们存在于 LayerFS main 树中。
+**读了哪些文件**：/package.json、/pnpm-workspace.yaml、/vite.config.ts、/tsconfig.json、/.oxlintrc.json、/.oxfmtrc.json、/index.html、/.gitignore、/.nvmrc、/.lww、/.env.example、/src/vite-env.d.ts、/src/index.css、/server/pyproject.toml、/server/.python-version、/server/AGENTS.md；/scripts/ 全部 3 个脚本（check-server.sh、setup-hooks.sh、start-server.sh）；/.githooks/ 两个钩子（commit-msg、pre-push）；/README.md、/AGENTS.md；/docs/ 全部文件（TECH、FINDINGS、UI_WARNINGS、ACCOUNT_MANAGEMENT、CHAT_STREAM_KNOWN_ISSUES、MESSAGE_ACTIONS、FASTGPT_API、INTERRUPTED_REPLY、NGINX_SPA_DEPLOYMENT_GUIDE、PARENT_PORTAL_PRIVACY；其中 CHAT_STREAM_KNOWN_ISSUES 与 INTERRUPTED_REPLY 已于 2026-11-05 退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md 等）与开发手册全部 4 篇；/public/、/dist/、/src/assets/ 目录清单与 dist 各 chunk 的实测大小；用 glob 统计了 src 下约 59 个 .ts/.tsx 文件，用范围限定的 grep 实测了 console.*、TODO、FIXME、@ts-expect-error、any 等在 /src 与 /server/src 两个范围的密度。未读取 /.env 与 /logs/server.log 的内容（敏感），只确认了它们存在于 LayerFS main 树中。
 
 **现状简述**：这是一个工程化纪律相当好的项目——TypeScript strict 全开、oxlint 开了 typeAware 类型规则（同类项目少见）、ruff 配了 7 组规则集含 banned-api、git 双钩子管提交信息和分支名、文档体系分工明确（FINDINGS 文件头的分流规则且被实际执行过）。代码卫生实测干净：src 与 server/src 里 0 个 console 残留、0 个 any、0 个 @ts-expect-error、0 个 FIXME，仅 2 个 TODO 且都有文档追踪。主要缺口集中在四处：
 
@@ -367,7 +367,7 @@ store-dir=node_modules/.pnpm-store
 - **位置**：/docs/FINDINGS.md（34.9 KB）。
 - **现状**：文件头的分流规则清晰且被执行过（上游 FastGPT 条目 2026-11-03 移到 FASTGPT_API.md）。但 2026-11-03 一天新增 6 条中，LayerFS store 损坏诊断、macOS init 缺陷、fs.apply 空目录行为、合并提交父指针方向、分页读取等属于**开发工具链**经验，与「Safari favicon 缓存」「transform 层叠上下文」这类产品运行时行为不同性质、不同受众（后者给产品开发者，前者给操作 LayerFS 的维护者与 agent）。文件 9 天涨到 35 KB，照此速度数月内会成为仓库最大文档。
 - **影响**：查产品行为坑的人要翻过平台工具流水账；两类经验的生命周期也不同（LayerFS 问题可能随上游版本修复而过时）。
-- **方案**：拆出 docs/LAYERFS_FINDINGS.md，把 LayerFS 平台相关条目整体迁移；FINDINGS.md 头部分流规则加一行「开发工具链（LayerFS、沙箱）实测去 LAYERFS_FINDINGS.md」。注意迁移的连带成本：全仓「见 FINDINGS 2026-xx-xx 那条」式引用实测约 11 处、分布在 AGENTS.md（5）、README（1）、server/AGENTS.md（1）、ACCOUNT_MANAGEMENT（3）、INTERRUPTED_REPLY（1），迁移条目涉及的引用要同步改。另定归档阈值：单文件超过约 50 KB 或跨自然年时按年拆分。pnpm store 条目（2026-10-31）介于两者之间，倾向留在 FINDINGS（它约束的是所有协作者的行为，不只 LayerFS 操作者），迁移时由维护者定夺。
+- **方案**：拆出 docs/LAYERFS_FINDINGS.md，把 LayerFS 平台相关条目整体迁移；FINDINGS.md 头部分流规则加一行「开发工具链（LayerFS、沙箱）实测去 LAYERFS_FINDINGS.md」。注意迁移的连带成本：全仓「见 FINDINGS 2026-xx-xx 那条」式引用实测约 11 处、分布在 AGENTS.md（5）、README（1）、server/AGENTS.md（1）、ACCOUNT_MANAGEMENT（3）、INTERRUPTED_REPLY（1；该文档已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md），迁移条目涉及的引用要同步改。另定归档阈值：单文件超过约 50 KB 或跨自然年时按年拆分。pnpm store 条目（2026-10-31）介于两者之间，倾向留在 FINDINGS（它约束的是所有协作者的行为，不只 LayerFS 操作者），迁移时由维护者定夺。
 - **第三方库/工具**：无。
 - **风险**：引用锚点漏改会造成文档死链，迁移后应全仓 grep「FINDINGS」核对一遍。
 - **工作量**：S。
@@ -375,7 +375,7 @@ store-dir=node_modules/.pnpm-store
 ### 23. docs/ 缺索引与状态标注，待办与现行事实混排
 
 - **位置**：/docs/ 目录（14 个文件 + 开发手册）。
-- **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY）、部署手册（NGINX 指南）、**待办**（MESSAGE_ACTIONS 整篇原是「以后要做的事」——2026-11-04 第一至三期已实现、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
+- **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY——已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）、部署手册（NGINX 指南）、**待办**（MESSAGE_ACTIONS 整篇原是「以后要做的事」——2026-11-04 第一至三期已实现、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单——已退役，并入 docs/CHAT_STREAM_PROTOCOL.md 等）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
 - **影响**：待办埋在文档里没有跟踪机制，容易遗忘；新人分不清「这是现状还是计划」。
 - **方案**：①新增 docs/README.md 索引表：文件、一句话范围、性质（现行事实/机制记录/待办/手册/决策）、最后核实日期；AGENTS.md「去哪儿找什么」改为链接它，消灭双索引；②每篇文档头部加统一状态行：`> 状态：现行事实 ｜ 最后核实 2026-11-03`；③MESSAGE_ACTIONS 与 CHAT_STREAM_KNOWN_ISSUES 里的可执行条目由维护者决定是否登记 GitHub Issues，文档保留背景分析、头部标「已建 issue #N 跟踪」。
 - **第三方库/工具**：无（GitHub Issues 现成）。

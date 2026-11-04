@@ -44,7 +44,7 @@
 - **「对话已停止」icon**：lucide `CircleStop`，黑色——与输入区的停止按钮同一个 icon，「你按了停止」的因果一眼对上。
 - **重试按钮**：黑色中性描边（替换现在 `FailedReply.tsx` 的红色 `btn-error` 样式），icon 沿用 `RotateCcw`。
 - 状态标志只挂在轮次的**回答行**上（该轮没有回答行时挂提问行）：提问与回答在表里共用一个结局状态，接口若两边都发给页面，脚注会把同一条提示显示两遍（2026-11-04 修复，`_merge_current_turn`）。
-- 状态提示**不再是独立的错误消息**。现在的实现是往消息流里插一条 `role:'error'` 的红框气泡（实时流程 `addErrorMessage`、刷新流程 `session/thread.ts` 的 `withFailureNotice` 合成）；改成由消息自身的 `failed` / `aborted` 标志直接渲染脚注，消息流里只留真正的对话内容。这也是状态收敛，方向与 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 第 1、4 条一致。
+- 状态提示**不再是独立的错误消息**。现在的实现是往消息流里插一条 `role:'error'` 的红框气泡（实时流程 `addErrorMessage`、刷新流程 `session/thread.ts` 的 `withFailureNotice` 合成）；改成由消息自身的 `failed` / `aborted` 标志直接渲染脚注，消息流里只留真正的对话内容。这也是状态收敛，方向与原 CHAT_STREAM_KNOWN_ISSUES.md 第 1、4 条一致（该文档已退役，内容并入 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)）。
 - 与轮次无关的错误提示（「无法连接到服务器」这类）统一归横幅，消息流里的无按钮红气泡退役。
 
 ### 编辑按钮与编辑框（第三期，交互已定）
@@ -63,7 +63,7 @@
 
 - 引擎签名泛化（采纳调研 N5 的建议）：`retryTurn(sessionId, turnId, editedText?)`。缺省 `editedText` 是重试（原文重发）；传了是编辑重发（本地先替换提问文字，再走既有流程）。
 - **服务器配套修复（已定方案①）**：`_clear_failed_turn`（`server/src/server/app.py`）指认上游「悬空提问」（被停轮上游只记了提问）时，拿**请求体里的文字**与上游最后一条记录比对。重试时请求带的是原文，比得中；编辑重发时请求带的是新文字，永远比不中，悬空提问就删不掉。修法：**删轮之前从我们自己的 `message` 表里读出这一轮的提问原文**，用它来比对。接口不用加任何字段；顺带让重试也更稳（不再依赖页面把旧文字一字不差发回来）。「指认不了就不删，宁可上游历史多一遍问答」的保底原则不变。
-- 已知边界（沿用现状）：被停轮之后用户又问过别的，悬空提问不再是上游最后一条，就不会被删——它会留在上游的上下文里。见 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)「一个已知的副作用」。
+- 已知边界（沿用现状）：被停轮之后用户又问过别的，悬空提问不再是上游最后一条，就不会被删——它会留在上游的上下文里。见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「已知限制」。
 
 ## 警告横幅：职责与位置（已定）
 
@@ -112,8 +112,8 @@
 | 框里按发送键是发送还是换行 | Enter 发送；Shift+Enter 换行；Esc 取消 |
 | 三种语言都要有 | 沿用，见「i18n」 |
 
-- [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)：机制记录（轮次编号、重试按钮、`message` 表、停止流程）不受本文覆盖，只引用。其中「被按停止的那一轮没有重试按钮」的说法在第一期落地后过时——实施时在那一段加指向本文的备注。
-- [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md)：其收敛方向（第 1 条流结局事件）与本文不冲突——脚注渲染改成「由消息标志驱动」之后，将来加了流结局事件只是数据源变化，界面规格不变。
+- 原 INTERRUPTED_REPLY.md（已退役，内容并入 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)）：机制记录（轮次编号、重试、`message` 表、停止流程）不受本文覆盖，只引用；「被按停止的那一轮没有重试按钮」的说法在第一期落地后已成历史。
+- 原 CHAT_STREAM_KNOWN_ISSUES.md（已退役，内容并入 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)）：其收敛方向（流结局事件）已实现，与本文不冲突——脚注渲染由消息标志驱动，结局事件只是数据源变化，界面规格不变。
 
 ## 附：为什么不做版本历史和分支
 

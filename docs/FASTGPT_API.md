@@ -2,7 +2,7 @@
 
 这个文件记上游 FastGPT 的**现状事实**：实测过或对着源码核过的接口、行为和怪癖。不按日期记流水账——事实变了就直接改对应条目，每条注明核实日期。
 
-版本基线、「接口清单怎么查」（三层说明、curl 取单个源文件）见 [server/AGENTS.md](../server/AGENTS.md) 的「FastGPT 的版本基线」一节。聊天流、停止、重试、`message` 表这些「我们怎么做」在 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)；这个文件只讲「上游是什么样」。
+版本基线、「接口清单怎么查」（三层说明、curl 取单个源文件）见 [server/AGENTS.md](../server/AGENTS.md) 的「FastGPT 的版本基线」一节。聊天流、停止、重试、`message` 表这些「我们怎么做」在 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)；这个文件只讲「上游是什么样」。
 
 ## 停止机制
 
@@ -29,7 +29,7 @@
 
 不主动叫停，上游会把整篇写完——token 白花。一轮**失败**（读超时、连接断在中间）同理：v2 的工作流不看连接，上游那一轮还在跑，会把答案写完，那条记录还会晚到我们的历史里。
 
-历史注：2026-10-31 之前我们走 v1，停止靠断开 httpx 连接；当时实测在回答进行到第 1 秒时调 `v2/chat/stop`，连做 4 次，每一轮都照跑完、都有完整回答和 `[DONE]`——v1 下那个标记没人读，停止接口的耗时（0.98 / 5.19 / 5.32 / 6.17 秒）只是跟着那一轮自己什么时候结束走（运行结束时会删掉标记）。改走 v2 之后，停止变成主动调 `v2/chat/stop`。停止请求和对话请求的时序问题、我们自己的停止标记，见 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)。
+历史注：2026-10-31 之前我们走 v1，停止靠断开 httpx 连接；当时实测在回答进行到第 1 秒时调 `v2/chat/stop`，连做 4 次，每一轮都照跑完、都有完整回答和 `[DONE]`——v1 下那个标记没人读，停止接口的耗时（0.98 / 5.19 / 5.32 / 6.17 秒）只是跟着那一轮自己什么时候结束走（运行结束时会删掉标记）。改走 v2 之后，停止变成主动调 `v2/chat/stop`。停止请求和对话请求的时序问题、我们自己的停止标记，见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「停止」一节。
 
 **上游没有「这一轮还在不在跑」的查询接口**（核过 v4.14.5 的 chat 接口，2026-11-01）：运行态只在流里通过节点状态事件报，`waitForWorkflowComplete` 是停止接口内部用的。所以读超时（`FASTGPT_READ_TIMEOUT_SECONDS`，见 [TECH.md](TECH.md)）是我们唯一的本地手段。
 
@@ -66,14 +66,14 @@
 
 `core/chat/record/getPaginationRecords`：返回字段是写死的，没有 `field` 参数可挑，v2 记录变胖后返回里会带 `responseData`——我们只解析 `value[].text.content`，用不上但要传。这是给页面显示用的完整历史，分页取的是全部记录（「打个招呼」那场 22 条整条都在），跟模型读到的上下文是两回事。
 
-结论（2026-11-01 定，不改）：**上下文归 FastGPT**。模型看到什么是上游节点的事，我们改不了；用户看到什么由我们自己存进 `message` 表（见 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md) 的「页面上的历史从哪儿来」）。
+结论（2026-11-01 定，不改）：**上下文归 FastGPT**。模型看到什么是上游节点的事，我们改不了；用户看到什么由我们自己存进 `message` 表（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md) 的「这一轮的历史从哪儿来」）。
 
 ## 删除记录
 
 - `DELETE {访问地址}/core/chat/history/delHistory?chatId={会话id}&appId={应用id}`：源码注释 "delete single chat history (soft delete)"，把**整场会话**标记成删除，也就是清空整场上下文，没有「删一轮」这个选项。**用不存在的会话 id 调它也返回 200**（正文 `{"code":200,...,"data":null}`，实测 2026-10-26）——「这场会话在 FastGPT 里不存在」和「删除成功」看起来一样。
 - `POST {访问地址}/core/chat/item/delete`：删**单条**记录，body 是 `{appId, chatId, contentId}`。官方文档没有列它（源码 `projects/app/src/pages/api/core/chat/item/delete.ts`），鉴权走 `authChatCrud`（`authApiKey: true`）。实现是给那条记录写 `deleteTime`（软删），按 `dataId` 匹配；删完 `getPaginationRecords` 里就没有了。**删一个不存在的 `contentId` 也返回 200**（`{"code":200,...,"data":null}`），不报错。（实测 2026-10-31。早先文档里写的 `core/chat/record/delete` 和 `sourceType`/`sourceId`/`contentIds` 那套参数属于更新版本，v4.14.5 没有那个文件。）
 
-回答那条记录的 `dataId` 就是我们的 `responseChatItemId`，提问那条的是 FastGPT 自己的，所以重发一轮时两条都能删；具体删法和「找不到就不删」的规矩见 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md) 的「重试按钮」一节。
+回答那条记录的 `dataId` 就是我们的 `responseChatItemId`，提问那条的是 FastGPT 自己的，所以重发一轮时两条都能删；具体删法和「找不到就不删」的规矩见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md) 的「重试与编辑重发（协议面）」一节。
 
 ## 点赞与点踩
 
@@ -85,12 +85,13 @@
 - 副作用都在上游侧：更新这场会话的反馈计数和应用日志表的好差评计数，对我们无影响。
 - 注意：**v2 目录下没有这个接口**——`v2/chat/` 只有 completions 和 stop；点赞点踩在 `core/chat/feedback/` 路径下。同目录还有 adminUpdate（管理员代改反馈）、getFeedbackRecordIds（按好差评筛记录）、updateFeedbackReadStatus（标已读）等运营接口，第四期用不到，留档备查。
 - **首测记录（2026-11-05**，消息操作第四期实现时的一次性探针，测完即删**）**：`v2/chat/completions` 开一轮探针会话（`chatId=probe-fb-随机8位`、`responseChatItemId=probe-fb-turn-随机8位`，「1+1=?」，`stream:true`、`detail:false`，HTTP 200，收到 `[DONE]`），然后依次调 updateUserFeedback：`{userGoodFeedback:""}` → HTTP 200、壳 `code:200`；`{userBadFeedback:""}` → 200 / `code:200`；`{}`（两个字段都省，即清空）→ 200 / `code:200`；最后 `DELETE core/chat/history/delHistory` 清理 → 200 / `code:200`。三次反馈调用的返回壳都符合「传什么设什么、不传就删什么」的预期，接口行为与源码结论一致。
+- **时序注意（2026-11-05 本机实测）**：一轮刚结束的瞬间调 updateUserFeedback 会吃上游 500——它把回答记录写进自己的库有数秒延迟，那一刻按 dataId 还找不到记录；约 6 秒后重试即 HTTP 200、壳 code 200。对我们页面的实际流程无影响：点赞点踩的点击总发生在答案出现之后。真撞上时代理端表现为 502「反馈没送到，稍后再试」（server/src/server/app.py 的 update_feedback）。
 
 ## 流式行为
 
 传 `stream: true`、响应头也是 `text/event-stream`，但**上游一整块返回，不是逐字**（实测 2026-10-29，连续三次对话同一节奏）：先来一个只含换行符的事件，隔 2 到 5 秒整段答案一次性到达，再来一个换行符事件，最后是 `finish_reason` 和 `[DONE]`。第一个事件 0.3 秒左右就到，所以不是反向代理把响应攒住才发，是 FastGPT 那边（maas.eduhk.hk）自己把答案写完才写成一条事件。要改成逐字输出是那边的事。
 
-**2026-11-04 复测（detail:false 与 detail:true 各两轮短问题，curl 直连）**：detail:false 的模式和 2026-10-29 的记录一致——换行帧、静默 2~4 秒、整段答案一帧到齐（90 字全文一帧）、换行帧、finish_reason、`[DONE]`；答案正文偶尔分成两帧（正文后隔约 0.4 秒补一帧尾巴）；响应头到达时间不稳（一次 0.3 秒、一次 3.8 秒）。**detail:true 时答案同样整块到达**（134 字全文在 fastAnswer 事件下一帧到齐，+2.3 秒）——开了 detail 也不会逐字输出；区别是响应头约 0.19 秒就到，且整个运行期间持续发命名事件：`event: flowNodeStatus`（载荷 `{name, status}`，几十字节一条，一轮 10~14 条）、`event: flowNodeResponse`（节点输出明细，单条最大 11.7 KB，含 historyPreview 和 codeLog）、`event: fastAnswer`（答案内容帧）、`event: updateVariables`（工作流变量全量，实测键名有 academy_lesson_id、academy_progress、cls 等学生数据键）、`event: workflowDuration`（总耗时）、`event: answer`（finish_reason 和 `[DONE]` 挂在这个事件名下）。一轮短问题合计 30~50 条事件、最多约 55 KB。答案文本按节点整块写出，答案出口的节点能不能改成逐字，要那边对着 v4.14.5 源码查。我们这层怎么用这些事件（转节点状态、不转变量和明细）见 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 的「上游的真实节奏」一节。
+**2026-11-04 复测（detail:false 与 detail:true 各两轮短问题，curl 直连）**：detail:false 的模式和 2026-10-29 的记录一致——换行帧、静默 2~4 秒、整段答案一帧到齐（90 字全文一帧）、换行帧、finish_reason、`[DONE]`；答案正文偶尔分成两帧（正文后隔约 0.4 秒补一帧尾巴）；响应头到达时间不稳（一次 0.3 秒、一次 3.8 秒）。**detail:true 时答案同样整块到达**（134 字全文在 fastAnswer 事件下一帧到齐，+2.3 秒）——开了 detail 也不会逐字输出；区别是响应头约 0.19 秒就到，且整个运行期间持续发命名事件：`event: flowNodeStatus`（载荷 `{name, status}`，几十字节一条，一轮 10~14 条）、`event: flowNodeResponse`（节点输出明细，单条最大 11.7 KB，含 historyPreview 和 codeLog）、`event: fastAnswer`（答案内容帧）、`event: updateVariables`（工作流变量全量，实测键名有 academy_lesson_id、academy_progress、cls 等学生数据键）、`event: workflowDuration`（总耗时）、`event: answer`（finish_reason 和 `[DONE]` 挂在这个事件名下）。一轮短问题合计 30~50 条事件、最多约 55 KB。答案文本按节点整块写出，答案出口的节点能不能改成逐字，要那边对着 v4.14.5 源码查。我们这层怎么用这些事件（转节点状态、不转变量和明细）见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md) 的「上游整块返回答案」一节。
 
 ## 杂项
 

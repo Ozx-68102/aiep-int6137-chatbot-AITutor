@@ -11,7 +11,7 @@
 - `/src/components/chat/` 全部七个文件（ChatMain.tsx、FailedReply.tsx、MarkdownText.tsx、ThinkingBubble.tsx、WarningBox.tsx、markdown.css、message-class.ts）
 - `/src/session/` 全部八个文件（thread.ts、poll.ts、unsent.ts、text.ts、title.ts、pin-order.ts、empty.ts、profile-cache.ts）
 - `/src/type/chat.ts`、`/src/App.tsx`（集成层，用于确认滚动/草稿/提交的实际行为）、`/src/i18n.ts`（文案键）、`/package.json`（依赖版本）
-- 文档：`/docs/CHAT_STREAM_KNOWN_ISSUES.md`、`/docs/INTERRUPTED_REPLY.md`、`/docs/MESSAGE_ACTIONS.md`、`/docs/FINDINGS.md`
+- 文档：`/docs/CHAT_STREAM_KNOWN_ISSUES.md`、`/docs/INTERRUPTED_REPLY.md`（两者已退役，内容并入 `/docs/CHAT_STREAM_PROTOCOL.md` 等）、`/docs/MESSAGE_ACTIONS.md`、`/docs/FINDINGS.md`
 
 文档里已记录且已修好的事（轮询 401 死循环、被踢时输入丢失、422 detail 数组）不再重复报告；`remark-math` 吃 `$`、流式公式跳变、会话行浮层必须走 portal 这些已有记录的固有行为也不再当新问题提。
 
@@ -25,7 +25,7 @@
 6. **停止**：`stopSending`（L555）先本地 `abort()`，再由 `finishStop`（L512）调 `POST /abort` 并读 `/partial` 按服务器说的收尾。
 7. **存储**：前端不存消息，历史全部来自服务器（自有 `message` 表 + FastGPT 回填）；本地只有 `h2bot-unsent`（sessionStorage 单槽，被踢/切会话时暂存未发送文本）和 `h2bot-profile`（localStorage，用户名+语言）。
 
-整体评价：断流对账、轮次编号幂等、停止语义这些"难而正确"的部分做得扎实（与 INTERRUPTED_REPLY.md 的记录一致）。短板集中在**渲染与交互层**：没有任何滚动管理、单行输入框、草稿不分会话、流式期间全树重渲染，以及若干错误分支把"可重试"做成了"不可重试"。
+整体评价：断流对账、轮次编号幂等、停止语义这些"难而正确"的部分做得扎实（与原 INTERRUPTED_REPLY.md 的记录一致，该文档已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）。短板集中在**渲染与交互层**：没有任何滚动管理、单行输入框、草稿不分会话、流式期间全树重渲染，以及若干错误分支把"可重试"做成了"不可重试"。
 
 ---
 
@@ -184,7 +184,7 @@
   2. **流式文本单独放**：给正在流式的那条消息的文本另开一个 state（如 `streamingTexts: Map<messageId, string>`，由 use-turn-engine 的 applyStreamText 改写这里而不是 `sessions`），渲染时 `MessageItem` 对 streaming 的那条叠加显示；流落定（completed/failed/aborted）时一次性写回 `sessions`。`sessions` 不再每 chunk 变 → Sidebar 完全不陪跑。
   3. 顺手项：`enteringIds.includes`（ChatMain 四处）换成 `Set`（O4 一起改）；assistant 分支 L104 的 `textShown === '' ? null : ...` 是死代码（L70 已拦截），可删。
 - **第三方库**：无。若做完后长会话（数百条）仍然重，再考虑虚拟化，点名 `@tanstack/react-virtual` ^3（动态高度用 `estimateSize` + `measureElement`），但那一步要处理「贴底滚动」与虚拟列表的配合，建议单独立项。
-- **风险**：中。第 2 步动了 use-turn-engine 的状态归属，`applyPartialText`/`recoverReply` 等所有写文本的路径都要同步改；没有自动化测试，需要按 INTERRUPTED_REPLY.md 的场景清单手测（刷新续传、停止、重试、busy）。可以先只做第 1 步观察收益。
+- **风险**：中。第 2 步动了 use-turn-engine 的状态归属，`applyPartialText`/`recoverReply` 等所有写文本的路径都要同步改；没有自动化测试，需要按原 INTERRUPTED_REPLY.md（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）的场景清单手测（刷新续传、停止、重试、busy）。可以先只做第 1 步观察收益。
 - **工作量**：第 1 步 S~M；第 2 步 M~L。
 
 ### O3. partial 轮询在后台标签页暂停
@@ -228,7 +228,7 @@
 ### P4. 新会话首条消息发送失败时，问题文本丢失
 
 - **位置**：`/src/App.tsx` `submitMessage` L530 附近（发送前 `clearUnsent(); setDraft('')`）→ `sendFirstMessage` L468 的 catch：L505-508 只有 401 分支 `saveUnsent(question)`；L511-513 `connectionFailure` 分支 showConnectionWarning 后直接 return；L514-516 其他错误且 `sessionId === ''` 时只 setNotice。
-- **现状**：用户在「新对话」里打了字点发送，`submitMessage` 立刻清空输入框和 unsent 缓存；如果 `createSession` 或首问因网络类错误失败，question 哪儿都没存——界面上没有（会话都没建出来）、unsent 没有、服务器没有。CHAT_STREAM_KNOWN_ISSUES.md 第 10 条修的是「被踢」路径，这条 connectionFailure 路径是同一个洞的另一半，还没堵。
+- **现状**：用户在「新对话」里打了字点发送，`submitMessage` 立刻清空输入框和 unsent 缓存；如果 `createSession` 或首问因网络类错误失败，question 哪儿都没存——界面上没有（会话都没建出来）、unsent 没有、服务器没有。原 CHAT_STREAM_KNOWN_ISSUES.md 第 10 条（已退役，内容并入 docs/CHAT_PAGE_BEHAVIOR.md）修的是「被踢」路径，这条 connectionFailure 路径是同一个洞的另一半，还没堵。
 - **影响**：弱网下新对话首发失败 = 用户输入直接蒸发，和已修的第 10 条同等严重。
 - **方案**：catch 的 connectionFailure 和兜底分支都补 `saveUnsent(question); setDraft(question);`（此时还没有会话，放回输入框即可，`composingNew` 仍为 true）：
 
@@ -289,7 +289,7 @@
 
 1. **先做一组 S 级、纯前端、互相独立的**：N1（自动滚动）、O1（rAF 节流）、P1/P2/P4（重试通路补全）、O4（enteringIds 泄漏）、N8（aria-live 收窄）。这一组把「日常最疼」和「弱网数据丢失」都堵上，且都不动状态归属。
 2. **再做交互升级**：N2（多行输入）→ N3（按会话草稿）→ N9（流式可打字）→ N6/N4（复制按钮）。N2 是 N5（编辑重发）的前置。
-3. **单独立项**：O2 第 2 步（流式文本与 sessions 解耦）、N5（编辑重发，跨前后端）、N7+P3（断线恢复，要按 INTERRUPTED_REPLY.md 场景清单手测）、高亮库/虚拟化等依赖引入（维护者决策）。
+3. **单独立项**：O2 第 2 步（流式文本与 sessions 解耦）、N5（编辑重发，跨前后端）、N7+P3（断线恢复，要按原 INTERRUPTED_REPLY.md——已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md——的场景清单手测）、高亮库/虚拟化等依赖引入（维护者决策）。
 
 所有涉及新界面文案的条目（N1 的「回到底部」、N6 的「复制」、N5 的「编辑/取消/发送」等）都要在 `/src/i18n.ts` 三种语言各补一条键，这是仓库惯例（MESSAGE_ACTIONS.md 也特别点了这一条）。
 

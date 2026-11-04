@@ -12,7 +12,7 @@
 - `server/src/server/`：`app.py`（1375 行，全部路由和流式转发）、`fastgpt.py`（上游客户端）、`chat_log.py`（自有 message 表读写）、`reply_store.py`（Redis 半截回复）、`ratelimit.py`（失败计数限流）、`url.py`、`settings.py`、`log.py`、`avatar.py`、`passwords.py`、`__init__.py`（uvicorn 入口）
 - `server/src/server/types/`：`api.py`（接口模型）、`env.py`（配置模型）、`__init__.py`
 - `server/src/server/db/`：`models.py`（表结构与索引）、`session.py`（引擎与会话）、`init.py`（幂等建表/补列）、`backfill.py`（历史搬迁命令）
-- 文档：`docs/FASTGPT_API.md`、`docs/INTERRUPTED_REPLY.md`、`docs/ACCOUNT_MANAGEMENT.md`、`docs/CHAT_STREAM_KNOWN_ISSUES.md`、`docs/MESSAGE_ACTIONS.md`、`docs/TECH.md`、`docs/FINDINGS.md`（相关条目）、`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md`（SSE 反代部分）
+- 文档：`docs/FASTGPT_API.md`、原 `docs/INTERRUPTED_REPLY.md`（已退役，内容并入 `docs/CHAT_STREAM_PROTOCOL.md`）、`docs/ACCOUNT_MANAGEMENT.md`、原 `docs/CHAT_STREAM_KNOWN_ISSUES.md`（已退役，内容并入 `docs/CHAT_STREAM_PROTOCOL.md` 等）、`docs/MESSAGE_ACTIONS.md`、`docs/TECH.md`、`docs/FINDINGS.md`（相关条目）、`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md`（SSE 反代部分）
 
 ### 架构简述
 
@@ -24,7 +24,7 @@
 
 登录态：`login` cookie 存随机令牌，库里 `login_token` 存 SHA-256 哈希，7 天滑动续期；每个带 cookie 的请求由 ASGI 中间件 `_RefreshLoginCookie`（`app.py:158-190`）重发 cookie，端点内 `_account_from_cookie` 校验并把 role 判断收在一层。聊天侧只认 `chat` role，`/api/admin/*` 只认 `admin_login` cookie 里的 `admin` role。
 
-已知的核心待修问题在 `docs/CHAT_STREAM_KNOWN_ISSUES.md` 里已成文（根因：「这一轮的结局没有跟着流走」）。本篇不推翻它，而是把其中后端部分落到文件/函数级方案，并补充该文档没覆盖的发现（下文标注「新增」的条目）。
+已知的核心待修问题曾在原 `docs/CHAT_STREAM_KNOWN_ISSUES.md` 里成文（已退役，内容并入 `docs/CHAT_STREAM_PROTOCOL.md`；根因「这一轮的结局没有跟着流走」现已修复）。本篇不推翻它，而是把其中后端部分落到文件/函数级方案，并补充该文档没覆盖的发现（下文标注「新增」的条目）。
 
 ---
 
@@ -272,7 +272,7 @@
 ### O4. 单轮占用检查是 check-then-act，不原子（新增）
 
 - **位置**：`app.py:877`（`round_in_flight` 读）→ `app.py:900`（`begin_reply` 写）；`reply_store.py:44-58`（`begin_reply` 用 pipeline 但无条件 SET）。
-- **现状**：「同一场会话同时只跑一轮」靠先读 status 再写 status 实现，两步之间没有原子性。两个并发 `POST /api/chat`（不同 turn_id、同一 chat_id——比如两个标签页同时发、或前端重发时序错开）可以都通过 `round_in_flight` 检查，然后双双 `begin_reply`：后写的把先写的 turn 键覆盖，两轮的片段交错写进同一个 text 键——正是 INTERRUPTED_REPLY「同一场会话同时只跑一轮」一节描述要防的事故，现在的防线在并发下有缝。turn_id 幂等检查（`app.py:866-873`）只防「同一请求来两次」，防不了「两个不同请求」。
+- **现状**：「同一场会话同时只跑一轮」靠先读 status 再写 status 实现，两步之间没有原子性。两个并发 `POST /api/chat`（不同 turn_id、同一 chat_id——比如两个标签页同时发、或前端重发时序错开）可以都通过 `round_in_flight` 检查，然后双双 `begin_reply`：后写的把先写的 turn 键覆盖，两轮的片段交错写进同一个 text 键——正是原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）「同一场会话同时只跑一轮」一节描述要防的事故，现在的防线在并发下有缝。turn_id 幂等检查（`app.py:866-873`）只防「同一请求来两次」，防不了「两个不同请求」。
 - **影响**：低概率但后果脏：Redis 半截文字两轮混写、上游多出一轮、message 表 seq 交错（`_next_seq` 的 max+1 也会撞）。多标签页是真实使用场景（ACCOUNT_MANAGEMENT 通篇在讨论多标签页）。
 - **方案**：把「占用」做成原子认领。`begin_reply` 返回是否认领成功：status 键用 `SET NX` 抢占，抢不到再看是不是自己的 turn（幂等重发）：
   ```python
@@ -319,7 +319,7 @@
   ```
   数字依据：stop 上游自等 5 秒 → 我们给 read 8 秒留余量；records/delete 是小请求，5+8 足够。流式 `events` 继续用客户端级配置（read=30 是维护者定的 `.env` 可调项，不动）。`max_connections` 设多少要看部署形态（单上游），64 是起点不是结论。
 - **第三方库**：无。
-- **风险**：低；超时数字改动会影响故障表现，改完要按 INTERRUPTED_REPLY 的实测方法过一遍停止/失败路径。
+- **风险**：低；超时数字改动会影响故障表现，改完要按原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）的实测方法过一遍停止/失败路径。
 - **工作量**：S。
 
 ### O6. `_records_cache` 无上限，且只在写入时清理陈旧项
@@ -353,7 +353,7 @@
 ### O9. chat_log 每轮的 SQL 往返可以减半；`_next_seq` 有并发撞号面
 
 - **位置**：`chat_log.py:57-89`（`begin_round`：DELETE + SELECT max(seq) + 2×INSERT）、`chat_log.py:92-102`（`finish_round`：SELECT 两行 + 逐行 ORM UPDATE）、`chat_log.py:252-257`（`_next_seq`）。
-- **现状**：INTERRUPTED_REPLY 说「一轮开始一个事务、落定一个事务」，实测中位 0.30ms——量级没问题，但每个事务内部的往返数可以压：begin_round 5 条语句、finish_round 3 条。`_next_seq` 用 `SELECT max(seq)+1`，两个并发事务能算出同一个号（现在被「单轮占用 + 单进程」挡住；O4 的竞态一旦发生，seq 就会交错，`message_session_id_seq_idx` 排序的历史会乱序——seq 上没有唯一约束兜底）。
+- **现状**：原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）说「一轮开始一个事务、落定一个事务」，实测中位 0.30ms——量级没问题，但每个事务内部的往返数可以压：begin_round 5 条语句、finish_round 3 条。`_next_seq` 用 `SELECT max(seq)+1`，两个并发事务能算出同一个号（现在被「单轮占用 + 单进程」挡住；O4 的竞态一旦发生，seq 就会交错，`message_session_id_seq_idx` 排序的历史会乱序——seq 上没有唯一约束兜底）。
 - **影响**：正常时是小优化；异常并发时 seq 撞号会导致历史排序错乱，且无声无息（没有约束报错）。
 - **方案**：
   ```python
@@ -513,7 +513,7 @@
 ### P8. 按停止后立刻发新消息：响应头被 `_wait_for_stop` 压住最长 7 秒（新增）
 
 - **位置**：`app.py:893-895`（`chat` 在返回 StreamingResponse **之前** `await _wait_for_stop(body.chat_id)`）、`app.py:1115-1124`（`_STOP_WAIT_SECONDS = 7.0`）、`fastgpt.py:124-153`（stop 调用本身，配合 O5 的超时收紧）。
-- **现状**：等停止落地的机制是对的（FASTGPT_API：上游每轮开始会删停止标记，标记晚到会掐掉新一轮），但它放在响应头发出之前。用户「按停止 → 马上改口重发」是高频动作，此时新请求要干等上一轮的 `_stop_upstream` 落地（正常几百毫秒，上游卡时到 7 秒上限）才拿到响应头。INTERRUPTED_REPLY 专门修过「响应头要立刻回」（0.013 秒实测），这条路径把那个修复又局部推翻了。
+- **现状**：等停止落地的机制是对的（FASTGPT_API：上游每轮开始会删停止标记，标记晚到会掐掉新一轮），但它放在响应头发出之前。用户「按停止 → 马上改口重发」是高频动作，此时新请求要干等上一轮的 `_stop_upstream` 落地（正常几百毫秒，上游卡时到 7 秒上限）才拿到响应头。docs/CHAT_STREAM_PROTOCOL.md（原 INTERRUPTED_REPLY，已退役）专门记过「响应头要立刻回」（0.013 秒实测），这条路径把那个修复又局部推翻了。
 - **影响**：停止后重发的体验退化：页面等待气泡不转、前端超时重发逻辑可能被触发（turn_id 幂等兜底，不会生成两遍，但请求白白多一轮）。
 - **方案**：把等待挪进 `_relay` 任务（登记照旧在前，等待发生在真正调上游之前）：
   ```python
@@ -525,7 +525,7 @@
   ```
   时序核对：停止标记必须在我们调 `v2/chat/completions` 之前落地（上游在**它那轮开始时**删标记）——挪动后依然满足；页面侧提前看到 `streaming` 状态，语义无害。`retry_of` 的 `_clear_failed_turn`（也在响应头之前，`app.py:897-898`）同理可以挪进任务，但它涉及删上游记录，失败时页面拿不到 409/502 之类的即时信号——建议第一期只挪 `_wait_for_stop`。
 - **第三方库**：无。
-- **风险**：动停止时序（文档明确机制），改完要按 INTERRUPTED_REPLY 的停止实测场景表复测（停止先到/对话先到/停完立刻发新轮）。
+- **风险**：动停止时序（文档明确机制），改完要按原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）的停止实测场景表复测（停止先到/对话先到/停完立刻发新轮）。
 - **工作量**：S～M。
 
 ### P9. cookie 没有 `Secure` 标志（新增；与 backend-infra 交界，接口层视角记录）
@@ -636,7 +636,7 @@
 
 ## 附：与既有文档的关系及建议的动手顺序
 
-CHAT_STREAM_KNOWN_ISSUES 的「收敛顺序」五条与本篇的对应：1（结局事件）= N1；2（词表合一）= O11；3（/partial 收窄）= N1 的后半；4（中间件查库）= O1；5（结构化日志）= O7。本篇新增的主要发现：O2（avatar 大字段）、O3（Redis 同步调用堵事件循环）、O4（单轮占用竞态）、P2（无长度上限）、P3（locale 死字段）、P4（删除会话竞态）、P5（卡死 streaming 行）、P6（DB 挂时假 200）、P7（上游错误一刀切）、P8（停止后 7 秒压响应头）、P10（头像上传无边缘限制）。
+原 CHAT_STREAM_KNOWN_ISSUES.md（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md 等）的「收敛顺序」五条与本篇的对应：1（结局事件）= N1；2（词表合一）= O11；3（/partial 收窄）= N1 的后半；4（中间件查库）= O1；5（结构化日志）= O7。本篇新增的主要发现：O2（avatar 大字段）、O3（Redis 同步调用堵事件循环）、O4（单轮占用竞态）、P2（无长度上限）、P3（locale 死字段）、P4（删除会话竞态）、P5（卡死 streaming 行）、P6（DB 挂时假 200）、P7（上游错误一刀切）、P8（停止后 7 秒压响应头）、P10（头像上传无边缘限制）。
 
 若按「风险低、独立可验收」优先排一个建议顺序（最终以维护者排期为准）：
 

@@ -31,7 +31,7 @@ class ProgressEvent:
     载荷只有 name 和 status 两个字符串字段，原样转发给页面当进度帧。
     节点输出明细（flowNodeResponse）和工作流变量（updateVariables）
     带学生数据，不当成这个类型解析，也一个字不外发（依据见
-    docs/CHAT_STREAM_KNOWN_ISSUES.md 第 13 条）。
+    docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」一节）。
     """
 
     name: str
@@ -78,7 +78,7 @@ class FastGPT:
             "stream": True,
             # detail:true 让上游把工作流节点事件也发过来：中继层只挑
             # flowNodeStatus 转给页面当进度，其余命名事件不产出内容
-            # （见 docs/CHAT_STREAM_KNOWN_ISSUES.md 第 13 条）。
+            # （见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」一节）。
             "detail": True,
             # 我们的编号交给 FastGPT 存着：这一轮的回答在历史里就带着这个编号，
             # 页面刷新以后能认出哪一条是当前这一轮，不用靠文字去猜。

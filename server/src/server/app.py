@@ -100,7 +100,7 @@ logger = logging.getLogger("server.app")
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.fastgpt = open_fastgpt(load_settings())
     # 启动对账：表里卡在 streaming 的行一次标成 failed。单进程前提
-    # （docs/CHAT_STREAM_KNOWN_ISSUES.md 第 12 条）：进程重启时不可能有
+    # （docs/CHAT_STREAM_PROTOCOL.md「单进程前提」一节）：进程重启时不可能有
     # 「还在写」的轮次，那些行必是死轮。读时兜底（_merge_current_turn）
     # 同样会降级展示，这里把库一次清干净。
     stuck = await asyncio.to_thread(chat_log.fail_stuck_rounds)
@@ -108,7 +108,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("启动对账：%d 行卡住的 streaming 已标为 failed", stuck)
     # 过期令牌的清扫从请求路径挪到这里：启动先跑一次，之后每
     # _SWEEP_INTERVAL_SECONDS 一次。单进程假设，不需要分布式锁
-    # （见 docs/CHAT_STREAM_KNOWN_ISSUES.md 第 12 条）。
+    # （见 docs/CHAT_STREAM_PROTOCOL.md「单进程前提」一节）。
     sweep = asyncio.create_task(_sweep_expired_tokens_loop())
     try:
         yield
@@ -755,8 +755,8 @@ def read_session_partial(
     Redis 里这场会话的状态是 streaming 才回 200（半截文字、轮次编号、
     提问）；其余一切情况（写完了/失败/被停/键不存在）一律 404，页面去
     读库。结局语义不再由这个接口承担：即时结局随流的 done 帧走，永久
-    结局在库的 message.status 上（docs/CHAT_STREAM_KNOWN_ISSUES.md
-    第 3 条，2026-11-05 维护者拍板）。Redis 读不通照旧抛错（500）：
+    结局在库的 message.status 上（docs/CHAT_STREAM_PROTOCOL.md
+    「刷新续传与断流恢复」一节，2026-11-05 维护者拍板）。Redis 读不通照旧抛错（500）：
     那是「问不到服务器」，不是「没在写」，客户端靠状态码区分这两种。
     """
     with db_session() as session:

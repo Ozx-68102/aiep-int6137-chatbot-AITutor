@@ -4,7 +4,7 @@
 cookie 的请求路径上、走全表扫；现在挪进了后台周期任务（app.py 的
 _sweep_expired_tokens_loop）。这条 DELETE 和令牌校验里
 expires_at > now() 的条件都吃这个索引（依据见
-docs/CHAT_STREAM_KNOWN_ISSUES.md 第 6 条）。
+docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「令牌表与定时清扫」一节）。
 
 Revision ID: 0001
 Revises:
