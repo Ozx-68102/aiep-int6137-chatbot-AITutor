@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -88,6 +88,7 @@ from server.types import (
     SessionPin,
     SessionRename,
     StatusResponse,
+    TurnDoneEvent,
     empty_fastgpt_fields,
 )
 
@@ -160,6 +161,9 @@ _HEARTBEAT_SECONDS = 15.0
 # 叫 nginx 这类反向代理别攒响应正文——攒住的话帧要等缓冲满才发得出去，
 # 静默期里页面连心跳都收不到。
 _SSE_HEADERS = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
+# 收尾帧：和上游 FastGPT 的 [DONE] 一字不差，格式永不动。
+# 结局帧（event: done）在它之前发出；失败/被停的路径没有这一帧。
+_DONE_FRAME = "data: [DONE]\n\n"
 # 中间件为本次请求验好的账号 id（连同 cookie 原文用于比对）。端点侧的
 # _account_from_cookie 直接拿它，省掉一轮令牌查库和续期：每个带 cookie
 # 的请求从两轮减到一轮。asyncio.to_thread 和端点线程池都会拷贝上下文，
@@ -188,6 +192,14 @@ class _Relay:
         self.account_id: str | None = None
         # 这一轮转发过的进度帧数（flowNodeStatus）：摘要行末尾那个字段。
         self.progress = 0
+        # 轮次编号：done 帧带着它，页面按编号认这一轮。
+        self.turn_id: str = ""
+        # done 帧告知页面的结局（即时判断，库才是最终事实）。结局落定
+        # 才有值；_sse 只在有值时发 done 帧。
+        self.done_status: Literal["completed", "aborted", "failed"] | None = None
+        # done 帧的 reason 词汇：stop（用户按停）、upstream（上游失败）、
+        # internal（我们这边出错）；正常写完为 None。
+        self.done_reason: Literal["stop", "upstream", "internal"] | None = None
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -989,9 +1001,12 @@ async def chat(
             stop_sent=False,
             db_written=written,
             progress_events=0,
+            done_status=ABORTED,
         )
+        # 结局随流明说：被停在这一轮开起来之前，done 帧照样发。
+        done = _done_chunk(turn_id, ABORTED, "stop", 0)
         return StreamingResponse(
-            _empty_sse(), media_type="text/event-stream", headers=_SSE_HEADERS
+            _empty_sse(done), media_type="text/event-stream", headers=_SSE_HEADERS
         )
 
     # 之前叫停上游的那一下要落地：停止标记晚到的话，
@@ -1006,6 +1021,7 @@ async def chat(
     begin_reply(body.chat_id, turn_id, body.message)
     relay = _Relay()
     relay.account_id = account_id
+    relay.turn_id = turn_id
     task = asyncio.create_task(
         _relay(body.chat_id, body.message, turn_id, relay, fastgpt)
     )
@@ -1052,26 +1068,38 @@ async def _relay(
                 continue
 
             mark_finished(chat_id)
-            logger.debug("发给页面 %s", "data: [DONE]")
-            await relay.queue.put("data: [DONE]\n\n")
+            # 结局落定：done 帧说 completed。done 帧是即时判断，库是
+            # 最终事实（见 _sse 的 docstring）。
+            relay.done_status = COMPLETED
+            logger.debug("发给页面 %s", _DONE_FRAME)
+            await relay.queue.put(_DONE_FRAME)
             relay.sent = True
             break
         else:
+            # 上游没发 [DONE] 就把流走完：算上游失败，done 帧照实说。
             relay.failed = True
+            relay.done_status = FAILED
+            relay.done_reason = "upstream"
     except asyncio.CancelledError:
         # 用户按了停止。状态在这里写：任务被掐掉时它确实还在写，
         # 页面轮询 /partial 时就能看到 aborted。
         logger.info("这一轮被停止 %s", chat_id)
         relay.status = ABORTED
+        relay.done_status = ABORTED
+        relay.done_reason = "stop"
         # 停止端点在掐这个任务之前已经叫停了上游，摘要行照实记。
         relay.stop_sent = True
         mark_aborted(chat_id)
         raise
     except FastGPTError:
         relay.failed = True
+        relay.done_status = FAILED
+        relay.done_reason = "upstream"
     except Exception as exc:
         logger.error("FastGPT 读取失败 %s", chat_id, exc_info=exc)
         relay.failed = True
+        relay.done_status = FAILED
+        relay.done_reason = "internal"
     finally:
         try:
             if relay.failed:
@@ -1155,6 +1183,7 @@ async def _write_round_end(
         stop_sent=relay.stop_sent,
         db_written=written,
         progress_events=relay.progress,
+        done_status=relay.done_status,
     )
 
 
@@ -1170,12 +1199,15 @@ def _log_turn_summary(
     stop_sent: bool,
     db_written: bool,
     progress_events: int,
+    done_status: str | None,
 ) -> None:
     """每轮一行的结构化摘要：键值对形式，方便 grep。
 
     outcome 用 turn_status 的状态词（completed/failed/aborted）；first_byte_ms
     是从开始到首个内容帧的毫秒数，一个内容帧都没有就是 "-"；
-    progress_events 是这一轮转发给页面的进度帧数。
+    progress_events 是这一轮转发给页面的进度帧数；done_status 是流里
+    done 帧告知页面的结局（即时判断），和 outcome（库里的最终事实）
+    可能不同：失败后与上游对账可能改成 completed，done 帧不回改。
     """
     duration_ms = int((time.monotonic() - started_at) * 1000)
     first_byte_ms = (
@@ -1186,7 +1218,7 @@ def _log_turn_summary(
     logger.info(
         "turn_summary turn_id=%s chat_id=%s account_id=%s outcome=%s "
         "duration_ms=%d first_byte_ms=%s bytes_sent=%d stop_sent=%s "
-        "db_written=%s progress_events=%d",
+        "db_written=%s progress_events=%d done_status=%s",
         turn_id,
         chat_id,
         account_id or "-",
@@ -1197,6 +1229,7 @@ def _log_turn_summary(
         "yes" if stop_sent else "no",
         "yes" if db_written else "no",
         progress_events,
+        done_status or "-",
     )
 
 
@@ -1233,7 +1266,17 @@ async def _sse(relay: _Relay) -> AsyncIterator[str]:
     被忽略；作用是让中间层和页面知道流还活着。哨兵 None 的结束语义和
     取消语义都不变：wait_for 超时会把 queue.get 原样取消重挂，
     asyncio.Queue 的唤醒不直接交接条目，超时不会吞掉已入队的帧。
+
+    收尾先发结局帧再发 [DONE]：relay 带着结局信息（done_status 落定）
+    时，在 yield "data: [DONE]" 之前先 yield event: done 帧；失败/被停
+    的路径没有 [DONE]，哨兵到达时补发 done 帧再结束流。
+
+    **done 帧是即时判断，库是最终事实**（2026-11-05 维护者拍板）：
+    _write_round_end 事后与上游对账，可能把 failed 改成 completed；
+    done 帧不等待那次对账，也不回改。页面的即时语义以 done 帧为准，
+    刷新以后的语义以库（/messages 消息上的标志）为准。
     """
+    done_sent = False
     while True:
         try:
             item = await asyncio.wait_for(relay.queue.get(), _HEARTBEAT_SECONDS)
@@ -1241,14 +1284,32 @@ async def _sse(relay: _Relay) -> AsyncIterator[str]:
             yield ": ping\n\n"
             continue
         if item is None:
+            # 中继落定：失败/被停的路径没有 [DONE]，结局帧在这里补发。
+            if not done_sent and relay.done_status is not None:
+                yield _done_chunk(
+                    relay.turn_id,
+                    relay.done_status,
+                    relay.done_reason,
+                    len(relay.text),
+                )
             break
+        if item == _DONE_FRAME and not done_sent and relay.done_status is not None:
+            yield _done_chunk(
+                relay.turn_id, relay.done_status, relay.done_reason, len(relay.text)
+            )
+            done_sent = True
         yield item
 
 
-async def _empty_sse() -> AsyncIterator[str]:
-    """这一轮被停止了：流直接结束，没有 [DONE]。"""
-    for piece in ():
-        yield piece
+async def _empty_sse(done: str | None = None) -> AsyncIterator[str]:
+    """没有正文可写的流：直接结束，没有 [DONE]。
+
+    「开轮前被停」的路径带着结局帧（status=aborted, reason=stop,
+    bytes_sent=0）：结局随流明说，页面不靠「流怎么断的」反推。
+    重复请求的路径（这一轮已经登记/落定，页面读库对账）维持空流。
+    """
+    if done is not None:
+        yield done
 
 
 def _progress_chunk(event: ProgressEvent) -> str:
@@ -1263,6 +1324,22 @@ def _progress_chunk(event: ProgressEvent) -> str:
         separators=(",", ":"),
     )
     return f"event: progress\ndata: {payload}\n\n"
+
+
+def _done_chunk(turn_id: str, status: str, reason: str | None, bytes_sent: int) -> str:
+    """跟前端钉死的结局帧：event: done + TurnDoneEvent JSON。
+
+    与进度帧同款风格：命名事件、紧凑分隔符、ensure_ascii=False。
+    老前端的解析器把未知命名事件的 data 整帧忽略，加这一帧不破坏
+    旧行为（2026-11-05 维护者拍板：流里引入命名事件）。
+    """
+    event = TurnDoneEvent(
+        turn_id=turn_id,
+        status=status,
+        reason=reason,
+        bytes_sent=bytes_sent,
+    )
+    return f"event: done\ndata: {event.model_dump_json()}\n\n"
 
 
 def _chunk(content: str) -> str:

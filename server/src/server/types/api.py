@@ -103,6 +103,24 @@ class PartialReplyResponse(BaseModel):
     question: str | None = None
 
 
+class TurnDoneEvent(BaseModel):
+    """流里结局帧（event: done 命名事件）的 data 载荷。
+
+    一轮写完/失败/被停的结局随流明说，页面不再靠「流怎么断的」反推。
+    reason 词汇固定：stop（用户按停）、upstream（上游失败）、
+    internal（我们这边出错）；正常写完为 null。
+
+    done 帧是即时判断，库是最终事实：_write_round_end 事后与上游对账
+    可能把 failed 改成 completed，done 帧不等待、也不回改
+    （2026-11-05 维护者拍板）。
+    """
+
+    turn_id: str
+    status: Literal["completed", "aborted", "failed"]
+    reason: Literal["stop", "upstream", "internal"] | None = None
+    bytes_sent: int
+
+
 class StatusResponse(BaseModel):
     database: Literal["ok", "unavailable"]
     reply_store: Literal["ok", "unavailable"]
