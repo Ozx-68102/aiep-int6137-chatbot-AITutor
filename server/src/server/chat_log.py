@@ -89,8 +89,8 @@ def begin_round(session_id: UUID, turn_id: UUID, question: str) -> None:
     _write("begin_round", session_id, action)
 
 
-def finish_round(session_id: UUID, turn_id: UUID, text: str, status: str) -> None:
-    """这一轮落定：写上最后的状态和文字。"""
+def finish_round(session_id: UUID, turn_id: UUID, text: str, status: str) -> bool:
+    """这一轮落定：写上最后的状态和文字。返回写库成没成（摘要行用）。"""
 
     def action(session: Session) -> None:
         for row in _turn_rows(session, session_id, turn_id):
@@ -98,7 +98,7 @@ def finish_round(session_id: UUID, turn_id: UUID, text: str, status: str) -> Non
             if row.role == ROLE_ASSISTANT:
                 row.text = text
 
-    _write("finish_round", session_id, action)
+    return _write("finish_round", session_id, action)
 
 
 def delete_round(session_id: UUID, turn_id: UUID) -> None:
@@ -254,13 +254,18 @@ def _write(
     operation: str,
     session_id: UUID,
     action: Callable[[Session], None],
-) -> None:
-    """写库失败不能把聊天整个弄挂：这份记录只是我们自己留的一份，上游还有。"""
+) -> bool:
+    """写库失败不能把聊天整个弄挂：这份记录只是我们自己留的一份，上游还有。
+
+    返回写没写成，需要知道结果的调用方（日志摘要行）用。
+    """
     try:
         with db_session() as session:
             action(session)
+        return True
     except SQLAlchemyError:
         logger.warning("会话记录写不进去 %s %s", operation, session_id, exc_info=True)
+        return False
 
 
 def _has_rows(session: Session, session_id: UUID) -> bool:

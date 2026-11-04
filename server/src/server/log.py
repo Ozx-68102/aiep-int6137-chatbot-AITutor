@@ -1,3 +1,4 @@
+import contextvars
 import logging
 import traceback
 from datetime import datetime
@@ -5,11 +6,28 @@ from pathlib import Path
 
 from uvicorn.logging import DefaultFormatter
 
-_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+_FORMAT = "%(asctime)s %(levelname)s %(name)s [turn %(turn_id)s] %(message)s"
 _STREAM_FORMAT = "%(levelprefix)s %(message)s"
 _LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "server.log"
 _MAX_BYTES = 5 * 1024 * 1024
 _FILE_HANDLER: logging.FileHandler | None = None
+
+# 当前在处理哪一轮：对话和停止端点的入口处设置。asyncio 建后台任务时会
+# 拷贝上下文，收尾任务的日志行自动带上；请求上下文之外的行输出 "-"。
+_TURN_ID: contextvars.ContextVar[str] = contextvars.ContextVar("turn_id", default="")
+
+
+def set_turn_context(turn_id: str) -> None:
+    """标记这个请求上下文里接下来的日志属于哪一轮。"""
+    _TURN_ID.set(turn_id)
+
+
+class _TurnFilter(logging.Filter):
+    """把上下文里的轮次编号注进每条日志，供 _FORMAT 的 %(turn_id)s 用。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.turn_id = _TURN_ID.get() or "-"
+        return True
 
 
 class _SizeLogFile(logging.FileHandler):
@@ -70,6 +88,7 @@ def _file_handler() -> logging.FileHandler:
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     handler = _SizeLogFile(_LOG_PATH, _MAX_BYTES)
     handler.setFormatter(logging.Formatter(_FORMAT))
+    handler.addFilter(_TurnFilter())
     _FILE_HANDLER = handler
     return handler
 
@@ -77,6 +96,7 @@ def _file_handler() -> logging.FileHandler:
 def _stream_handler() -> logging.StreamHandler:
     handler = logging.StreamHandler()
     handler.setFormatter(DefaultFormatter(fmt=_STREAM_FORMAT))
+    handler.addFilter(_TurnFilter())
     return handler
 
 

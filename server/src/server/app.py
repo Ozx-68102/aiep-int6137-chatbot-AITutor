@@ -33,6 +33,7 @@ from server import avatar as avatar_image
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
 from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
+from server.log import set_turn_context
 from server.passwords import (
     check_password_policy,
     generate_password,
@@ -152,6 +153,14 @@ class _Relay:
         self.text = ""
         # 这一轮最后的状态：写完了、被停了、还是失败了。
         self.status = chat_log.COMPLETED
+        # 摘要行用的最小计时：开始时刻、首个内容帧时刻（monotonic 秒）。
+        self.started_at = time.monotonic()
+        self.first_content_at: float | None = None
+        # 有没有给上游发过停止：用户按停止（停止端点会先叫停上游），
+        # 或者失败以后由我们叫停。
+        self.stop_sent = False
+        # 账号 id：对话端点鉴权之后填上，摘要行拿得到就带。
+        self.account_id: str | None = None
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -625,6 +634,8 @@ async def abort_session_reply(
     if turn_id == "":
         # 页面没带编号就用当前这一轮的编号。
         turn_id = current_turn_id(session_id)
+    # 停止这一侧的日志行也带上轮次编号，跟对话那一侧的日志对得上。
+    set_turn_context(turn_id)
     request_stop(session_id, turn_id)
 
     task = _running.get(session_id)
@@ -897,21 +908,26 @@ async def chat(
     body: ChatRequest,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
+    started = time.monotonic()
+    turn_id = str(body.turn_id)
+    # 从这里起这一轮的日志行都带着轮次编号：asyncio 建任务会拷贝上下文，
+    # 中继和写库收尾那些后台任务自动继承。
+    set_turn_context(turn_id)
     # INFO 只留元数据；完整请求体降到 DEBUG（debug 开关打开才写，
     # 见 settings.py）。请求体里没有登录 cookie。
     logger.info(
         "对话请求 chat_id=%s turn_id=%s retry_of=%s message_len=%d",
         body.chat_id,
-        body.turn_id,
+        turn_id,
         body.retry_of,
         len(body.message),
     )
     logger.debug("对话请求全文 %s", body.model_dump_json(by_alias=True))
     fastgpt = _fastgpt()
 
-    await asyncio.to_thread(_authorize_session, body.chat_id, login_cookie)
-
-    turn_id = str(body.turn_id)
+    account_id = await asyncio.to_thread(
+        _authorize_session, body.chat_id, login_cookie
+    )
 
     # 同一个请求又来了（重复点击、页面重发）：这一轮已经登记过了，
     # 不能再开一轮，不然上游会生成两遍。
@@ -931,10 +947,21 @@ async def chat(
         # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」。
         begin_reply(body.chat_id, turn_id, body.message)
         mark_aborted(body.chat_id)
-        await asyncio.to_thread(
+        written = await asyncio.to_thread(
             _record_stopped_round, body.chat_id, body.turn_id, body.message
         )
         logger.info("这一轮发出之前就被停止 %s", body.chat_id)
+        _log_turn_summary(
+            turn_id=turn_id,
+            chat_id=body.chat_id,
+            account_id=account_id,
+            outcome=chat_log.ABORTED,
+            started_at=started,
+            first_content_at=None,
+            bytes_sent=0,
+            stop_sent=False,
+            db_written=written,
+        )
         return StreamingResponse(_empty_sse(), media_type="text/event-stream")
 
     # 之前叫停上游的那一下要落地：停止标记晚到的话，
@@ -948,6 +975,7 @@ async def chat(
     # 先登记这一轮，页面断流之后才知道请求有没有落地。
     begin_reply(body.chat_id, turn_id, body.message)
     relay = _Relay()
+    relay.account_id = account_id
     task = asyncio.create_task(
         _relay(body.chat_id, body.message, turn_id, relay, fastgpt)
     )
@@ -971,6 +999,8 @@ async def _relay(
     try:
         async for event in fastgpt.events(chat_id, message, turn_id):
             if isinstance(event, str):
+                if relay.first_content_at is None:
+                    relay.first_content_at = time.monotonic()
                 append_chunk(chat_id, event)
                 relay.text += event
                 outgoing = _chunk(event)
@@ -991,6 +1021,8 @@ async def _relay(
         # 页面轮询 /partial 时就能看到 aborted。
         logger.info("这一轮被停止 %s", chat_id)
         relay.status = chat_log.ABORTED
+        # 停止端点在掐这个任务之前已经叫停了上游，摘要行照实记。
+        relay.stop_sent = True
         mark_aborted(chat_id)
         raise
     except FastGPTError:
@@ -1013,15 +1045,19 @@ async def _relay(
         # 放在结束流以后叫：页面不用等这一下。
         # 这一下要等它落地：那时候上游可能正卡着，请求过去得慢一些。
         if relay.failed:
+            relay.stop_sent = True
             _ask_upstream_to_stop(chat_id, wait=True)
         # 这一轮落定以后写进我们自己的表。
         _settle_round(chat_id, turn_id, relay, fastgpt)
 
 
-def _record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> None:
-    """这一轮在开始之前就被按了停止：提问记下来，状态是 aborted。"""
+def _record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> bool:
+    """这一轮在开始之前就被按了停止：提问记下来，状态是 aborted。
+
+    返回写库成没成，摘要行用。
+    """
     chat_log.begin_round(session_id, turn_id, question)
-    chat_log.finish_round(session_id, turn_id, "", chat_log.ABORTED)
+    return chat_log.finish_round(session_id, turn_id, "", chat_log.ABORTED)
 
 
 def _settle_round(
@@ -1037,7 +1073,7 @@ def _settle_round(
     """
     status = chat_log.FAILED if relay.failed else relay.status
     task = asyncio.create_task(
-        _write_round_end(chat_id, turn_id, relay.text, status, fastgpt)
+        _write_round_end(chat_id, turn_id, relay, status, fastgpt)
     )
     _settle_tasks.add(task)
     task.add_done_callback(_settle_tasks.discard)
@@ -1046,10 +1082,11 @@ def _settle_round(
 async def _write_round_end(
     chat_id: UUID,
     turn_id: str,
-    text: str,
+    relay: _Relay,
     status: str,
     fastgpt: FastGPT,
 ) -> None:
+    text = relay.text
     if status == chat_log.FAILED:
         # 失败以后上游可能已经把答案写完了（我们的 [DONE] 丢了）。
         # 叫停已经发出去了，等它落地，再按编号核对一次上游。
@@ -1060,7 +1097,60 @@ async def _write_round_end(
             # 断的是我们的 [DONE]。用上游那份，状态改成写完了。
             text = answer
             status = chat_log.COMPLETED
-    await asyncio.to_thread(chat_log.finish_round, chat_id, UUID(turn_id), text, status)
+    written = await asyncio.to_thread(
+        chat_log.finish_round, chat_id, UUID(turn_id), text, status
+    )
+    # 这一轮到此落定：打一行结构化摘要。只在这里打一次——上面的对账
+    # 也在这个函数里，不会在重试或对账路径上重复打。
+    _log_turn_summary(
+        turn_id=turn_id,
+        chat_id=chat_id,
+        account_id=relay.account_id,
+        outcome=status,
+        started_at=relay.started_at,
+        first_content_at=relay.first_content_at,
+        bytes_sent=len(relay.text),
+        stop_sent=relay.stop_sent,
+        db_written=written,
+    )
+
+
+def _log_turn_summary(
+    *,
+    turn_id: str,
+    chat_id: UUID,
+    account_id: str | None,
+    outcome: str,
+    started_at: float,
+    first_content_at: float | None,
+    bytes_sent: int,
+    stop_sent: bool,
+    db_written: bool,
+) -> None:
+    """每轮一行的结构化摘要：键值对形式，方便 grep。
+
+    outcome 用 chat_log 的状态词（completed/failed/aborted）；first_byte_ms
+    是从开始到首个内容帧的毫秒数，一个内容帧都没有就是 "-"。
+    """
+    duration_ms = int((time.monotonic() - started_at) * 1000)
+    first_byte_ms = (
+        "-"
+        if first_content_at is None
+        else str(int((first_content_at - started_at) * 1000))
+    )
+    logger.info(
+        "turn_summary turn_id=%s chat_id=%s account_id=%s outcome=%s "
+        "duration_ms=%d first_byte_ms=%s bytes_sent=%d stop_sent=%s db_written=%s",
+        turn_id,
+        chat_id,
+        account_id or "-",
+        outcome,
+        duration_ms,
+        first_byte_ms,
+        bytes_sent,
+        "yes" if stop_sent else "no",
+        "yes" if db_written else "no",
+    )
 
 
 async def _upstream_answer(
@@ -1204,15 +1294,17 @@ def _require_session(
     return found
 
 
-def _authorize_session(session_id: UUID, login_cookie: str | None) -> None:
-    """确认这场会话是这个账号的。
+def _authorize_session(session_id: UUID, login_cookie: str | None) -> str:
+    """确认这场会话是这个账号的，顺手把账号 id 带出来。
 
     数据库是同步的，接口是异步的：这一步要放到线程里跑，
     别把事件循环卡住（卡住的时候，正在流式输出的那一轮也发不出去）。
+    账号 id 只有日志摘要行用；不需要它的调用方忽略返回值就行。
     """
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
         _require_session(session, account, session_id)
+        return str(account.id)
 
 
 def _delete_session_row(session_id: UUID, login_cookie: str | None) -> None:
