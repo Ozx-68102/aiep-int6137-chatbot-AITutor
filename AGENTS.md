@@ -25,19 +25,26 @@
 ## 守则
 
 - 信息不足先问：需求、接口、字段、配置不清楚时停下来问并说明理解，不猜、不臆造
-- **不推送**；提交自己做（维护者给了常驻许可），发现问题了再补一个提交，不改写已推送的历史。改写历史、强推、删文件等破坏性操作一律先要许可。推送只能维护者做：上游推送后禁止删除和改写提交树，模型推上去的东西一旦有问题就再也改不了
-- 不擅自加依赖、换包管理器、改目录结构，如有需要直接提出来，不要静默绕过这些问题。依赖优先于手搓：成熟三方库能做的事，就点名那个库、让维护者装，不要因为自己装不了依赖就宁应手写一份实现凑合——装不装由维护者定，该说的必须说。依赖目前只能由维护者装：agent 沙箱里 pnpm 会把 store 切到 `node_modules/.pnpm-store`，维护者终端里用的是 `~/Library/pnpm/store`，两边对不上，pnpm 报 ERR_PNPM_UNEXPECTED_STORE。沙箱里装一次，维护者下一次 `pnpm add` 就撞上这个错。store 目录固定下来之后这条可以放开，细节见 [docs/FINDINGS.md](docs/FINDINGS.md) 里 2026-10-31 那条
+- **不推送**。推送只能维护者做：上游推送后禁止删除和改写提交树，模型推上去的东西一旦有问题就再也改不了。提交自己做（维护者给了常驻许可），具体规矩见「Git」一节
+- 不擅自加依赖、换包管理器、改目录结构，如有需要直接提出来，不要静默绕过这些问题
+- 依赖优先于手搓：成熟三方库能做的事，就点名那个库、让维护者装，不要因为自己装不了依赖就宁应手写一份实现凑合——装不装由维护者定，该说的必须说
+- 依赖目前只能由维护者装：agent 沙箱里 pnpm 会把 store 切到 `node_modules/.pnpm-store`，维护者终端里用的是 `~/Library/pnpm/store`，两边对不上，pnpm 报 ERR_PNPM_UNEXPECTED_STORE。沙箱里装一次，维护者下一次 `pnpm add` 就撞上这个错。store 目录固定下来之后这条可以放开，细节见 [docs/FINDINGS.md](docs/FINDINGS.md) 里 2026-10-31 那条
 - 聊天页面在 `src/`，接口服务在 `server/`。浏览器只访问本仓库的接口，不直连 FastGPT。FastGPT 的工作流和知识库不在本仓库改，那边的事找 FastGPT 的维护者。我们这个 FastGPT 是内部部署的 **v4.14.5** 基线，接口以官方源码为准，不要照文档站抄（见 [server/AGENTS.md](server/AGENTS.md) 的「FastGPT 的版本基线」）
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts` 里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上 `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
 - 用户名和语言另外记在 localStorage 的 `h2bot-profile` 里（`src/session/profile-cache.ts`）：接口服务连不上的时候靠它撑住「我是谁、我用哪种语言」，退出登录要清掉。别当成冗余删了
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
-- 界面一律用 daisyUI 5 的组件类（btn、input、card、alert、chat、table、menu、avatar、loading 等），不再手写「描边 + 圆角 + hover 变色」这类 utility 组合。颜色优先用语义类（btn-primary、text-error、bg-base-200），它们在 `aiep` 主题下与 stone/emerald 色板同值。类名的权威参考是 `node_modules/daisyui/components/*.css`（按钮在 button.css，不在 btn.css），别凭记忆猜。聊天气泡是 `.chat` 包装 + `.chat-bubble` 双层结构（`src/components/chat/message-class.ts`），气泡下方的按钮要包 `.chat-footer`，否则会被 grid 定位挤歪
+- 界面一律用 daisyUI 5 的组件类（btn、input、card、alert、chat、table、menu、avatar、loading 等），不再手写「描边 + 圆角 + hover 变色」这类 utility 组合。颜色优先用语义类（btn-primary、text-error、bg-base-200），它们在 `aiep` 主题下与 stone/emerald 色板同值。类名的权威参考是 `node_modules/daisyui/components/*.css`（按钮在 button.css，不在 btn.css），别凭记忆猜
+- 聊天气泡是 `.chat` 包装 + `.chat-bubble` 双层结构（`src/components/chat/message-class.ts`），气泡下方的按钮要包 `.chat-footer`，否则会被 grid 定位挤歪
 - 提示面（警示框、行内表单错误、Toast、气泡脚注）背景一律 `bg-base-100` 白底、文字一律 `base-content` 黑字，语义色只出现在图标上（红 `text-error`、琥珀 `text-warning`、绿 `text-success`）；不要用 `alert-error` / `alert-warning` / `alert-success` 的整块语义色背景（2026-11-04 维护者拍板，规则正文在 [docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)）
 - `src/components/shell/Modal.tsx` 面板上的 `opacity-100 scale-100` 两个类是在反制 `.modal-box` 的默认隐藏态：daisyUI 靠 `.modal-open` 父级解锁可见，而本项目用的是自建 portal 外壳、没有那个父级。删掉这两个类，所有弹窗会直接隐形
 - 会话行和语言菜单的浮层保持 createPortal 结构，不要换成 daisyUI 的 dropdown：dropdown 依赖行内定位，会被行上动画的 transform 层叠上下文困住（原理见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-10-31 那条）
 - CSS 注释里不要出现 `col-*/offset-*` 这种带 `*/` 的写法：注释会提前终止，后面的 `@plugin` 块被静默丢弃——构建照常成功，只有一条 `Unexpected token` 警告，产物却少了整个插件（2026-11-03 踩过）
 - 格式交给工具：写完跑对应的 fmt 命令，不要手动跟格式较劲
-- 文档和对话都用平常话，不用自造词和行话
+
+## 说话和写文档
+
+- 文档和对话都用人类的自然语言，不用自造词和行话。指代一个概念时，用仓库里已有的叫法，或者拿平常话直接解释，不要发明新词
+- 文档里的编号和日期标记（FINDINGS 按日期索引的条目、UI_WARNINGS 的第几条规则这类）是给 AI 助手定位原文用的，不是对话用语。跟我说话时不要甩个编号让我自己回去翻条目，把那条内容用自然语言讲出来；要给出处，编号附在话后面
 - 说话用陈述语气，少用问句：全程平等探讨，可以列出下一步能做的事，但不要在结尾用「要不要…」「需要吗…」这种问句逼我拍板，也不要把选项包装成二选一或多选一，更不要推销
 
 ## 验收
@@ -50,7 +57,7 @@
 
 ## Git
 
-- 一次逻辑改动一个提交；改完自己提交，不用等许可；不改写已推送的历史，不强推
+- 一次逻辑改动一个提交；改完自己提交，不用等许可。发现问题了再补一个提交，不改写已推送的历史，不强推；改写历史、删文件这类破坏性操作一律先要许可
 - 远端开着禁止删除和禁止强推，别去关它。要改已经推送的内容，用新提交、`git revert` 或 `git commit-tree`；推送之后不要强推，要解除这两条规则先问维护者
 - 提交说明用英文写成 `feat: add session pinning` 这种样子：类型、冒号、一句话；类型后面不要加括号（`feat(server): ...` 会被钩子拒绝）
 - 类型按语义选：用户能感知到的界面或能力变化（含视觉改版）用 feat；纯代码排版用 style；行为不变的重构用 refactor；依赖增删用 chore
@@ -68,7 +75,7 @@
 
 **前端（仓库根目录）**
 
-- `pnpm install` — 装依赖；只用 pnpm。装依赖由维护者执行，原因见上面「不擅自加依赖」那条
+- `pnpm install` — 装依赖；只用 pnpm。装依赖由维护者执行，原因见上面「守则」里「依赖目前只能由维护者装」那条
 - `pnpm run dev:frontend` — 起页面
 - `pnpm run dev:backend` — 起接口服务（127.0.0.1:3001）
 - `pnpm lint` — oxlint，含类型相关规则
