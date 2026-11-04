@@ -139,6 +139,8 @@ _NO_AVATAR = "没有头像"
 # 两份一样的图迟早会走偏。
 _DEFAULT_AVATAR_URL = "/avatar-default.svg"
 _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
+# /partial 只回答「还在写吗」：其余一切情况的 404 都是这句话。
+_PARTIAL_NOT_STREAMING = "这一轮已经不在写了"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
 _OLD_PASSWORD_WRONG = "旧密码不正确"
 _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
@@ -706,13 +708,24 @@ def read_session_partial(
     session_id: UUID,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> PartialReplyResponse:
+    """「还在写吗」——只回答这一个问题。
+
+    Redis 里这场会话的状态是 streaming 才回 200（半截文字、轮次编号、
+    提问）；其余一切情况（写完了/失败/被停/键不存在）一律 404，页面去
+    读库。结局语义不再由这个接口承担：即时结局随流的 done 帧走，永久
+    结局在库的 message.status 上（docs/CHAT_STREAM_KNOWN_ISSUES.md
+    第 3 条，2026-11-05 维护者拍板）。Redis 读不通照旧抛错（500）：
+    那是「问不到服务器」，不是「没在写」，客户端靠状态码区分这两种。
+    """
     with db_session() as session:
         account = _account_from_cookie(session, login_cookie)
         _require_session(session, account, session_id)
 
     partial = read_partial(session_id)
+    if partial.status != STREAMING:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _PARTIAL_NOT_STREAMING)
     return PartialReplyResponse(
-        status=partial.status,
+        status=STREAMING,
         text=partial.text,
         turn_id=partial.turn_id,
         question=partial.question,

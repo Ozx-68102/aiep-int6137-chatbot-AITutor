@@ -97,7 +97,16 @@ class ProfileUpdate(BaseModel):
 
 
 class PartialReplyResponse(BaseModel):
-    status: str | None
+    """"还在写吗"——只回答这一个问题。
+
+    这场会话的轮次还在写时才返回（200，status 恒为 streaming）；其余
+    一切情况（写完了/失败/被停/键不存在）都是 404（见
+    app.read_session_partial）。结局语义（finished/failed/aborted）不再
+    由这个接口承担：即时结局随流的 done 帧走，永久结局在库的
+    message.status 上。
+    """
+
+    status: Literal["streaming"]
     text: str
     turn_id: str | None = None
     question: str | None = None
