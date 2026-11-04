@@ -208,6 +208,49 @@ class FastGPT:
                 return True
         return False
 
+    async def update_feedback(
+        self,
+        chat_id: UUID,
+        data_id: str,
+        feedback: Literal["good", "bad"] | None,
+    ) -> None:
+        """给一条回答设置或清掉好差评（消息操作第四期）。
+
+        上游语义（docs/FASTGPT_API.md「点赞与点踩」）：字段出现就设、
+        没出现就删——点赞只带 userGoodFeedback，点踩只带
+        userBadFeedback，清掉两个都不带。dataId 是我们的轮次编号
+        （responseChatItemId 跟着回答进了上游历史）。响应壳 code==200
+        才算成功，其余一律抛 FastGPTError。
+        """
+        payload: dict[str, object] = {
+            "appId": self._app_id,
+            "chatId": str(chat_id),
+            "dataId": data_id,
+        }
+        if feedback == "good":
+            payload["userGoodFeedback"] = ""
+        elif feedback == "bad":
+            payload["userBadFeedback"] = ""
+        # INFO 只记元数据；反馈载荷本身是空串，没有正文可漏。
+        logger.info(
+            "FastGPT 反馈 chat_id=%s data_id=%s feedback=%s",
+            chat_id,
+            data_id,
+            feedback,
+        )
+        try:
+            response = await self._client.post(
+                join_url(self._base_url, "core/chat/feedback/updateUserFeedback"),
+                json=payload,
+            )
+        except httpx2.HTTPError as exc:
+            logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
+            raise FastGPTError from None
+        if response.status_code != 200:
+            logger.error("FastGPT 反馈返回 %s", response.status_code)
+            raise FastGPTError
+        _read_body(response)
+
     async def delete_item(self, chat_id: UUID, content_id: str) -> bool:
         """删掉这场会话里的某一条记录（软删）。
 

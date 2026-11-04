@@ -175,3 +175,25 @@ class AbortRequest(BaseModel):
         if isinstance(value, str) and value.strip() == "":
             return None
         return value
+
+
+class FeedbackUpdate(BaseModel):
+    """点赞/点踩（docs/MESSAGE_ACTIONS.md 第四期）。
+
+    turn_id 是我们的轮次编号，也就是上游那条回答记录的 dataId；
+    feedback：good=点赞、bad=点踩、null=清掉之前的反馈。页面没有
+    轮次编号时传空串，这里当成没有（端点回 404）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    turn_id: UUID | None = Field(default=None, alias="turnId")
+    feedback: Literal["good", "bad"] | None = None
+
+    @field_validator("turn_id", mode="before")
+    @classmethod
+    def _empty_turn_id(cls, value: object) -> object:
+        # 页面没有这一轮编号时传空串，这里当成没有。
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value

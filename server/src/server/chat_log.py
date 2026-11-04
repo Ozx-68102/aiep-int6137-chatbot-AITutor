@@ -185,6 +185,27 @@ def read_question(session_id: UUID, turn_id: UUID) -> str | None:
         return None
 
 
+def has_turn(session_id: UUID, turn_id: UUID) -> bool:
+    """这场会话的表里有没有这一轮（点赞点踩端点用）。
+
+    读库失败按没有处理：宁可回 404，也不把一个查不到的轮次放去上游。
+    """
+    try:
+        with db_session() as session:
+            found = session.scalar(
+                select(ChatMessage.id)
+                .where(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.turn_id == turn_id,
+                )
+                .limit(1)
+            )
+            return found is not None
+    except SQLAlchemyError:
+        logger.warning("会话记录读不出来 %s %s", session_id, turn_id, exc_info=True)
+        return False
+
+
 def backfill(session_id: UUID, rounds: list[StoredRound]) -> None:
     """把上游那一份抄一份过来。
 

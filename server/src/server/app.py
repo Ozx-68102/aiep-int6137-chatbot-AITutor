@@ -75,6 +75,7 @@ from server.types import (
     AdminPasswordResetRequest,
     AdminPasswordResetResponse,
     ChatRequest,
+    FeedbackUpdate,
     HistoryMessageResponse,
     HistoryResponse,
     LoginRequest,
@@ -142,6 +143,9 @@ _ROUND_BUSY = "这一场会话还有一轮在写，等它答完再发"
 # /partial 只回答「还在写吗」：其余一切情况的 404 都是这句话。
 _PARTIAL_NOT_STREAMING = "这一轮已经不在写了"
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
+# 点赞点踩（第四期）：轮次找不到、上游没收到，各一句。detail 一律字符串。
+_FEEDBACK_TURN_MISSING = "找不到这一轮，没法记反馈"
+_FEEDBACK_UPSTREAM_ERROR = "反馈没送到，稍后再试"
 _OLD_PASSWORD_WRONG = "旧密码不正确"
 _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
 # 控制台重置密码时报的「没有这个人」。
@@ -750,6 +754,37 @@ async def read_session_messages(
 
     messages = _merge_current_turn(stored, read_partial(session_id))
     return HistoryResponse(total=len(messages), messages=messages)
+
+
+@app.post(
+    "/api/sessions/{session_id}/feedback", status_code=status.HTTP_204_NO_CONTENT
+)
+async def update_feedback(
+    session_id: UUID,
+    body: FeedbackUpdate,
+    login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> Response:
+    """把一轮的点赞/点踩送到上游（docs/MESSAGE_ACTIONS.md 第四期）。
+
+    反馈不存在我们库里：上游按 dataId（就是我们的轮次编号）记在那条
+    回答上。没有轮次编号、或者这场会话的表里没有这一轮，都是 404——
+    映射不到上游的 dataId，发过去也是打空。上游没收到是 502。
+    """
+    fastgpt = _fastgpt()
+    await asyncio.to_thread(_authorize_session, session_id, login_cookie)
+    if body.turn_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _FEEDBACK_TURN_MISSING)
+    has_turn = await asyncio.to_thread(chat_log.has_turn, session_id, body.turn_id)
+    if not has_turn:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _FEEDBACK_TURN_MISSING)
+    try:
+        await fastgpt.update_feedback(session_id, str(body.turn_id), body.feedback)
+    except FastGPTError:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            _FEEDBACK_UPSTREAM_ERROR,
+        ) from None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 async def _backfill_session(session_id: UUID) -> list[chat_log.StoredMessage]:
