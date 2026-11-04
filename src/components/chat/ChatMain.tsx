@@ -24,6 +24,7 @@ export function ChatMain({
   enteringIds,
   onAnimationEnd,
   pending,
+  progressText,
   draft,
   inputLocked,
   sendLocked,
@@ -41,6 +42,7 @@ export function ChatMain({
   enteringIds: Set<string>;
   onAnimationEnd: (id: string) => void;
   pending: boolean;
+  progressText: string | undefined;
   draft: string;
   inputLocked: boolean;
   sendLocked: boolean;
@@ -169,6 +171,7 @@ export function ChatMain({
                         key={message.id}
                         entering={entering}
                         label={text.thinking}
+                        progress={progressText}
                         onAnimationEnd={() => onAnimationEnd(message.id)}
                       />
                     );

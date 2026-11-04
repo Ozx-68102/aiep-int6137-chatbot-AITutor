@@ -160,6 +160,8 @@ function ChatApp() {
   const serviceNotice = serviceNoticeText(service.serviceState, text);
   const active = sessions.find((session) => session.id === activeId);
   const activePending = active ? engine.pendingIds.has(active.id) : false;
+  // 当前会话最新的进度节点名（没有进度时 undefined）：等待气泡里显示。
+  const progressText = active ? engine.progressBySession[active.id] : undefined;
   const inputLocked = sendingNew || activePending;
   const historyLocked = engine.historyLoadingId === active?.id && active.messages.length === 0;
   // 会话级的提示都在输入区分隔线上方的警示框里（聊天滚动区与输入区之间的流内节点），只有一种样子。
@@ -690,6 +692,7 @@ function ChatApp() {
           });
         }}
         pending={activePending}
+        progressText={progressText}
         draft={draft}
         inputLocked={inputLocked}
         sendLocked={inputLocked || historyLocked}
