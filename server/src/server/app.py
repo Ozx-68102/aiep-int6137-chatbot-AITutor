@@ -1184,15 +1184,25 @@ async def _write_round_end(
     status: str,
     fastgpt: FastGPT,
 ) -> None:
+    """这一轮落定以后写进我们自己的表。
+
+    分工（2026-11-05 维护者拍板）：页面的即时语义由流里的 done 帧负责
+    ——done 帧是即时判断，在这个函数跑起来之前就已经发出去了，不等待
+    也不回改。下面「失败后与上游对账」的逻辑保留，但降级为归档核对：
+    只修库里的存档文本和状态（页面刷新以后走 /messages 看到的语义），
+    不再影响任何页面即时语义。
+    """
     text = relay.text
     if status == FAILED:
-        # 失败以后上游可能已经把答案写完了（我们的 [DONE] 丢了）。
-        # 叫停已经发出去了，等它落地，再按编号核对一次上游。
+        # 归档核对：失败以后上游可能已经把答案写完了（我们的 [DONE]
+        # 丢了）。叫停已经发出去了，等它落地，再按编号核对一次上游。
+        # 核对的结果只进库，不进页面。
         await _wait_for_stop(chat_id)
         answer = await _upstream_answer(chat_id, turn_id, fastgpt)
         if answer is not None and answer.startswith(text):
             # 上游那份从我们收到的那段接着往下写：这一轮其实写完了，
-            # 断的是我们的 [DONE]。用上游那份，状态改成写完了。
+            # 断的是我们的 [DONE]。存档用上游那份，库里状态改成写完了
+            # （done 帧已经说过的 failed 不回改）。
             text = answer
             status = COMPLETED
     written = await asyncio.to_thread(
