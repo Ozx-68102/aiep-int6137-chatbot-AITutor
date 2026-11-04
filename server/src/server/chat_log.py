@@ -42,6 +42,8 @@ class StoredMessage:
     role: Literal["user", "assistant"]
     text: str
     status: str
+    # 会话里的先后序号：排查工具（server.turn_dump）对齐行用。
+    seq: int
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,7 @@ def read_messages(session_id: UUID) -> list[StoredMessage]:
                     role=ROLE_USER if row.role == ROLE_USER else ROLE_ASSISTANT,
                     text=row.text,
                     status=row.status,
+                    seq=row.seq,
                 )
                 for row in rows
             ]
