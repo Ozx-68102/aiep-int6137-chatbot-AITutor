@@ -12,13 +12,16 @@ const intervalMs = 500;
  * 是终止条件，走 onEnd。401 必须当终止条件：轮着问只会每 500 毫秒
  * 空转一次，输入框一直锁着。网络错继续下一拍：问不到服务器不等于没在写。
  *
+ * onEnd 带上触发终止的那个 ApiError（404/401 都有）：调用方要分开处理
+ * 「这一轮没在写了」（对账数据库）和「会话过期」（统一的 401 出口）。
+ *
  * 页面切到后台（document.hidden）时不发请求，光等；回到前台立刻补查一次，
  * 不等下一拍。500 毫秒的节奏和终止语义都不变。
  */
 export function startPartialPolling(
   sessionId: string,
   onPartial: (partial: PartialReply) => void,
-  onEnd?: () => void,
+  onEnd?: (error?: ApiError) => void,
 ): () => void {
   let stopped = false;
   // waitTick 挂着的唤醒钩子：页面回到可见时把等待提前结束，好立刻补查。
@@ -58,7 +61,7 @@ export function startPartialPolling(
         partial = await readPartial(sessionId);
       } catch (error) {
         if (error instanceof ApiError && (error.status === 404 || error.status === 401)) {
-          onEnd?.();
+          onEnd?.(error);
           return;
         }
         continue;

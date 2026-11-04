@@ -24,7 +24,8 @@ type TurnEngineDeps = {
   markEntering: (id: string) => void;
   setNotice: (notice: string | null) => void;
   setDraft: (draft: string) => void;
-  onEnterLogin: (detail: string | null) => void;
+  /** 会话类 401 的统一出口：ApiError 透传给 App 层（带 reason 走原地态，不带回退整页登录）。 */
+  onAuthError: (error: ApiError) => void;
   onConnectionWarning: () => void;
 };
 
@@ -103,7 +104,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
           return;
         }
         if (error instanceof ApiError && error.status === 401) {
-          depsRef.current.onEnterLogin(error.detail);
+          depsRef.current.onAuthError(error);
           return;
         }
         if (connectionFailure(error)) {
@@ -409,13 +410,17 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         // 200 ⇒ 服务器说还在写（接口只回答「还在写吗」）：补半截文字即可。
         applyPartialText(sessionId, turnId, partial, fallbackKey);
       },
-      () => {
+      (error?: ApiError) => {
         // 404（服务器明确说没在写，或会话没了）或 401（会话过期）：轮询
-        // 到此为止，去库里对账——结局标志（failed/aborted）在消息上，
-        // 脚注照标志渲染；输入框解锁。过期的事不用在这里说：下一个动作
-        // （发送、重命名……）自然会带着去重新登录。
+        // 到此为止，输入框解锁。404 去库里对账——结局标志（failed/aborted）
+        // 在消息上，脚注照标志渲染；401 交给 App 层的统一出口（带 reason
+        // 进原地的会话失效态，不带的回退整页登录路径）。
         stopPolling(sessionId);
         clearPending(sessionId);
+        if (error !== undefined && error.status === 401) {
+          depsRef.current.onAuthError(error);
+          return;
+        }
         void refreshThread(sessionId);
       },
     );
@@ -534,7 +539,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         // 发送时被踢：发送前草稿已经清了，这句提问存起来，
         // 登录后放回输入框。
         saveUnsent(question);
-        depsRef.current.onEnterLogin(error.detail);
+        depsRef.current.onAuthError(error);
         return;
       }
       if (connectionFailure(error)) {
