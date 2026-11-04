@@ -49,6 +49,7 @@ select = [
     "B",   # flake8-bugbear
     "TID", # flake8-tidy-imports (TID251)
     "RET",  # flake8-return
+    "ASYNC", # flake8-async
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
