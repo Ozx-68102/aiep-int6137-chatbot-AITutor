@@ -1,4 +1,4 @@
-import {CircleStop, PanelLeftOpen, Send} from 'lucide-react';
+import {ArrowDown, CircleStop, PanelLeftOpen, Send} from 'lucide-react';
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
@@ -50,6 +50,29 @@ export function ChatMain({
   onEditResend: (turnId: string, text: string) => void;
 }) {
   const text = translations[locale];
+  // 滚动跟随：距底 48px 以内算贴底。贴底时内容变化自动滚到底；用户往上滚
+  // 就停止跟随，露出悬浮的「回到底部」圆钮。切换会话时 App.tsx 用 key 把
+  // 本组件整个重挂载，贴底状态自然复位。
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true);
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (el === null) {
+      return;
+    }
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight <= 48);
+  }
+
+  function scrollToBottom() {
+    const el = scrollRef.current;
+    if (el === null) {
+      return;
+    }
+    // 一步滚到底，不用平滑滚动：平滑滚动的中间状态会把贴底判定又打回去。
+    el.scrollTop = el.scrollHeight;
+    setAtBottom(true);
+  }
   // 输入框自动长高：随内容增高，CSS 的 max-h-40 封顶后内部滚动。做成对
   // draft 的 effect：草稿被程序性清空/恢复（切会话、被踢后回填）时高度也同步。
   const formRef = useRef<HTMLFormElement>(null);
@@ -76,6 +99,17 @@ export function ChatMain({
     el.style.height = `${el.scrollHeight}px`;
   }, [editing?.text]);
   const chatMessages = active?.messages ?? [];
+  // 贴底时跟着内容变化贴住底部：流式输出、新消息、编辑框长高都算。
+  useEffect(() => {
+    if (!atBottom) {
+      return;
+    }
+    const el = scrollRef.current;
+    if (el === null) {
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+  }, [atBottom, chatMessages, editing?.text]);
   let lastUserMessageId: string | null = null;
   for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
     if (chatMessages[index].role === 'user') {
@@ -109,31 +143,63 @@ export function ChatMain({
           {active ? sessionTitle(active, text.newChat) : text.newChat}
         </h1>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-4" aria-live="polite" aria-busy={pending}>
-        {active && active.messages.length > 0
-          ? active.messages.map((message) => {
-              const entering = enteringIds.includes(message.id);
-              const textShown = visibleText(message.role, message.text);
-              if (textShown === '') {
-                if (waitingForText(message)) {
-                  return (
-                    <ThinkingBubble
-                      key={message.id}
-                      entering={entering}
-                      label={text.thinking}
-                      onAnimationEnd={() => onAnimationEnd(message.id)}
-                    />
-                  );
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          className="h-full overflow-auto p-4"
+          onScroll={handleScroll}
+          aria-live="polite"
+          aria-busy={pending}
+        >
+          {active && active.messages.length > 0
+            ? active.messages.map((message) => {
+                const entering = enteringIds.includes(message.id);
+                const textShown = visibleText(message.role, message.text);
+                if (textShown === '') {
+                  if (waitingForText(message)) {
+                    return (
+                      <ThinkingBubble
+                        key={message.id}
+                        entering={entering}
+                        label={text.thinking}
+                        onAnimationEnd={() => onAnimationEnd(message.id)}
+                      />
+                    );
+                  }
+                  if (
+                    message.role === 'assistant' &&
+                    (message.failed === true || message.aborted === true)
+                  ) {
+                    // 零文字的失败/被停轮：没有气泡，只有脚注，
+                    // 位置自然落在用户提问下方（docs/MESSAGE_ACTIONS.md）。
+                    const classes = bubbleClass('assistant', false);
+                    return (
+                      <div key={message.id} className={`${classes.wrap} group`}>
+                        <MessageActions
+                          message={message}
+                          failedText={text.replyInterrupted}
+                          stoppedText={text.replyStopped}
+                          retryLabel={text.retry}
+                          entering={entering}
+                          onRetry={onRetry}
+                          onAnimationEnd={() => onAnimationEnd(message.id)}
+                        />
+                      </div>
+                    );
+                  }
+                  return null;
                 }
-                if (
-                  message.role === 'assistant' &&
-                  (message.failed === true || message.aborted === true)
-                ) {
-                  // 零文字的失败/被停轮：没有气泡，只有脚注，
-                  // 位置自然落在用户提问下方（docs/MESSAGE_ACTIONS.md）。
-                  const classes = bubbleClass('assistant', false);
+                if (message.role === 'assistant') {
+                  const classes = bubbleClass(message.role, entering);
                   return (
                     <div key={message.id} className={`${classes.wrap} group`}>
+                      <div
+                        lang={message.locale ? htmlLang[message.locale] : undefined}
+                        className={classes.bubble}
+                        onAnimationEnd={() => onAnimationEnd(message.id)}
+                      >
+                        <MarkdownText text={textShown} />
+                      </div>
                       <MessageActions
                         message={message}
                         failedText={text.replyInterrupted}
@@ -146,127 +212,114 @@ export function ChatMain({
                     </div>
                   );
                 }
-                return null;
-              }
-              if (message.role === 'assistant') {
                 const classes = bubbleClass(message.role, entering);
+                if (editing !== null && editing.messageId === message.id) {
+                  // 编辑态：气泡原地换成自动长高的编辑框，右下角「取消」「发送」。
+                  // Enter/「发送」发出、Shift+Enter 换行、Esc 取消
+                  //（docs/MESSAGE_ACTIONS.md 第三期）。
+                  return (
+                    <div key={message.id} className={classes.wrap}>
+                      <div className="w-full max-w-[600px]">
+                        <textarea
+                          ref={editAreaRef}
+                          autoFocus
+                          className="textarea w-full min-h-10 max-h-40 resize-none overflow-y-auto text-base"
+                          rows={2}
+                          value={editing.text}
+                          aria-label={text.edit}
+                          onChange={(event) =>
+                            setEditing({
+                              messageId: message.id,
+                              turnId: editing.turnId,
+                              text: event.target.value,
+                            })
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              setEditing(null);
+                              return;
+                            }
+                            if (
+                              event.key === 'Enter' &&
+                              !event.shiftKey &&
+                              !event.nativeEvent.isComposing
+                            ) {
+                              event.preventDefault();
+                              submitEdit();
+                            }
+                          }}
+                        />
+                        <div className="mt-2 flex justify-end gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setEditing(null)}
+                          >
+                            {text.cancel}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={editing.text.trim() === '' || pending}
+                            onClick={submitEdit}
+                          >
+                            {text.send}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                // 编辑按钮只给最后一轮的用户提问；流式输出中（pending）不出现。
+                const canEdit =
+                  !pending && message.id === lastUserMessageId && message.turnId !== undefined;
                 return (
                   <div key={message.id} className={`${classes.wrap} group`}>
-                    <div
+                    <p
                       lang={message.locale ? htmlLang[message.locale] : undefined}
                       className={classes.bubble}
                       onAnimationEnd={() => onAnimationEnd(message.id)}
                     >
-                      <MarkdownText text={textShown} />
-                    </div>
+                      {textShown}
+                    </p>
                     <MessageActions
                       message={message}
                       failedText={text.replyInterrupted}
                       stoppedText={text.replyStopped}
                       retryLabel={text.retry}
-                      entering={entering}
                       onRetry={onRetry}
-                      onAnimationEnd={() => onAnimationEnd(message.id)}
+                      canEdit={canEdit}
+                      editLabel={text.edit}
+                      onEdit={
+                        canEdit
+                          ? () =>
+                              setEditing({
+                                messageId: message.id,
+                                turnId: message.turnId ?? '',
+                                text: message.text,
+                              })
+                          : undefined
+                      }
                     />
                   </div>
                 );
-              }
-              const classes = bubbleClass(message.role, entering);
-              if (editing !== null && editing.messageId === message.id) {
-                // 编辑态：气泡原地换成自动长高的编辑框，右下角「取消」「发送」。
-                // Enter/「发送」发出、Shift+Enter 换行、Esc 取消
-                //（docs/MESSAGE_ACTIONS.md 第三期）。
-                return (
-                  <div key={message.id} className={classes.wrap}>
-                    <div className="w-full max-w-[600px]">
-                      <textarea
-                        ref={editAreaRef}
-                        autoFocus
-                        className="textarea w-full min-h-10 max-h-40 resize-none overflow-y-auto text-base"
-                        rows={2}
-                        value={editing.text}
-                        aria-label={text.edit}
-                        onChange={(event) =>
-                          setEditing({
-                            messageId: message.id,
-                            turnId: editing.turnId,
-                            text: event.target.value,
-                          })
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            setEditing(null);
-                            return;
-                          }
-                          if (
-                            event.key === 'Enter' &&
-                            !event.shiftKey &&
-                            !event.nativeEvent.isComposing
-                          ) {
-                            event.preventDefault();
-                            submitEdit();
-                          }
-                        }}
-                      />
-                      <div className="mt-2 flex justify-end gap-2">
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => setEditing(null)}
-                        >
-                          {text.cancel}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          disabled={editing.text.trim() === '' || pending}
-                          onClick={submitEdit}
-                        >
-                          {text.send}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
-              // 编辑按钮只给最后一轮的用户提问；流式输出中（pending）不出现。
-              const canEdit =
-                !pending && message.id === lastUserMessageId && message.turnId !== undefined;
-              return (
-                <div key={message.id} className={`${classes.wrap} group`}>
-                  <p
-                    lang={message.locale ? htmlLang[message.locale] : undefined}
-                    className={classes.bubble}
-                    onAnimationEnd={() => onAnimationEnd(message.id)}
-                  >
-                    {textShown}
-                  </p>
-                  <MessageActions
-                    message={message}
-                    failedText={text.replyInterrupted}
-                    stoppedText={text.replyStopped}
-                    retryLabel={text.retry}
-                    onRetry={onRetry}
-                    canEdit={canEdit}
-                    editLabel={text.edit}
-                    onEdit={
-                      canEdit
-                        ? () =>
-                            setEditing({
-                              messageId: message.id,
-                              turnId: message.turnId ?? '',
-                              text: message.text,
-                            })
-                        : undefined
-                    }
-                  />
-                </div>
-              );
-            })
-          : null}
-        {!active || (active.messagesKnown && active.messages.length === 0) ? (
-          <p className="m-0 text-stone-500">{text.empty}</p>
+              })
+            : null}
+          {!active || (active.messagesKnown && active.messages.length === 0) ? (
+            <p className="m-0 text-stone-500">{text.empty}</p>
+          ) : null}
+        </div>
+        {!atBottom ? (
+          <button
+            type="button"
+            className="btn btn-circle btn-ghost bg-base-100 shadow absolute bottom-4 left-1/2 z-10 -translate-x-1/2"
+            aria-label={text.backToBottom}
+            title={text.backToBottom}
+            onClick={scrollToBottom}
+          >
+            <ArrowDown aria-hidden="true" />
+          </button>
         ) : null}
       </div>
       {/* 警示横幅：聊天滚动区与输入区之间的流内兄弟节点。分隔线固定在输入区顶上，
