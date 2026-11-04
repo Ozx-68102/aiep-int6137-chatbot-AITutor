@@ -214,7 +214,11 @@ export function ChatMain({
                           className={classes.bubble}
                           onAnimationEnd={() => onAnimationEnd(message.id)}
                         >
-                          <MarkdownText text={textShown} />
+                          <MarkdownText
+                            text={textShown}
+                            copyLabel={text.copy}
+                            copiedLabel={text.copied}
+                          />
                         </div>
                       </BubbleBoundary>
                       <MessageActions

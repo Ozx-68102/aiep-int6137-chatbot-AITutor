@@ -17,7 +17,7 @@
   white-space: pre-wrap;
 }
 
-.markdown li:has(> ul, > ol, > p, > pre, > blockquote, > table) {
+.markdown li:has(> ul, > ol, > p, > pre, > blockquote, > table, > .code-block-wrap) {
   white-space: normal;
 }
 
@@ -124,6 +124,21 @@
   padding: 0;
   color: inherit;
   font-size: inherit;
+}
+
+/* 代码块外面包了一层带复制按钮的容器（MarkdownText.tsx 的 CodeBlock）：
+   对外间距挪到容器层，里面的 pre 不再自带下边距，免得复制按钮的定位
+   跟着边距跑。高亮路线的 customStyle 与这几个数保持一致。 */
+.markdown .code-block-wrap {
+  margin: 0 0 0.5rem;
+}
+
+.markdown .code-block-wrap pre {
+  margin: 0;
+}
+
+.markdown > .code-block-wrap:last-child {
+  margin-bottom: 0;
 }
 
 .markdown a {
