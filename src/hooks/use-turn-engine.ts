@@ -104,7 +104,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
           depsRef.current.onConnectionWarning();
           return;
         }
-        depsRef.current.setNotice(explain(error, translations[depsRef.current.locale].connectionError));
+        depsRef.current.setNotice(
+          explain(error, translations[depsRef.current.locale].connectionError),
+        );
       })
       .finally(() => {
         if (cancelled) {
@@ -319,7 +321,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         stopPolling(sessionId);
         clearPending(sessionId);
         if (partial.status === 'failed') {
-          addErrorMessage(sessionId, textRef.current.replyInterrupted, depsRef.current.locale, turnId);
+          addErrorMessage(
+            sessionId,
+            textRef.current.replyInterrupted,
+            depsRef.current.locale,
+            turnId,
+          );
         }
         if (partial.status === 'aborted') {
           setSessionWarning({sessionId, text: textRef.current.replyStopped});
@@ -474,7 +481,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       const detail = error instanceof ApiError ? error.detail : null;
-      addErrorMessage(sessionId, detail ?? textRef.current.connectionError, detail ? 'zh-CN' : depsRef.current.locale, turnId);
+      addErrorMessage(
+        sessionId,
+        detail ?? textRef.current.connectionError,
+        detail ? 'zh-CN' : depsRef.current.locale,
+        turnId,
+      );
     } finally {
       aborters.current.delete(sessionId);
       stoppers.current.delete(sessionId);

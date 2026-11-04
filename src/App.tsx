@@ -10,13 +10,7 @@ import {connectionFailure, explain} from './api/failure.ts';
 import {ApiError} from './api/http.ts';
 import {logout, readProfile} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
-import {
-  createSession,
-  emptySession,
-  listSessions,
-  login,
-  sessionsFromList,
-} from './api/session.ts';
+import {createSession, emptySession, listSessions, login, sessionsFromList} from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
 import {AdminConsole} from './components/admin/AdminConsole.tsx';
 import {ChatMain} from './components/chat/ChatMain.tsx';
@@ -562,7 +556,8 @@ function ChatApp() {
     }));
     markEntering(userMessage.id);
     if (missingTitle) {
-      const saving = sessionActions.saveTitle(sessionId, title)
+      const saving = sessionActions
+        .saveTitle(sessionId, title)
         .then((saved) => {
           if (!saved) {
             updateSession(sessionId, (session) => ({...session, title: null}));
