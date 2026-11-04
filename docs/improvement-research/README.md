@@ -22,7 +22,9 @@
 - 工作量估计：S（半天内）、M（1~3 天）、L（更大，需要拆分）。
 - 本调研基于 main 分支 `1eadc4e8c042` 的代码状态，文中的行号以该快照为准。
 
-> **2026-11-04 进展**：编辑重发（frontend-chat N5）、多行输入（frontend-chat N2）、服务端悬空提问比对修复（backend-api N9，取方案①）已随 [MESSAGE_ACTIONS.md](../MESSAGE_ACTIONS.md) 第一至三期实现，「建议落地顺序」第四批中的这两项由此完成。相关条目保留作调研记录，现状以各条目标题下的备注和 MESSAGE_ACTIONS.md 为准。
+> **2026-11-04 进展**：[MESSAGE_ACTIONS.md](../MESSAGE_ACTIONS.md) 第一至三期已实现——第一期（气泡脚注 MessageActions、`FailedReply` 与 `role:'error'` 合成消息退役、横幅移入聊天区、UI_WARNINGS.md 修订）、第二期（服务端悬空提问比对修复，backend-api N9 方案①）、第三期（编辑重发，frontend-chat N5）与多行输入（frontend-chat N2）。frontend-chat P1/P2/O4 与 frontend-app P9 已相应加注；`EDIT_MESSAGE.md` 已删除并入 MESSAGE_ACTIONS.md，五份文档里的引用已重指。
+>
+> **行号漂移提醒**：main 已随上述实现前进（快照 `426f221cc9d8`），各文档中标注基线 `1eadc4e8c042` 的行号只作历史参考，引用时以符号名定位。
 
 ## 第三方库结论汇总
 

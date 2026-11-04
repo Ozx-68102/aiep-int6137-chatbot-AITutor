@@ -887,6 +887,8 @@
 
 ### P9. 文档漂移：README 和 ACCOUNT_MANAGEMENT 仍写 `?page=admin`、`?page=password`
 
+> **已修复（2026-11-04）**：README 与 ACCOUNT_MANAGEMENT 的 URL 引用已统一到路径路由（本地提交 1418e5c，LayerFS 分支 `docs-update-path-references`），仓库文档里已无 `?page=admin`、`?page=password`（仅本条目原文引述）。本节保留作调研记录。
+
 - **位置**：`/README.md`「功能」一节（「管理员控制台在 `?page=admin`」）、`/docs/ACCOUNT_MANAGEMENT.md`「控制台」一节（「地址 `?page=admin`（同源单页应用里的路由，没做 `/admin/` 独立入口）」）与「修改密码」一节（「页面地址带 `?page=password`」）。
 - **现状**：代码早已改成真实路径路由：`App.tsx` 的 `/admin` Route、`usePathRouting` 认的 `/password` 路径。README 自己的「部署」一节都在讲「真实路径路由（`/chat/<会话id>`、`/password`、`/admin`）」——同一份 README 前后矛盾；ACCOUNT_MANAGEMENT 的「没做 /admin 独立入口」与代码直接冲突。
 - **影响**：照文档操作的人会去试 `?page=admin`（现在会被路由归位效果送回根路径），排障和新人上手都被误导；这类漂移正是 `refactor-drop-legacy-redirects` 那轮改造后忘了扫尾。

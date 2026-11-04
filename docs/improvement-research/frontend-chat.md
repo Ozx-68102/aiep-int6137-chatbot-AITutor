@@ -189,7 +189,7 @@
 
 ### N5. 消息编辑重发（对齐 MESSAGE_ACTIONS.md，前端部分）
 
-> **已实现（2026-11-04，MESSAGE_ACTIONS.md 第三期）**，其中一处决策与本节建议不同：编辑按钮只给**最后一轮**的用户提问（本节建议每个用户提问都给）；发送失败按 Gemini 式整轮回滚。本节的 `retryTurn(sessionId, turnId, editedText?)` 签名被采纳。现状以 [MESSAGE_ACTIONS.md](../MESSAGE_ACTIONS.md) 为准，本节保留作调研记录。
+> **已实现（2026-11-04，MESSAGE_ACTIONS.md 第三期）**，其中一处决策与本节建议不同：编辑按钮只给**最后一轮**的用户提问（本节建议每个用户提问都给）；发送失败按 Gemini 式整轮回滚。本节的 `retryTurn(sessionId, turnId, editedText?)` 签名被采纳。现状以 [MESSAGE_ACTIONS.md](../MESSAGE_ACTIONS.md) 为准，本节保留作调研记录；下方「位置」行是历史快照——`ChatMain.tsx` L129-131 的 TODO 注释已随实现移除，行号也因重构漂移。
 
 - **位置**：`/src/components/chat/ChatMain.tsx` L129-131 已有 TODO 注释指向 `/docs/MESSAGE_ACTIONS.md`；重试通路在 `/src/hooks/use-turn-engine.ts` `retryTurn` L226。
 - **现状**：设计文档已写清产品形态（每轮下方小编辑按钮 → 展开修改框 → 右下角取消/发送，用户视角等同重试），并明确不做版本历史/分支；后端接口字段未定（`retryOf` 之外要带新提问文本）。前端没有任何实现。
@@ -409,6 +409,8 @@
 
 ### O4. enteringIds 泄漏：消息在动画结束前被移除时 id 永远留下
 
+> **2026-11-04 注**：`removeFailedNotice` 已随 `role:'error'` 退役删除，泄漏路径收窄为 `removeTurnAnswer` / `removeTurn`（not-started 与重试分支仍会在进场动画期间删气泡，`use-turn-engine.ts` L493/L498）；`enteringIds` 仍是数组 + `includes`（App.tsx L81、L664，ChatMain.tsx L23/L40/L115）。本条仍然成立，位置行号已漂移，引用时以符号名定位。
+
 - **位置**：`/src/App.tsx` L87（`enteringIds` 数组 state）、L331 `markEntering`、L672-674 `onAnimationEnd` 移除；移除消息的路径在 `use-turn-engine.ts`：`removeTurnAnswer` L193、`removeFailedNotice` L213、`removeTurn` L202。
 - **现状**：id 靠气泡元素的 `animationend` 事件弹出。但重试路径会**在动画期间删元素**：`retryTurn`（L226）先 `removeTurnAnswer` + `removeFailedNotice`——如果失败气泡的 200ms 进场动画还没跑完（快速点重试、或低性能设备），它的 id 就永远留在 `enteringIds` 里。同理被 abort 清掉的 waiting 气泡。
 - **影响**：慢性内存泄漏（每条几个十字节，量小但只增不减）；`enteringIds.includes` 在每条消息渲染时扫这个数组，泄漏越多渲染越慢（O(n×m)）；`prefers-reduced-motion` 用户不加 id，无此问题。
@@ -481,6 +483,8 @@
 
 ### P1. 重试遇到「连不上」后，这一轮悬空：问题留着，却永远没有重试按钮
 
+> **已随 MESSAGE_ACTIONS.md 第一期解决（2026-11-04），形态有变**：`FailedReply.tsx` 与 `role:'error'` 合成消息已退役。重试场景下 `onRollback` 会把旧轮连同常驻脚注（状态提示 + 重试按钮）恢复回原位（`use-turn-engine.ts` L497-511），不再悬空；首发「连不上」按新设计统一归横幅报（L491 注释「连不上归横幅报」、L513「不再往消息流里插错误消息」），不提供轮次级重试入口。下文的 `addErrorMessage` 方案已过时，保留作调研记录。
+
 - **位置**：`/src/hooks/use-turn-engine.ts` `retryTurn` L226 → `sendQuestion` 的 catch：L464 先 `removeTurnAnswer`，L472-475 `connectionFailure` 分支只调 `onConnectionWarning()` 就 `return`，**不 addErrorMessage**。
 - **现状**：点重试后如果这次请求属于「连接类失败」（断网、服务不可达），旧的失败气泡和半截回答已被 `retryTurn` 删掉，新的错误气泡又不生成——线程里只剩那条提问，没有任何错误提示、没有重试按钮。`sendingRef` 在 finally 里清了，输入框能用，但这一轮就悬在那儿：想重问只能手动重新输入同样的话（而服务器上游那轮的记录也没人清理）。
 - **影响**：弱网下「点重试 → 提示都没了 → 无法再重试」，用户视角是功能坏了。首次发送走同一 catch，但首发场景 connectionFailure 分支同样不 addErrorMessage——首发的提问是本地追加的，留在线程里同样悬空（只是首次发送时 App 层还有 showConnectionWarning 的横幅，稍微好一点）。
@@ -500,6 +504,8 @@
 - **工作量**：S。
 
 ### P2. `not-started` 的错误气泡不带 turnId，明明可以重试却给不出按钮
+
+> **已随 MESSAGE_ACTIONS.md 第一期解决（2026-11-04）**：错误气泡这一形态已不存在——`not-started` 现在走 `removeTurnAnswer` + 横幅提示 + 重试场景 `onRollback` 恢复旧轮的脚注重试入口（`use-turn-engine.ts` L490-496），`FailedReply.tsx` 已删除。本条的一行修复随架构更新失去意义，保留作调研记录。
 
 - **位置**：`/src/hooks/use-turn-engine.ts` L458-461：`outcome === 'not-started'` 时 `addErrorMessage(sessionId, connectionError, locale)`——第四个参数 `turnId` 没传；对照 `ChatMain.tsx` L86：`role === 'error' && turnId !== undefined` 才渲染带重试按钮的 FailedReply。
 - **现状**：`not-started` 的语义恰恰是「请求没落地、服务器根本没有这一轮、重发安全」（chat.ts L9-10 的注释原文），而且 `streamReply` 已经自动重发过一次仍失败才走到这里。这时页面显示的是一条普通红色气泡，没有重试按钮。
