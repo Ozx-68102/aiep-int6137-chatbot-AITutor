@@ -1,5 +1,5 @@
 import {CircleStop, PanelLeftOpen, Send} from 'lucide-react';
-import type {SubmitEvent} from 'react';
+import {type SubmitEvent, useEffect, useRef} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
 import {visibleText, waitingForText} from '../../session/text.ts';
@@ -45,6 +45,18 @@ export function ChatMain({
   onRetry: (turnId: string) => void;
 }) {
   const text = translations[locale];
+  // 输入框自动长高：随内容增高，CSS 的 max-h-40 封顶后内部滚动。做成对
+  // draft 的 effect：草稿被程序性清空/恢复（切会话、被踢后回填）时高度也同步。
+  const formRef = useRef<HTMLFormElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el === null) {
+      return;
+    }
+    el.style.height = '0px';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   return (
     <main className="flex min-h-0 min-w-0 flex-col bg-white">
@@ -170,14 +182,24 @@ export function ChatMain({
         </div>
       ) : null}
       <div className="border-t border-stone-300 px-4 pt-3 pb-4">
-        <form className="flex items-center gap-2" onSubmit={onSubmit}>
-          <input
-            className="input min-w-0 flex-1"
+        <form ref={formRef} className="flex items-end gap-2" onSubmit={onSubmit}>
+          <textarea
+            ref={textareaRef}
+            className="textarea min-h-10 max-h-40 min-w-0 flex-1 resize-none overflow-y-auto text-base"
+            rows={1}
             value={draft}
             placeholder={text.placeholder}
             aria-label={text.placeholder}
             disabled={inputLocked}
             onChange={(event) => onDraft(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter 发送、Shift+Enter 换行。输入法组合期的回车是在选词
+              // （isComposing），不算发送——中文打字不会误发。
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                formRef.current?.requestSubmit();
+              }
+            }}
           />
           {pending ? (
             <button
