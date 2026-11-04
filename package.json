@@ -18,7 +18,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "check": "oxlint && oxfmt --check",
+    "check": "oxlint && oxfmt --check && pnpm exec tsc --noEmit",
     "preview": "vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

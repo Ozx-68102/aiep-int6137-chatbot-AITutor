@@ -36,7 +36,7 @@ npm install -g pnpm
 - 代码高亮：react-syntax-highlighter 16.1.2（2026-11-05 装上，尚未接线；接线时按需注册语言 + 动态 import，见 improvement-research frontend-chat N4 注记；类型声明还没配齐）
 - 语言：TypeScript 7.0.2
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
-- 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint 加 oxfmt --check 一起跑
+- 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint、oxfmt --check 加类型检查（`pnpm exec tsc --noEmit`）一起跑
 - 类型检查和打包：`pnpm build`，等于 `pnpm exec tsc --noEmit && vite build`。产物在 `dist/`，已被忽略
 - 部署：真实路径路由要求托管方配 SPA 回落（任何未知路径返回 index.html），Nginx 配置和故障排查见 [NGINX_SPA_DEPLOYMENT_GUIDE.md](NGINX_SPA_DEPLOYMENT_GUIDE.md)
 - `pnpm test` 是占位脚本，会直接失败。仓库里没有自动化测试
