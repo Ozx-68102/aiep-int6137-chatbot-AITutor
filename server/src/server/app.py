@@ -464,9 +464,11 @@ def admin_logout(
     """控制台退出：镜像 /api/logout，只是 cookie 换成 admin_login。"""
     with db_session() as session:
         if not _revoke_login_token(session, admin_cookie):
+            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
+            if admin_cookie:
+                content["reason"] = _REASON_EXPIRED
             result = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": _LOGIN_REQUIRED, "reason": _REASON_EXPIRED},
+                status_code=status.HTTP_401_UNAUTHORIZED, content=content
             )
             _clear_cookie(result, _ADMIN_COOKIE_NAME)
             return result
@@ -482,10 +484,12 @@ def logout(
 ) -> Response:
     with db_session() as session:
         if not _revoke_login_token(session, login_cookie):
-            # 令牌已死时的退出也是会话类 401：同样带上 reason。
+            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
+            if login_cookie:
+                # 令牌已死时的退出也是会话过期语义：带 reason；匿名请求维持现状。
+                content["reason"] = _REASON_EXPIRED
             result = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": _LOGIN_REQUIRED, "reason": _REASON_EXPIRED},
+                status_code=status.HTTP_401_UNAUTHORIZED, content=content
             )
             _clear_cookie(result, _COOKIE_NAME)
             return result
@@ -1693,6 +1697,10 @@ def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
         account_id = _renew_login_token(session, login_cookie)
         account = None if account_id is None else _account_by_id(session, account_id)
     if account is None:
+        # 没带 cookie 的是匿名请求：401 维持现状（不带 reason）。带了 cookie
+        # 但不认识（过期/被吊销/被删）才是会话过期语义，带上 expired。
+        if not login_cookie:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
         raise _SessionUnauthorized()
     _require_role(account, _ROLE_CHAT)
     return account
@@ -1709,6 +1717,9 @@ def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
     account_id = _renew_login_token(session, admin_cookie)
     account = None if account_id is None else _account_by_id(session, account_id)
     if account is None or account.role != _ROLE_ADMIN:
+        # 同 _account_from_cookie：匿名请求维持现状，cookie 不认识才算会话过期。
+        if not admin_cookie:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
         raise _SessionUnauthorized()
     return account
 
@@ -1734,6 +1745,8 @@ def _password_account(
     account = None if account_id is None else _account_by_id(session, account_id)
     if account is not None and account.role == _ROLE_ADMIN:
         return account
+    if not login_cookie and not admin_cookie:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
     raise _SessionUnauthorized()
 
 
