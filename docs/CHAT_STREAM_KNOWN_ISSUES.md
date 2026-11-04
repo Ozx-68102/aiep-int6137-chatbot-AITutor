@@ -1,8 +1,10 @@
 # Chat stream known issues
 
-这一层是「助手回答怎么流出来、一轮问答怎么算结束」。写于 2026-11-02。
+这一层是「助手回答怎么流出来、一轮问答怎么算结束」。写于 2026-11-02，2026-11-04 整理。
 
-现在的问题都记在这里。每条写清楚：什么现象、为什么、代码在哪、怎么修。这一层有几处做得很好，列在最后——修的时候不要推翻它们。
+> 状态：第 5、10、11 条已修复，浏览器手点验证也做过了，原文存在文末「存档」一节；其余条目开放。编号是其他文档引用的锚点，永久保留，不要因为整理而重排。
+
+未解决的问题记在主体，每条写清楚：什么现象、为什么、代码在哪、怎么修。这一层有几处做得很好，列在主体末尾——修的时候不要推翻它们。
 
 ## 验证情况
 
@@ -14,7 +16,7 @@
 - 清扫那条 `DELETE` 的执行计划：`Seq Scan on login_token`，扫过 111 行。
 - FastAPI 的 422 正文：`{"detail": [...]}`，是数组（`fastapi/exception_handlers.py` 里的 `request_validation_exception_handler`）。
 
-**读代码推出来的（没跑起来看）**：第 5 条（轮询空转）、第 10 条（发送失败清掉输入）。这两条要确认得开浏览器点一遍。
+**当时读代码推出来的（没跑起来看）**：第 5 条（轮询空转）、第 10 条（发送失败清掉输入）。这两条后来都修了，浏览器手点验证也做过了（见文末存档）。
 
 ## 根因：这一轮的结局没有跟着流走
 
@@ -60,16 +62,6 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 加上 [src/api/chat.ts:5](../src/api/chat.ts#L5) 的 5 个 outcome（`completed` / `interrupted` / `not-started` / `aborted` / `busy`），前端要处理 16 种状态组合。
 
 **怎么修**：读到一个明确的结局就完事；只有「流真的断了」才去问 `/partial`，而那时候只需要问「还在写吗」。
-
-## 5. 轮询遇到 401 不会停，输入框被锁死
-
-**2026-11-02 已修**（commit 04984de）：401 和 404 一样当终止条件，停下并清 pending、解锁输入框。浏览器手点还没做。
-
-[src/session/poll.ts:23](../src/session/poll.ts#L23) 的 catch 只认 404，其余一律 `continue`。会话过期时 `/partial` 回 401 → 轮询每 500 毫秒继续问一次，永远不停。
-
-同时 [src/App.tsx:1211](../src/App.tsx#L1211)：轮询还在跑的话就不清 pending，`inputLocked` 一直是 true——**用户连字都打不了**，只能刷新页面。
-
-**怎么修**：401 当成终止条件，停下来并解锁输入框。
 
 ## 6. 中间件每个请求查两次库，还堵住事件循环
 
@@ -120,27 +112,9 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 `_authorize_session` 只在请求开头查一次（[server/src/server/app.py:932](../server/src/server/app.py#L932)）。会话后来过期了，那一轮照旧写完、写进库——这是对的，用户改密码不该掐掉正在写的答案。
 
-但页面不知道它后来怎么了：流断掉 → 去问 `/partial` → 401 → 「无法连接到服务器」（见第 11 条）。
+但页面不知道它后来怎么了：流断掉 → 去问 `/partial` → 401 → 「无法连接到服务器」（见存档第 11 条）。
 
 **怎么修**：服务器要能分清「令牌不认识 / 被撤销 / 账号被停用」；客户端收到之后进「会话过期」状态，聊天页原地保留、输入框上方给提示、可以重新登录。
-
-## 10. 发送失败时，用户输入的东西被清掉
-
-**2026-11-02 已修**（commit 6da0b34）：被踢时把内容存进 `h2bot-unsent`，登录成功后放回输入框，主动退出清掉缓存。浏览器手点还没做。
-
-[src/App.tsx:852](../src/App.tsx#L852) 发送前 `clearUnsent()`、`setDraft('')`；请求 401 之后 [src/App.tsx:1197](../src/App.tsx#L1197) 调 `enterLogin()`，而 `enterLogin` 第一件事是 `setSessions([])`（[src/App.tsx:446](../src/App.tsx#L446)）。
-
-结果：用户打了一段字点发送，发现要重新登录，那段字没了——界面上的、草稿缓存里的、服务器那边（压根没收到）都没有。
-
-**怎么修**：被踢的时候把内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。
-
-## 11. 后端的错误信息会被前端显示成「无法连接到服务器」
-
-**2026-11-02 已修**（commit db794f1）：`app.py` 里 `_validation_error` 接管 422，把校验错误拼成一句中文（字段名 + 认得的类型用中文模板，认不得的兜底用原始消息），实测六种坏请求都回 `{"detail": "中文句子"}`。
-
-前端只认 `{"detail": "字符串"}`（[src/api/http.ts:96](../src/api/http.ts#L96)）。FastAPI 的 422 校验错误返回 `{"detail": [...]}`，`detail` 是数组（实测确认，`fastapi/exception_handlers.py` 里的 `request_validation_exception_handler`），前端读不出字符串，于是 `explain()` 显示成「无法连接到服务器」，`connectionFailure()` 还判定成「服务连不上」（[src/api/failure.ts:3](../src/api/failure.ts#L3)）。
-
-**怎么修**：后端所有错误都返回 `{"detail": "中文句子"}`，别用 Pydantic 的字段校验去报业务错误。`HTTPException` 走的是 `http_exception_handler`，出来就是 `{"detail": exc.detail}`，是字符串，没问题。
 
 ## 12. 模块级可变状态，只能单进程跑
 
@@ -176,3 +150,37 @@ grep "<轮次编号>" logs/server.log
 ```
 
 把那几行拼起来，这一轮的完整轨迹就在眼前：请求到了、上游回了什么、什么时候停的、库写没写。
+
+---
+
+## 存档：已解决的问题（第 5、10、11 条）
+
+三条都是 2026-11-02 修复、2026-11-04 经维护者确认浏览器手点验证通过的。原文照录，编号保留，方便其他文档按编号引用。
+
+### 5. 轮询遇到 401 不会停，输入框被锁死
+
+**2026-11-02 已修**（commit 04984de）：401 和 404 一样当终止条件，停下并清 pending、解锁输入框。浏览器手点已验证（2026-11-04 维护者确认）。
+
+[src/session/poll.ts:23](../src/session/poll.ts#L23) 的 catch 只认 404，其余一律 `continue`。会话过期时 `/partial` 回 401 → 轮询每 500 毫秒继续问一次，永远不停。
+
+同时 [src/App.tsx:1211](../src/App.tsx#L1211)：轮询还在跑的话就不清 pending，`inputLocked` 一直是 true——**用户连字都打不了**，只能刷新页面。
+
+**怎么修**：401 当成终止条件，停下来并解锁输入框。
+
+### 10. 发送失败时，用户输入的东西被清掉
+
+**2026-11-02 已修**（commit 6da0b34）：被踢时把内容存进 `h2bot-unsent`，登录成功后放回输入框，主动退出清掉缓存。浏览器手点已验证（2026-11-04 维护者确认）。
+
+[src/App.tsx:852](../src/App.tsx#L852) 发送前 `clearUnsent()`、`setDraft('')`；请求 401 之后 [src/App.tsx:1197](../src/App.tsx#L1197) 调 `enterLogin()`，而 `enterLogin` 第一件事是 `setSessions([])`（[src/App.tsx:446](../src/App.tsx#L446)）。
+
+结果：用户打了一段字点发送，发现要重新登录，那段字没了——界面上的、草稿缓存里的、服务器那边（压根没收到）都没有。
+
+**怎么修**：被踢的时候把内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。
+
+### 11. 后端的错误信息会被前端显示成「无法连接到服务器」
+
+**2026-11-02 已修**（commit db794f1）：`app.py` 里 `_validation_error` 接管 422，把校验错误拼成一句中文（字段名 + 认得的类型用中文模板，认不得的兜底用原始消息），实测六种坏请求都回 `{"detail": "中文句子"}`。浏览器手点已验证（2026-11-04 维护者确认）。
+
+前端只认 `{"detail": "字符串"}`（[src/api/http.ts:96](../src/api/http.ts#L96)）。FastAPI 的 422 校验错误返回 `{"detail": [...]}`，`detail` 是数组（实测确认，`fastapi/exception_handlers.py` 里的 `request_validation_exception_handler`），前端读不出字符串，于是 `explain()` 显示成「无法连接到服务器」，`connectionFailure()` 还判定成「服务连不上」（[src/api/failure.ts:3](../src/api/failure.ts#L3)）。
+
+**怎么修**：后端所有错误都返回 `{"detail": "中文句子"}`，别用 Pydantic 的字段校验去报业务错误。`HTTPException` 走的是 `http_exception_handler`，出来就是 `{"detail": exc.detail}`，是字符串，没问题。
