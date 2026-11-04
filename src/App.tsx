@@ -21,6 +21,7 @@ import {ChangePasswordPage} from './components/settings/ChangePasswordPage.tsx';
 import {ConfirmLogout} from './components/settings/ConfirmLogout.tsx';
 import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
+import {Modal} from './components/shell/Modal.tsx';
 import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast} from './components/toast/Toast.tsx';
@@ -82,9 +83,15 @@ function ChatApp() {
   const [sendingNew, setSendingNew] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  // 会话失效的原地态（docs/ACCOUNT_MANAGEMENT.md 会话状态通道的最小 HTTP 版）：
+  // auth 保持 ready，聊天页原样保留、输入区禁用、输入区上方挂常驻警示条。
+  // expired 可以就地重新登录（Modal 里弹 LoginScreen）；disabled 是终态，只给提示。
+  const [sessionInvalid, setSessionInvalid] = useState<'expired' | 'disabled' | null>(null);
+  const [reloginOpen, setReloginOpen] = useState(false);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(() => new Set());
   const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
   const draftRef = useRef(draft);
+  const sessionInvalidRef = useRef(sessionInvalid);
   // 异步回调和效果调用的函数统一从 ref 里拿 navigate：走 ref 就不会成为
   // 各个效果的响应式依赖。
   const navigateRef = useRef(navigate);
@@ -109,7 +116,7 @@ function ChatApp() {
     setLocale,
     setAvatarUrl,
     onClaimPath: (list) => routingRef.current.claimPath(list),
-    onEnterLogin: enterLogin,
+    onEnterLogin: enterLoginGuarded,
   });
   const serviceRef = useRef(service);
   const engine = useTurnEngine({
@@ -123,14 +130,14 @@ function ChatApp() {
     markEntering,
     setNotice,
     setDraft,
-    onEnterLogin: enterLogin,
+    onAuthError: handleAuthError,
     onConnectionWarning: service.showConnectionWarning,
   });
   const engineRef = useRef(engine);
   const password = usePasswordChange({
     locale,
     onPasswordChanged: () => setLoginNotice(text.passwordChanged),
-    onEnterLogin: enterLogin,
+    onEnterLogin: enterLoginGuarded,
     onConnectionWarning: service.showConnectionWarning,
   });
   const passwordRef = useRef(password);
@@ -139,7 +146,7 @@ function ChatApp() {
     setLocale,
     setUsername,
     setAvatarUrl,
-    onEnterLogin: enterLogin,
+    onEnterLogin: enterLoginGuarded,
     onConnectionWarning: service.showConnectionWarning,
   });
   const profileApiRef = useRef(profileApi);
@@ -149,7 +156,7 @@ function ChatApp() {
     setSessions,
     setNotice,
     onShowToast: showToast,
-    onEnterLogin: enterLogin,
+    onEnterLogin: enterLoginGuarded,
     onConnectionWarning: service.showConnectionWarning,
     showNewChat,
     onStopPolling: engine.stopPolling,
@@ -163,10 +170,30 @@ function ChatApp() {
   const activePending = active ? engine.pendingIds.has(active.id) : false;
   // 当前会话最新的进度节点名（没有进度时 undefined）：等待气泡里显示。
   const progressText = active ? engine.progressBySession[active.id] : undefined;
-  const inputLocked = sendingNew || activePending;
+  const inputLocked = sendingNew || activePending || sessionInvalid !== null;
   const historyLocked = engine.historyLoadingId === active?.id && active.messages.length === 0;
   // 会话级的提示都在输入区分隔线上方的警示框里（聊天滚动区与输入区之间的流内节点），只有一种样子。
   const warnings: WarningItem[] = [];
+  if (sessionInvalid !== null) {
+    // 会话失效的常驻警示条，不可关闭：expired 用琥珀的「有状况」语气（可以
+    // 就地重新登录）；disabled 用红色出错语气（终态，登录也没用，不给按钮）。
+    // 白底黑字，语义色只在图标上（docs/UI_WARNINGS.md）。
+    warnings.push({
+      id: 'session-invalid',
+      tone: sessionInvalid === 'disabled' ? 'error' : 'warning',
+      text: sessionInvalid === 'disabled' ? text.accountDisabled : text.sessionExpired,
+      ...(sessionInvalid === 'expired'
+        ? {
+            action: {
+              label: text.logInAgain,
+              onClick: () => {
+                setReloginOpen(true);
+              },
+            },
+          }
+        : {}),
+    });
+  }
   if (serviceNotice !== null) {
     warnings.push({id: 'service', tone: 'warning', text: serviceNotice});
   }
@@ -198,6 +225,7 @@ function ChatApp() {
 
   useEffect(() => {
     draftRef.current = draft;
+    sessionInvalidRef.current = sessionInvalid;
     navigateRef.current = navigate;
     routingRef.current = routing;
     serviceRef.current = service;
@@ -313,6 +341,8 @@ function ChatApp() {
     routingRef.current.resetPasswordEntry();
     setComposingNew(false);
     setConfirmLogout(false);
+    setSessionInvalid(null);
+    setReloginOpen(false);
     profileApiRef.current.setProfileError(null);
     passwordRef.current.setError(null);
     sessionActionsRef.current.titleSaves.current.clear();
@@ -320,6 +350,33 @@ function ChatApp() {
     setLoginOffline(false);
     setLoginDetail(detail);
     setLoginSubmitting(false);
+  }
+
+  /**
+   * 会话类 401 的统一入口（回合引擎、半截回答轮询和 App 自己的请求都走
+   * 这里）：带着 reason（expired/disabled）就进原地的「会话失效」态——
+   * 聊天页、会话列表、草稿、profile 缓存全部原样保留，只禁用输入区、挂
+   * 常驻警示条；没有 reason（老后端）保守回退整页 enterLogin 路径。只在
+   * auth 是 ready 时有意义：checking/anonymous 阶段的 401 照旧走整页登录屏。
+   */
+  function handleAuthError(error: ApiError) {
+    if (error.reason === 'expired' || error.reason === 'disabled') {
+      setSessionInvalid(error.reason);
+      return;
+    }
+    enterLogin(error.detail);
+  }
+
+  /**
+   * 其余动作（侧栏、设置、改密、服务状态恢复）的 401 出口还是 enterLogin：
+   * 已经在会话失效原地态里时不再升级成整页清空——横幅已经挂着了，清空
+   * 反而把原地态保住的东西弄丢。
+   */
+  function enterLoginGuarded(detail: string | null) {
+    if (sessionInvalidRef.current !== null) {
+      return;
+    }
+    enterLogin(detail);
   }
 
   function updateSession(sessionId: string, change: (session: Session) => Session) {
@@ -380,13 +437,22 @@ function ChatApp() {
     if (isLocale(result.locale)) {
       setLocale(result.locale);
     }
+    // 上一个登录态的在飞请求、轮询和「线程已加载」标记都作废：一次清掉。
+    // 整页登录路径里 enterLogin 已经清过（幂等）；原地重登录靠这次清理
+    // 加 bumpThreadRetry 让当前会话的历史重新拉——activeId 和 auth 都没变，
+    // 线程加载效果只能靠 retry 计数重新触发。
+    engineRef.current.resetForLogin();
+    engineRef.current.bumpThreadRetry();
+    setSessionInvalid(null);
+    setReloginOpen(false);
     let next = sessionsFromList(result.sessions);
     setSessions(next);
     routingRef.current.claimPath(next);
     // 被踢时存下的那句话放回输入框；放回就消费掉，别带去再下一次登录。
+    // 原地重登录时输入框里的字本来就留着，没有存句就不要动它。
     const unsent = readUnsent();
-    setDraft(unsent);
     if (unsent !== '') {
+      setDraft(unsent);
       clearUnsent();
     }
     setNotice(null);
@@ -401,7 +467,7 @@ function ChatApp() {
       })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 401) {
-          enterLogin(error.detail);
+          handleAuthError(error);
         }
       });
   }
@@ -519,7 +585,7 @@ function ChatApp() {
       if (error instanceof ApiError && error.status === 401) {
         // 会话在发出前就过期了：这句提问存起来，登录后放回输入框。
         saveUnsent(question);
-        enterLogin(error.detail);
+        handleAuthError(error);
         return;
       }
       if (connectionFailure(error)) {
@@ -545,7 +611,12 @@ function ChatApp() {
   function submitMessage(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = draft.trim();
-    if (!question || sendingNew || (active && engine.sendingRef.current.has(active.id))) {
+    if (
+      !question ||
+      sendingNew ||
+      sessionInvalid !== null ||
+      (active && engine.sendingRef.current.has(active.id))
+    ) {
       return;
     }
     if (!active) {
@@ -723,8 +794,8 @@ function ChatApp() {
             return true;
           } catch (error) {
             if (error instanceof ApiError && error.status === 401) {
-              // 点赞途中被踢：跟其他动作一样回登录页。
-              enterLogin(error.detail);
+              // 点赞途中被踢：跟其他动作一样走统一的 401 入口。
+              handleAuthError(error);
               return false;
             }
             if (connectionFailure(error)) {
@@ -779,6 +850,32 @@ function ChatApp() {
           void signOut();
         }}
       />
+      {/* 会话过期后的就地重登录：Modal 里放 LoginScreen 同款卡片，不清聊天页的
+          任何状态；登录失败弹窗不关，错误留在表单里；成功由 openAccount 就地
+          恢复（刷新 profile 和会话列表）。disabled 不给（终态，登录也没用）。 */}
+      <Modal
+        open={sessionInvalid === 'expired' && reloginOpen}
+        titleId="relogin-title"
+        panelClass="max-w-sm"
+        onClose={() => {
+          setReloginOpen(false);
+          setLoginDetail(null);
+          setLoginOffline(false);
+        }}
+      >
+        <LoginScreen
+          locale={locale}
+          error={loginError}
+          offline={loginOffline}
+          submitting={loginSubmitting}
+          embedded
+          headingId="relogin-title"
+          onLocale={setLocale}
+          onSubmit={(usernameValue, password) => {
+            void submitLogin(usernameValue, password);
+          }}
+        />
+      </Modal>
       <Toast
         message={toast?.text ?? null}
         lang={toast?.lang ?? htmlLang[locale]}
