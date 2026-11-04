@@ -125,7 +125,9 @@ _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
 _ADMIN_ACCOUNT_NOT_FOUND = "找不到这个账号"
 _RATE_LIMITED = "尝试次数太多，请 15 分钟后再试"
 # 限流计数分两个维度，各自锁各自的：账号和来源 IP。scope 会拼进 Redis 的键名
-# （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。
+# （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。改密和登录
+# 共用这两个 scope：登录的账号维度拿归一化用户名当标识，改密拿账号 id，
+# 两边的账号计数碰不到一起；IP 维度两边合用一个计数。
 _RATELIMIT_ACCOUNT_SCOPE = "password"
 _RATELIMIT_IP_SCOPE = "password:ip"
 _running: dict[UUID, set[asyncio.Task[None]]] = {}
@@ -270,29 +272,47 @@ def _validation_text(error: dict[str, object]) -> str:
 
 
 @app.post("/api/login")
-def login(body: LoginRequest, response: Response) -> LoginResponse:
+def login(body: LoginRequest, request: Request, response: Response) -> LoginResponse:
+    # 先查锁定再进验证：锁定期间连密码哈希都不碰（argon2 是 CPU 活）。
+    _raise_if_login_locked(body.username, request)
     _sweep_expired_tokens()
     with db_session() as session:
-        result, token = _login_account(session, body.username, body.password)
+        try:
+            result, token = _login_account(session, body.username, body.password)
+        except HTTPException as exc:
+            _register_login_failure(exc, body.username, request)
+            raise
 
+    # 登录成功清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的
+    # 账号在正常登录，它们的计数不该跟着被清掉（跟改密端点同款语义）。
+    clear_failures(_RATELIMIT_ACCOUNT_SCOPE, _login_account_key(body.username))
     _set_cookie(response, _COOKIE_NAME, token)
     return result
 
 
 @app.post("/api/admin/login")
-def admin_login(body: LoginRequest, response: Response) -> AdminLoginResponse:
+def admin_login(
+    body: LoginRequest, request: Request, response: Response
+) -> AdminLoginResponse:
     """控制台那一边：只认 role 是 admin 的账号，发 admin_login cookie。
 
     跟 /api/login 同一条规矩：先验密码再看 role，密码不对一律回
-    「用户名或密码不正确」。控制台界面是后面那批活，接口先立起来。
+    「用户名或密码不正确」；限流也是同一套。控制台界面是后面那批活，
+    接口先立起来。
     """
+    _raise_if_login_locked(body.username, request)
     _sweep_expired_tokens()
     with db_session() as session:
-        account = _verified_account(session, body.username, body.password)
-        _require_role(account, _ROLE_ADMIN)
-        token = _new_token(session, account)
-        username = account.username
+        try:
+            account = _verified_account(session, body.username, body.password)
+            _require_role(account, _ROLE_ADMIN)
+            token = _new_token(session, account)
+            username = account.username
+        except HTTPException as exc:
+            _register_login_failure(exc, body.username, request)
+            raise
 
+    clear_failures(_RATELIMIT_ACCOUNT_SCOPE, _login_account_key(body.username))
     _set_cookie(response, _ADMIN_COOKIE_NAME, token)
     return AdminLoginResponse(username=username)
 
@@ -1253,6 +1273,45 @@ def _login_account(
         sessions=_session_items(account),
     )
     return result, token
+
+
+def _login_account_key(username: str) -> str:
+    """登录限流的账号维度键：归一化的用户名。
+
+    数据库里 admin、Admin、"admin " 是三个账号；限流键照原文用的话，
+    换个写法就把计数摊到三个键上，锁定形同虚设。
+    """
+    return username.strip().lower()
+
+
+def _login_client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _raise_if_login_locked(username: str, request: Request) -> None:
+    """进密码验证之前先查账号和 IP 两个维度的锁定（照改密端点的做法）。"""
+    account_key = _login_account_key(username)
+    client_ip = _login_client_ip(request)
+    locked = is_locked(_RATELIMIT_ACCOUNT_SCOPE, account_key) or is_locked(
+        _RATELIMIT_IP_SCOPE, client_ip
+    )
+    if locked:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, _RATE_LIMITED)
+
+
+def _register_login_failure(
+    exc: HTTPException, username: str, request: Request
+) -> None:
+    """登录没成时两个维度都记失败。只数 401。
+
+    没这个人和密码不对是同一句 401，计数也不分这两种：不然「试几次以后
+    是不是 429」会把用户名存不存在漏出去。403（密码对了但 role 不属于
+    这一边）说明密码已经验对，不记。
+    """
+    if exc.status_code != status.HTTP_401_UNAUTHORIZED:
+        return
+    register_failure(_RATELIMIT_ACCOUNT_SCOPE, _login_account_key(username))
+    register_failure(_RATELIMIT_IP_SCOPE, _login_client_ip(request))
 
 
 def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
