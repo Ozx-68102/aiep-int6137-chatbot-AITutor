@@ -856,7 +856,7 @@ function ChatApp() {
       <Modal
         open={sessionInvalid === 'expired' && reloginOpen}
         titleId="relogin-title"
-        panelClass="max-w-sm"
+        panelClass="w-full max-w-sm p-0"
         onClose={() => {
           setReloginOpen(false);
           setLoginDetail(null);
