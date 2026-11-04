@@ -97,7 +97,7 @@ class ProfileUpdate(BaseModel):
 
 
 class PartialReplyResponse(BaseModel):
-    """"还在写吗"——只回答这一个问题。
+    """ "还在写吗"——只回答这一个问题。
 
     这场会话的轮次还在写时才返回（200，status 恒为 streaming）；其余
     一切情况（写完了/失败/被停/键不存在）都是 404（见
