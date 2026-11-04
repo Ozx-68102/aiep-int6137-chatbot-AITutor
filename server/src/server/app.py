@@ -1,11 +1,12 @@
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
 import secrets
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
@@ -23,7 +24,7 @@ from fastapi import (
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.datastructures import MutableHeaders
@@ -92,9 +93,16 @@ logger = logging.getLogger("server.app")
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.fastgpt = open_fastgpt(load_settings())
+    # 过期令牌的清扫从请求路径挪到这里：启动先跑一次，之后每
+    # _SWEEP_INTERVAL_SECONDS 一次。单进程假设，不需要分布式锁
+    # （见 docs/CHAT_STREAM_KNOWN_ISSUES.md 第 12 条）。
+    sweep = asyncio.create_task(_sweep_expired_tokens_loop())
     try:
         yield
     finally:
+        sweep.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweep
         fastgpt = _app.state.fastgpt
         if isinstance(fastgpt, FastGPT):
             await fastgpt.aclose()
@@ -142,6 +150,14 @@ _STOP_WAIT_SECONDS = 7.0
 _records_cache: dict[UUID, tuple[float, list[ChatRecord]]] = {}
 _RECORDS_CACHE_SECONDS = 5.0
 _RECORDS_PAGE_SIZE = 100
+_SWEEP_INTERVAL_SECONDS = 600.0
+# 中间件为本次请求验好的账号 id（连同 cookie 原文用于比对）。端点侧的
+# _account_from_cookie 直接拿它，省掉一轮令牌查库和续期：每个带 cookie
+# 的请求从两轮减到一轮。asyncio.to_thread 和端点线程池都会拷贝上下文，
+# 同步、异步端点都读得到；每个请求在中间件入口重置，绝不串上一个请求。
+_REQUEST_ACCOUNT: contextvars.ContextVar[tuple[str, UUID] | None] = (
+    contextvars.ContextVar("request_account", default=None)
+)
 
 
 class _Relay:
@@ -176,12 +192,18 @@ class _RefreshLoginCookie:
             return
 
         cookie = Request(scope).cookies.get(_COOKIE_NAME)
-        # 状态检查是心跳，不该把登录有效期往后推。
-        refresh = (
-            scope.get("path") != _STATUS_PATH
-            and cookie is not None
-            and _cookie_is_valid(cookie)
-        )
+        # 状态检查是心跳，不该把登录有效期往后推。校验加续期是一条 SQL
+        # （_renew_login_token）；同步的 psycopg 放进线程里跑，
+        # async 中间件不堵事件循环。
+        account_id: UUID | None = None
+        if scope.get("path") != _STATUS_PATH and cookie is not None:
+            account_id = await asyncio.to_thread(_renew_cookie_token, cookie)
+        # 先重置再写：上下文是拷贝来的，别把上一个请求的缓存带进来。
+        if account_id is not None and cookie is not None:
+            _REQUEST_ACCOUNT.set((cookie, account_id))
+        else:
+            _REQUEST_ACCOUNT.set(None)
+        refresh = account_id is not None
 
         async def send_with_refresh(message: Message) -> None:
             starting = message["type"] == "http.response.start"
@@ -284,7 +306,6 @@ def _validation_text(error: dict[str, object]) -> str:
 def login(body: LoginRequest, request: Request, response: Response) -> LoginResponse:
     # 先查锁定再进验证：锁定期间连密码哈希都不碰（argon2 是 CPU 活）。
     _raise_if_login_locked(body.username, request)
-    _sweep_expired_tokens()
     with db_session() as session:
         try:
             result, token = _login_account(session, body.username, body.password)
@@ -310,7 +331,6 @@ def admin_login(
     接口先立起来。
     """
     _raise_if_login_locked(body.username, request)
-    _sweep_expired_tokens()
     with db_session() as session:
         try:
             account = _verified_account(session, body.username, body.password)
@@ -374,15 +394,13 @@ def admin_logout(
 ) -> Response:
     """控制台退出：镜像 /api/logout，只是 cookie 换成 admin_login。"""
     with db_session() as session:
-        token = _login_token(session, admin_cookie)
-        if token is None:
+        if not _revoke_login_token(session, admin_cookie):
             result = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": _LOGIN_REQUIRED},
             )
             _clear_cookie(result, _ADMIN_COOKIE_NAME)
             return result
-        session.delete(token)
 
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_cookie(result, _ADMIN_COOKIE_NAME)
@@ -394,15 +412,13 @@ def logout(
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
     with db_session() as session:
-        token = _login_token(session, login_cookie)
-        if token is None:
+        if not _revoke_login_token(session, login_cookie):
             result = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": _LOGIN_REQUIRED},
             )
             _clear_cookie(result, _COOKIE_NAME)
             return result
-        session.delete(token)
 
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_cookie(result, _COOKIE_NAME)
@@ -1412,16 +1428,34 @@ def _register_login_failure(
     register_failure(_RATELIMIT_IP_SCOPE, _login_client_ip(request))
 
 
+def _cached_account(session: Session, login_cookie: str | None) -> Account | None:
+    """中间件已经查好的账号。没有缓存或者 cookie 对不上就是 None。"""
+    cached = _REQUEST_ACCOUNT.get()
+    if cached is None or login_cookie is None or cached[0] != login_cookie:
+        return None
+    return _account_by_id(session, cached[1])
+
+
+def _account_by_id(session: Session, account_id: UUID) -> Account | None:
+    account = session.get(Account, account_id)
+    return account if isinstance(account, Account) else None
+
+
 def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
     """聊天接口只认 chat 账号。
 
     判断放在这一层，所有聊天接口就都盖到了，不用每个端点自己记着查。
+    中间件验过的 cookie 直接用缓存的账号 id（一次主键查询），
+    不再做一轮令牌查库加续期。
     """
-    token = _login_token(session, login_cookie)
-    if token is None:
+    account = _cached_account(session, login_cookie)
+    if account is None:
+        account_id = _renew_login_token(session, login_cookie)
+        account = None if account_id is None else _account_by_id(session, account_id)
+    if account is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
-    _require_role(token.account, _ROLE_CHAT)
-    return token.account
+    _require_role(account, _ROLE_CHAT)
+    return account
 
 
 def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
@@ -1430,11 +1464,13 @@ def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
     镜像 _account_from_cookie。token 无效或者账号不是 admin，都回
     「未登录」（401）：这个 cookie 只有控制台登录接口自己种，
     不像登录那样需要把「密码对了但角色不对」分开说。
+    中间件的缓存只盖聊天侧的 login cookie，控制台这边自己查一轮。
     """
-    token = _login_token(session, admin_cookie)
-    if token is None or token.account.role != _ROLE_ADMIN:
+    account_id = _renew_login_token(session, admin_cookie)
+    account = None if account_id is None else _account_by_id(session, account_id)
+    if account is None or account.role != _ROLE_ADMIN:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
-    return token.account
+    return account
 
 
 def _password_account(
@@ -1447,27 +1483,67 @@ def _password_account(
     管理员改自己的密码也走 /api/password，所以不能只用 _account_from_cookie。
     两边都对不上就是没登录。
     """
-    token = _login_token(session, login_cookie)
-    if token is not None and token.account.role == _ROLE_CHAT:
-        return token.account
-    token = _login_token(session, admin_cookie)
-    if token is not None and token.account.role == _ROLE_ADMIN:
-        return token.account
+    account = _cached_account(session, login_cookie)
+    if account is not None and account.role == _ROLE_CHAT:
+        return account
+    account_id = _renew_login_token(session, login_cookie)
+    account = None if account_id is None else _account_by_id(session, account_id)
+    if account is not None and account.role == _ROLE_CHAT:
+        return account
+    account_id = _renew_login_token(session, admin_cookie)
+    account = None if account_id is None else _account_by_id(session, account_id)
+    if account is not None and account.role == _ROLE_ADMIN:
+        return account
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
 
 
-def _login_token(session: Session, login_cookie: str | None) -> LoginToken | None:
+def _renew_login_token(session: Session, login_cookie: str | None) -> UUID | None:
+    """校验加续期合成一条 SQL：还没过期就续期，并把账号 id 带回来。
+
+    原来是 SELECT 查到行、ORM 再写回 expires_at，一件事跑两趟；现在
+    UPDATE ... WHERE expires_at > now() RETURNING account_id 一趟做完。
+    令牌不存在或者已经过期都返回 None——401 的语义留在调用方，不变。
+    synchronize_session=False：会话里不会挂着 LoginToken 对象，不需要同步，
+    也省掉 auto 策略先做的那次 SELECT。
+    """
     if login_cookie is None or login_cookie == "":
         return None
-
-    _sweep_expired_tokens()
-    token = session.scalar(
-        select(LoginToken).where(LoginToken.token_hash == _token_hash(login_cookie)),
+    return session.scalar(
+        update(LoginToken)
+        .where(
+            LoginToken.token_hash == _token_hash(login_cookie),
+            LoginToken.expires_at > func.now(),
+        )
+        .values(expires_at=_login_deadline())
+        .returning(LoginToken.account_id)
+        .execution_options(synchronize_session=False)
     )
-    if not isinstance(token, LoginToken):
-        return None
-    token.expires_at = _login_deadline()
-    return token
+
+
+def _renew_cookie_token(login_cookie: str) -> UUID | None:
+    """中间件那一份：自己开会话，校验加续期，把账号 id 带回来。"""
+    with db_session() as session:
+        return _renew_login_token(session, login_cookie)
+
+
+def _revoke_login_token(session: Session, login_cookie: str | None) -> bool:
+    """退出登录：一条 DELETE ... RETURNING 删掉这个还没过期的令牌。
+
+    查不到或者已经过期都算没登录（过期的行交给周期清扫）；
+    返回删没删到行。
+    """
+    if login_cookie is None or login_cookie == "":
+        return False
+    token_id = session.scalar(
+        delete(LoginToken)
+        .where(
+            LoginToken.token_hash == _token_hash(login_cookie),
+            LoginToken.expires_at > func.now(),
+        )
+        .returning(LoginToken.id)
+        .execution_options(synchronize_session=False)
+    )
+    return token_id is not None
 
 
 def _login_deadline() -> datetime:
@@ -1481,6 +1557,20 @@ def _sweep_expired_tokens() -> None:
                 LoginToken.expires_at <= datetime.now(UTC),
             ),
         )
+
+
+async def _sweep_expired_tokens_loop() -> None:
+    """周期清扫：启动立刻跑一次，之后每 _SWEEP_INTERVAL_SECONDS 一次。
+
+    原来这一步挂在请求路径上（每个带令牌的请求都扫一遍全表），现在只在
+    这里跑。失败只记一条、不掐循环：数据库恢复以后下一轮会补上。
+    """
+    while True:
+        try:
+            await asyncio.to_thread(_sweep_expired_tokens)
+        except Exception:
+            logger.warning("清扫过期令牌失败", exc_info=True)
+        await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
 def _profile(account: Account) -> ProfileResponse:
@@ -1508,11 +1598,6 @@ def _avatar_url(account: Account) -> str:
 
 def _avatar_version(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
-
-
-def _cookie_is_valid(login_cookie: str) -> bool:
-    with db_session() as session:
-        return _login_token(session, login_cookie) is not None
 
 
 def _set_cookie(response: Response, name: str, token: str) -> None:
