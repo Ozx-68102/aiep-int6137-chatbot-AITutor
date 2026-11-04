@@ -7,15 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1)
+    # 上限挡住超大的正文：argon2 哈希按字节算成本，别拿它烤一炉大面包。
+    password: str = Field(min_length=1, max_length=128)
 
 
 class PasswordChange(BaseModel):
     # 密码的规则不写在这里：Pydantic 的 422 正文是数组，前端读不出字符串
     # （见 docs/ACCOUNT_MANAGEMENT.md）。端点里手动查，回一句中文。
-    old_password: str
-    new_password: str
-    new_password_confirm: str
+    # 长度上限除外：超大的正文在门口就 422，不走到 argon2 跟前。
+    old_password: str = Field(max_length=128)
+    new_password: str = Field(max_length=128)
+    new_password_confirm: str = Field(max_length=128)
 
 
 class SessionItem(BaseModel):
@@ -126,7 +128,7 @@ class HistoryResponse(BaseModel):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=8000)
     chat_id: UUID = Field(alias="chatId")
     turn_id: UUID = Field(alias="turnId")
     locale: str | None = None
