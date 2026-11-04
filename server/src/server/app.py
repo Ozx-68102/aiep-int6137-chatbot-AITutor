@@ -925,9 +925,7 @@ async def chat(
     logger.debug("对话请求全文 %s", body.model_dump_json(by_alias=True))
     fastgpt = _fastgpt()
 
-    account_id = await asyncio.to_thread(
-        _authorize_session, body.chat_id, login_cookie
-    )
+    account_id = await asyncio.to_thread(_authorize_session, body.chat_id, login_cookie)
 
     # 同一个请求又来了（重复点击、页面重发）：这一轮已经登记过了，
     # 不能再开一轮，不然上游会生成两遍。
