@@ -756,9 +756,7 @@ async def read_session_messages(
     return HistoryResponse(total=len(messages), messages=messages)
 
 
-@app.post(
-    "/api/sessions/{session_id}/feedback", status_code=status.HTTP_204_NO_CONTENT
-)
+@app.post("/api/sessions/{session_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
 async def update_feedback(
     session_id: UUID,
     body: FeedbackUpdate,
