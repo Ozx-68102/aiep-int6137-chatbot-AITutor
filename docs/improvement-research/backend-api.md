@@ -537,6 +537,8 @@
 
 ### P2. 请求体无长度上限：message、password 都能无限长（新增）
 
+> **2026-11-04 维护者拍板**：`message` 的长度上限定为 **8000 字**。密码相关字段的上限照本节建议（128，与现有密码策略常量一致）。本节其余内容（nginx 请求体上限兜底、前端输入提示）不变，落地时一起做。
+
 - **位置**：`types/api.py:129`（`message: str = Field(min_length=1)`，无上限）、`types/api.py:10`（`LoginRequest.password` 无上限）、`types/api.py:16-18`（`PasswordChange` 三个字段无任何约束）；Starlette/uvicorn 对 JSON body 大小无默认上限。
 - **现状**：一条 10MB 的 `message` 会被完整解析、写进日志（O7 的现状让它写四遍）、存进 Redis turn 键和 message 表，再原样转发给上游（token 直接烧穿）。超长 `password` 会进 argon2（argon2-cffi 对长度宽松，CPU 代价随长度涨）并可能触发 422 之外的怪路径。`check_password_policy` 的 128 上限只在改密时查，登录不查。
 - **影响**：资源滥用（上游 token、磁盘、日志、内存）；单个恶意/失控客户端能显著拖累单进程服务。

@@ -77,6 +77,8 @@
 
 ### 4. 会话是纯滑动 7 天、无绝对上限；过期令牌清扫挂在每个请求上
 
+> **2026-11-04 维护者拍板**：方案 (a)「30 天绝对会话上限」**不采纳**，维持纯滑动续期——与主流产品的登录态一致：不退出登录、不换浏览器设备，就可以长期用。方案 (b) 清扫定时化、(c) `expires_at` 索引与上限无关，照做。配套前提记录在案：公网上线时第 2 条的 HTTPS + Secure cookie 是必要条件；对失窃 cookie 的补救靠现有吊销路径（改密码、控制台重置、停用账号都会让令牌失效）。
+
 - **位置**：`app.py` 的 `_RefreshLoginCookie` 中间件、`_login_token()`、`_sweep_expired_tokens()`；`db/models.py` 的 `LoginToken`
 - **现状**：每个带 cookie 的请求都把 `expires_at` 续到 now+7 天（中间件里 `_cookie_is_valid` 续一次，端点里 `_login_token` 又续一次）；`_login_token` 和登录端点开头都调 `_sweep_expired_tokens()`，对 `login_token` 全表做 `DELETE ... WHERE expires_at <= now`，而 `models.py` 里 `expires_at` 没有索引。
 - **影响**：a) 被窃的 cookie 只要持续使用就永不过期，没有「最长 30 天必须重新登录」这种绝对上限；b) 每个认证请求都带一次全表扫描 DELETE，是纯写放大，令牌行数涨起来后所有接口跟着变慢；c) 中间件+端点重复查询让 DB QPS 翻倍（详见第 15 条）。
