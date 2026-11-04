@@ -653,6 +653,7 @@ function ChatApp() {
         }}
       />
       <ChatMain
+        key={active?.id ?? 'new'}
         locale={locale}
         sidebarOpen={sidebarOpen}
         onShowSidebar={() => {
@@ -678,6 +679,11 @@ function ChatApp() {
         onRetry={(turnId) => {
           if (active) {
             void engine.retryTurn(active.id, turnId);
+          }
+        }}
+        onEditResend={(turnId, text) => {
+          if (active) {
+            void engine.retryTurn(active.id, turnId, text);
           }
         }}
       />

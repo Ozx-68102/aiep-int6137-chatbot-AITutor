@@ -1,4 +1,4 @@
-import {CircleAlert, CircleStop, RotateCcw} from 'lucide-react';
+import {CircleAlert, CircleStop, Pencil, RotateCcw} from 'lucide-react';
 import type {Message} from '../../type/chat.ts';
 
 /**
@@ -6,10 +6,10 @@ import type {Message} from '../../type/chat.ts';
  * hover 触发区 = 气泡本身 + 脚注区域：调用方把两者放进同一个 .group，
  * hover 型按钮用 group-hover 淡入。
  *
- * 第一期（docs/MESSAGE_ACTIONS.md）只有常驻内容：坏掉的轮次（failed / aborted）
- * 的状态提示和重试按钮，始终可见、不可关闭——坏掉的轮次必须始终留着恢复的入口。
- * hover 区暂时是空的：编辑按钮第三期进、复制/点赞点踩第四期进。
- * 流式输出中的等待气泡（三个点）不挂脚注。
+ * 常驻内容：坏掉的轮次（failed / aborted）的状态提示和重试按钮，始终可见、
+ * 不可关闭——坏掉的轮次必须始终留着恢复的入口。
+ * hover 区：最后一轮用户提问上的编辑按钮（group-hover 淡入）；复制/点赞点踩
+ * 第四期进驻。流式输出中的等待气泡（三个点）不挂脚注。
  */
 export function MessageActions({
   message,
@@ -19,6 +19,9 @@ export function MessageActions({
   entering = false,
   onRetry,
   onAnimationEnd,
+  canEdit = false,
+  editLabel,
+  onEdit,
 }: {
   message: Message;
   /** 失败轮的状态提示文字（i18n replyInterrupted，「消息生成失败」）。 */
@@ -29,6 +32,11 @@ export function MessageActions({
   entering?: boolean;
   onRetry: (turnId: string) => void;
   onAnimationEnd?: () => void;
+  /** 编辑按钮：只出现在最后一轮的用户提问下（docs/MESSAGE_ACTIONS.md 第三期）。 */
+  canEdit?: boolean;
+  /** 「编辑」popover 的文字（i18n edit）。 */
+  editLabel?: string;
+  onEdit?: () => void;
 }) {
   const failed = message.failed === true;
   const stopped = message.aborted === true;
@@ -58,8 +66,22 @@ export function MessageActions({
           </button>
         </div>
       ) : null}
-      {/* hover 区：第一期是空的。编辑（第三期）、复制/点赞点踩（第四期）进这里，
-          group-hover 淡入（触发区 = 气泡 + 脚注）。 */}
+      {/* hover 区：触发区 = 气泡 + 脚注（调用方的 .group），按钮淡入。
+          复制/点赞点踩（第四期）也进这里。 */}
+      {canEdit && onEdit !== undefined ? (
+        <div className="flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+          <div className="tooltip tooltip-bottom" data-tip={editLabel}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-square btn-xs"
+              aria-label={editLabel}
+              onClick={onEdit}
+            >
+              <Pencil className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

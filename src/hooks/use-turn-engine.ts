@@ -231,19 +231,39 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   }
 
   /**
-   * 重发一轮：把失败/被停的回答换成重新答一遍同一句提问。
+   * 重发一轮：重新答一遍同一句提问（重试），或者用改过的文字重新问一遍
+   * （编辑重发，docs/MESSAGE_ACTIONS.md 第三期）。
    *
    * 提问留在原处，旧的回答（连同脚注里的状态提示）去掉。新的回答算新的一轮，
    * 服务器会把上一轮在上游留下的记录删掉，历史里不会出现两遍问答。
+   *
+   * 传了 editedText 就是编辑重发：提问气泡的文字就地换成新的。发送没有成功
+   * （409 繁忙、请求没落地、后端没接下）时按 Gemini 的做法整轮回滚：新文字
+   * 回输入框（busy 路径的 setDraft 负责），提问恢复原文，被去掉的回答连同
+   * 状态提示恢复——动手改界面之前先把这一轮快照下来。请求已经落地的（流
+   * 中途断了）不回滚：服务器那边旧轮已经删了，回滚反而是骗人。
    */
-  async function retryTurn(sessionId: string, turnId: string) {
+  async function retryTurn(sessionId: string, turnId: string, editedText?: string) {
     if (sendingRef.current.has(sessionId)) {
       return;
     }
-    const question = questionOfTurn(sessionId, turnId);
+    const question = editedText ?? questionOfTurn(sessionId, turnId);
     if (question === null || question.trim() === '') {
       depsRef.current.setNotice(textRef.current.actionFailed);
       return;
+    }
+    const messages = depsRef.current.sessions.find((item) => item.id === sessionId)?.messages ?? [];
+    const indexStart = messages.findIndex((message) => message.turnId === turnId);
+    const snapshot = messages.filter((message) => message.turnId === turnId);
+    if (editedText !== undefined) {
+      depsRef.current.updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.role === 'user' && message.turnId === turnId
+            ? {...message, text: editedText}
+            : message,
+        ),
+      }));
     }
     removeTurnAnswer(sessionId, turnId);
     const newTurnId = crypto.randomUUID();
@@ -251,7 +271,25 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     setPendingIds((current) => new Set(current).add(sessionId));
     depsRef.current.setNotice(null);
     clearSessionWarning(sessionId);
-    await sendQuestion(sessionId, question, newTurnId, turnId);
+    await sendQuestion(sessionId, question, newTurnId, turnId, () => {
+      restoreTurn(sessionId, turnId, indexStart, snapshot);
+    });
+  }
+
+  /** 发送没成功：把这一轮恢复成重发之前的样子（提问文字、回答、状态标志都在内）。 */
+  function restoreTurn(sessionId: string, turnId: string, indexStart: number, snapshot: Message[]) {
+    if (snapshot.length === 0) {
+      return;
+    }
+    depsRef.current.updateSession(sessionId, (session) => {
+      const existing = session.messages.findIndex((message) => message.turnId === turnId);
+      const without = session.messages.filter((message) => message.turnId !== turnId);
+      const at = Math.min(existing === -1 ? indexStart : existing, without.length);
+      return {
+        ...session,
+        messages: [...without.slice(0, at), ...snapshot, ...without.slice(at)],
+      };
+    });
   }
 
   /**
@@ -403,6 +441,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     question: string,
     turnId: string,
     retryOf?: string,
+    onRollback?: () => void,
   ) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
@@ -427,6 +466,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         saveUnsent(question);
         setSessionWarning({sessionId, text: textRef.current.roundBusy});
         await refreshThread(sessionId);
+        // 重发（重试/编辑重发）没发出去：把旧轮放回来。refreshThread 一般已经
+        // 从服务器带回旧轮，这里是读线程失败时的兜底；恢复本身是幂等的。
+        onRollback?.();
         return;
       }
       if (outcome === 'aborted') {
@@ -446,12 +488,17 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (outcome === 'not-started') {
-        // 请求没落地，服务器上没有这一轮：空的气泡去掉，连不上归横幅报。
+        // 请求没落地，服务器上没有这一轮：空的气泡去掉，连不上归横幅报，
+        // 重发的旧轮放回原样。
         removeTurnAnswer(sessionId, turnId);
         depsRef.current.setNotice(textRef.current.connectionError);
+        onRollback?.();
       }
     } catch (error) {
       removeTurnAnswer(sessionId, turnId);
+      // 发送没成功：重发的旧轮放回原样（请求几乎可以肯定没落地；万一落了，
+      // 下一次读线程会用服务器的版本盖掉）。
+      onRollback?.();
       if (error instanceof ApiError && error.status === 401) {
         // 发送时被踢：发送前草稿已经清了，这句提问存起来，
         // 登录后放回输入框。

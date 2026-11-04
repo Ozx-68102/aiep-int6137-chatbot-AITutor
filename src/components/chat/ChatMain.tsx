@@ -1,5 +1,5 @@
 import {CircleStop, PanelLeftOpen, Send} from 'lucide-react';
-import {type SubmitEvent, useEffect, useRef} from 'react';
+import {type SubmitEvent, useEffect, useRef, useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
 import {visibleText, waitingForText} from '../../session/text.ts';
@@ -10,6 +10,9 @@ import {MarkdownText} from './MarkdownText.tsx';
 import {MessageActions} from './MessageActions.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
 import {WarningBox, type WarningItem} from './WarningBox.tsx';
+
+/** 正在编辑的那条提问：气泡 id、轮次编号、框里当前的文字。 */
+type EditingState = {messageId: string; turnId: string; text: string};
 
 export function ChatMain({
   locale,
@@ -27,6 +30,7 @@ export function ChatMain({
   onSubmit,
   onStop,
   onRetry,
+  onEditResend,
 }: {
   locale: Locale;
   sidebarOpen: boolean;
@@ -43,6 +47,7 @@ export function ChatMain({
   onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
   onStop: () => void;
   onRetry: (turnId: string) => void;
+  onEditResend: (turnId: string, text: string) => void;
 }) {
   const text = translations[locale];
   // 输入框自动长高：随内容增高，CSS 的 max-h-40 封顶后内部滚动。做成对
@@ -57,6 +62,34 @@ export function ChatMain({
     el.style.height = '0px';
     el.style.height = `${el.scrollHeight}px`;
   }, [draft]);
+
+  // 编辑态：最后一轮的用户提问就地换成编辑框（docs/MESSAGE_ACTIONS.md 第三期）。
+  // 切换会话时 App.tsx 用 key 把整个 ChatMain 重挂载，没提交的编辑框跟着清掉。
+  const [editing, setEditing] = useState<EditingState | null>(null);
+  const editAreaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = editAreaRef.current;
+    if (el === null) {
+      return;
+    }
+    el.style.height = '0px';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [editing?.text]);
+  const chatMessages = active?.messages ?? [];
+  let lastUserMessageId: string | null = null;
+  for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
+    if (chatMessages[index].role === 'user') {
+      lastUserMessageId = chatMessages[index].id;
+      break;
+    }
+  }
+  function submitEdit() {
+    if (editing === null || editing.text.trim() === '' || pending) {
+      return;
+    }
+    onEditResend(editing.turnId, editing.text);
+    setEditing(null);
+  }
 
   return (
     <main className="flex min-h-0 min-w-0 flex-col bg-white">
@@ -138,10 +171,68 @@ export function ChatMain({
                   </div>
                 );
               }
-              // TODO（docs/MESSAGE_ACTIONS.md 第三期）：最后一轮用户提问的脚注 hover 区里
-              // 加「编辑」按钮，点开是就地展开的编辑框（Enter/「发送」发出、Shift+Enter 换行、
-              // Esc 取消），发出去等于把这一轮重问一遍，用户视角跟「重试」一样。
               const classes = bubbleClass(message.role, entering);
+              if (editing !== null && editing.messageId === message.id) {
+                // 编辑态：气泡原地换成自动长高的编辑框，右下角「取消」「发送」。
+                // Enter/「发送」发出、Shift+Enter 换行、Esc 取消
+                //（docs/MESSAGE_ACTIONS.md 第三期）。
+                return (
+                  <div key={message.id} className={classes.wrap}>
+                    <div className="w-full max-w-[600px]">
+                      <textarea
+                        ref={editAreaRef}
+                        autoFocus
+                        className="textarea w-full min-h-10 max-h-40 resize-none overflow-y-auto text-base"
+                        rows={2}
+                        value={editing.text}
+                        aria-label={text.edit}
+                        onChange={(event) =>
+                          setEditing({
+                            messageId: message.id,
+                            turnId: editing.turnId,
+                            text: event.target.value,
+                          })
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setEditing(null);
+                            return;
+                          }
+                          if (
+                            event.key === 'Enter' &&
+                            !event.shiftKey &&
+                            !event.nativeEvent.isComposing
+                          ) {
+                            event.preventDefault();
+                            submitEdit();
+                          }
+                        }}
+                      />
+                      <div className="mt-1 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setEditing(null)}
+                        >
+                          {text.cancel}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={editing.text.trim() === '' || pending}
+                          onClick={submitEdit}
+                        >
+                          {text.send}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              // 编辑按钮只给最后一轮的用户提问；流式输出中（pending）不出现。
+              const canEdit =
+                !pending && message.id === lastUserMessageId && message.turnId !== undefined;
               return (
                 <div key={message.id} className={`${classes.wrap} group`}>
                   <p
@@ -157,6 +248,18 @@ export function ChatMain({
                     stoppedText={text.replyStopped}
                     retryLabel={text.retry}
                     onRetry={onRetry}
+                    canEdit={canEdit}
+                    editLabel={text.edit}
+                    onEdit={
+                      canEdit
+                        ? () =>
+                            setEditing({
+                              messageId: message.id,
+                              turnId: message.turnId ?? '',
+                              text: message.text,
+                            })
+                        : undefined
+                    }
                   />
                 </div>
               );
