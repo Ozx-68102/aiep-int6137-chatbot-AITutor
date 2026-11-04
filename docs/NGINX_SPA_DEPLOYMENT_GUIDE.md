@@ -56,8 +56,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # 聊天回答是逐字推送的流（SSE）。缓冲必须关：否则 Nginx 会把
-        # 回答憋在手里，用户看到长时间空白，最后一次性砸出来甚至超时断开。
+        # 聊天走 SSE 流。缓冲必须关：否则 Nginx 会把先到的帧憋在手里，
+        # 浏览器在流结束前一个字节都收不到，长静默也更容易撞超时。
+        # 注意：「静默几秒后回答整块出现」是上游的正常行为（它把答案
+        # 全部写完才发，见 docs/FASTGPT_API.md「流式行为」），不是这行的锅。
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 300s;
@@ -90,7 +92,7 @@ curl -I http://你的域名/chat/does-not-exist
 curl http://你的域名/api/status
 ```
 
-再到浏览器里过一遍：打开首页 → 登录 → 点开一个会话（地址变成 `/chat/<id>`）→ **按刷新** → 页面还在原会话上 → 发一条消息，回答应该**逐字出现**（整段一次性砸出来就是 ④ 的缓冲没关）。
+再到浏览器里过一遍：打开首页 → 登录 → 点开一个会话（地址变成 `/chat/<id>`）→ **按刷新** → 页面还在原会话上 → 发一条要答几秒的消息（比如「写一篇 200 字的短文」）：先静默一阵，然后**回答整块出现——这是上游 FastGPT 的正常行为**（它把答案全部写完才发，见 [FASTGPT_API.md](FASTGPT_API.md)「流式行为」），不是 ④ 的缓冲没关。要确认缓冲真的关了：等回答的那段时间里，在开发者工具 Network 面板点开这条 `/api/chat` 请求，请求还没结束时 Response 里就应该已经有内容；直到请求整个结束才见到第一个字节的，才是缓冲没关。
 
 ## 常见故障对照
 
@@ -99,7 +101,8 @@ curl http://你的域名/api/status
 | 刷新 `/chat/xxx`、`/admin` 就 404 | 没配 SPA 回落                 | 补上①                                                          |
 | 页面白屏，控制台报 JS/CSS 404     | `root` 指错目录               | 确认 `index.html` 和 `assets/` 就在 `root` 下面一层            |
 | 页面正常但登录报网络错误          | `/api` 没反代，或接口服务没起 | 查④，确认 3001 端口有进程在听                                  |
-| 回答不逐字、憋很久后整段出现      | Nginx 缓冲没关                | `proxy_buffering off`（④里那行）                               |
+| 静默几秒后回答整块出现              | 正常行为，不是故障               | 上游把答案全部写完才发，见 FASTGPT_API.md「流式行为」            |
+| 请求结束前一个字节都收不到          | Nginx 缓冲没关，答案和收尾一起到 | `proxy_buffering off`（④里那行）                                 |
 | 发了新版，用户看到的还是旧页面    | `index.html` 被缓存了         | 查②；也检查有没有在更外层配全局缓存                            |
 | 全部 404                          | 配置没生效                    | `nginx -t` 看语法，确认软链建了、`systemctl reload nginx` 跑过 |
 
