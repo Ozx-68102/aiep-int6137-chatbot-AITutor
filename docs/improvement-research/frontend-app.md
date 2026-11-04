@@ -33,46 +33,7 @@
 
 ### N1. 会话状态通道（SSE）：expired / disabled 状态与就地重登录
 
-- **位置**：新增 `/src/hooks/use-account-events.ts`；改 `/src/App.tsx` 的 `enterLogin`、`ChatApp` 状态机；协议见 `/docs/ACCOUNT_MANAGEMENT.md`「会话状态通道」一节（后端 `GET /api/events` 尚未实现，此条是它的前端半边）。
-- **现状**：账号在别处被吊销（改密、控制台重置、被禁用）后，当前页面要等到下一次请求吃 401 才发现，然后 `enterLogin` 一把清空：会话列表、页面状态全没了，整页换成登录界面。ACCOUNT_MANAGEMENT.md 已把「expired 时聊天页原地保留、输入框上方常驻提示、弹登录框而不是整页换掉」列为待办，多标签页不同步的问题也点名了。
-- **影响**：学生在别的设备改了密码，正在用的这台要「输入、发送、失败」之后才知道掉线，体验差且草稿靠 `h2bot-unsent` 兜底才不丢。这是文档里定义的「最核心的一条」。
-- **方案**：后端按文档实现 `GET /api/events`（连上先发一次 `state`，之后 `revoked` / `disabled` 才推）之后，前端加一个 hook：
-
-  ```ts
-  // src/hooks/use-account-events.ts
-  import {useEffect} from 'react';
-
-  export type AccountInvalid = {reason: 'revoked' | 'disabled'; message: string};
-
-  export function useAccountEvents(
-    auth: 'checking' | 'anonymous' | 'ready',
-    onInvalidate: (invalid: AccountInvalid) => void,
-  ): void {
-    useEffect(() => {
-      if (auth !== 'ready') {
-        return;
-      }
-      // 同源自动带 cookie；断线 EventSource 自己重连，重连即补状态。
-      const source = new EventSource('/api/events');
-      source.addEventListener('state', (event) => {
-        const data = JSON.parse((event as MessageEvent<string>).data) as {
-          valid?: boolean;
-          reason?: string;
-          message?: string;
-        };
-        if (data.valid === false && (data.reason === 'revoked' || data.reason === 'disabled')) {
-          onInvalidate({reason: data.reason, message: data.message ?? ''});
-        }
-      });
-      return () => source.close();
-    }, [auth]);
-  }
-  ```
-
-  `ChatApp` 里加 `const [invalid, setInvalid] = useState<AccountInvalid | null>(null)`：`revoked` → 输入框禁用、WarningBox 挂常驻提示 + 「重新登录」按钮（弹 `LoginScreen` 同款卡片进 Modal，不清 sessions / draft），登录成功走现有 `openAccount` 恢复；`disabled` → 只给提示不给登录框。`enterLogin` 保持现状给真正的整页退出用。30 秒 `/api/status` 轮询保留做兜底（文档定的三层结构）。
-- **第三方库**：无（浏览器自带 `EventSource`，文档也明确这么定）。
-- **风险**：与 `use-turn-engine` 的轮询、`useServiceStatus` 的 401 处理有交互，「原地保留」路径要理清哪些效果继续跑哪些停；后端未实现前此条只能停在方案。改动横跨登录核心链路，按 AGENTS.md 属大改动，要维护者点头。
-- **工作量**：L（前端半边 M，联调加后端另算）。
+> **部分实现（2026-11-05）**：最小 HTTP 版已落地——会话类 401 的响应体带 reason 字段（词表 expired/disabled；disabled 因停用列未建暂时发不出），前端 auth 为 ready 时收到带 reason 的 401 进「会话过期原地态」：会话、消息、草稿、profile 缓存全保留，输入区禁用、常驻警示条，expired 给「重新登录」就地弹 Modal 内嵌 LoginScreen，成功走 openAccount + resetForLogin + bumpThreadRetry 原地恢复；不带 reason 的 401 回退旧的整页登录路径。GET /api/events 推送通道未做，仍是 backlog（设计见 docs/ACCOUNT_MANAGEMENT.md「会话状态通道」）。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「会话过期原地态」和 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「401 带原因」。调研原文以 LayerFS 历史为准。
 
 ### N2. 会话列表搜索框
 
@@ -718,33 +679,7 @@
 
 ### P2. fetch 无超时：启动引导可能永远停在占位页
 
-- **位置**：`/src/api/http.ts` 的 `request()`；受害最重的是 `/src/App.tsx` 的启动效果。
-- **现状**：`fetch` 没配 `signal`/超时。TCP 连上了但服务器不回话（后端挂死、代理吞包）时，`listSessions()` 的 promise 永远悬着：`auth` 停在 `'checking'`，页面是那个 `bg-stone-100` 空 div，没有提示、没有重试入口，用户只能手动刷新——刷新后大概率还是挂住。`/api/status` 轮询同理（但轮询是串行 tick，不会堆积）。
-- **影响**：最坏的故障形态：无限白屏，且现有「连不上服务器」的降级 UI 完全帮不上忙（它只在 fetch 抛错时触发）。
-- **方案**：`request()` 里加 `AbortSignal.timeout`（Chrome 103+/Safari 16.4+，本项目目标浏览器可用；超时会抛 `TimeoutError` DOMException，被现有 catch 转成 `ApiError(0, null)`，正好落进 connectionFailure 的既有降级路径）：
-
-  ```ts
-  const requestTimeoutMs = 15_000;
-
-  async function request(path, init?): Promise<Response> {
-    try {
-      return await fetch(path, {
-        method: init?.method ?? 'GET',
-        credentials: 'include',
-        signal: AbortSignal.timeout(requestTimeoutMs),
-        headers: /* 现有逻辑 */,
-        body: init?.body,
-      });
-    } catch {
-      throw new ApiError(0, null);
-    }
-  }
-  ```
-
-  注意两点：① 流式聊天请求（`api/chat.ts`，不在本次范围）如果有自己的 fetch，长连接不能套 15 秒总超时，要区分「连接超时」和「读超时」或干脆不动它；② `withConnectionRetry` 4 次 × (15s + 300ms) 最坏 61 秒才报错，超时场景可考虑减少重试次数。
-- **第三方库**：无。
-- **风险**：中。超时值是全局行为改变，弱网学校的大文件上传（头像 5MB）要留足余量，或给 FormData 请求单独放宽。手点：DevTools 里把后端 hang 住验证 15 秒后进降级 UI。
-- **工作量**：M。
+> **已实现（2026-11-05）**：普通请求 fetch 超时 15 秒、FormData（头像上传）60 秒（AbortSignal.timeout，超时统一包成 ApiError(0, null) 落进「连不上」的既有降级路径）；流式对话请求没有总超时（上游整块返回，一轮实测可达 23 秒，断流靠续传恢复）。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「超时与重试」。调研原文以 LayerFS 历史为准。
 
 ### P3. `ApiError(0, null)` 语义过载：「连不上」和「响应解析不了」混为一谈
 
@@ -889,13 +824,7 @@
 
 > **已修复（2026-11-04）**：README 与 ACCOUNT_MANAGEMENT 的 URL 引用已统一到路径路由（本地提交 1418e5c，LayerFS 分支 `docs-update-path-references`），仓库文档里已无 `?page=admin`、`?page=password`（仅本条目原文引述）。本节保留作调研记录。
 
-- **位置**：`/README.md`「功能」一节（「管理员控制台在 `?page=admin`」）、`/docs/ACCOUNT_MANAGEMENT.md`「控制台」一节（「地址 `?page=admin`（同源单页应用里的路由，没做 `/admin/` 独立入口）」）与「修改密码」一节（「页面地址带 `?page=password`」）。
-- **现状**：代码早已改成真实路径路由：`App.tsx` 的 `/admin` Route、`usePathRouting` 认的 `/password` 路径。README 自己的「部署」一节都在讲「真实路径路由（`/chat/<会话id>`、`/password`、`/admin`）」——同一份 README 前后矛盾；ACCOUNT_MANAGEMENT 的「没做 /admin 独立入口」与代码直接冲突。
-- **影响**：照文档操作的人会去试 `?page=admin`（现在会被路由归位效果送回根路径），排障和新人上手都被误导；这类漂移正是 `refactor-drop-legacy-redirects` 那轮改造后忘了扫尾。
-- **方案**：三处文本更新：README「管理员控制台在 `/admin`（真实路径，SPA 回落配置见部署节）」；ACCOUNT_MANAGEMENT「控制台」的入口描述改成 `/admin` 路径 + `admin_login` cookie；「修改密码」的地址描述改成「页面地址是 `/password`，取消的行为按进入方式分后退/就地替换（`use-path-routing.ts` 的 `passwordEntry`）」。纯文档改动。
-- **第三方库**：无。
-- **风险**：无。
-- **工作量**：S。
+> 现状见 README.md 与 docs/ACCOUNT_MANAGEMENT.md（均已对齐真实路径路由）；调研原文以 LayerFS 历史为准。
 
 ### P10. AdminConsole 账号表：空态缺失、无手动刷新、无分页预期
 

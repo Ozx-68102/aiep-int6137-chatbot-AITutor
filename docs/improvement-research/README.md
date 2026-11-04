@@ -1,6 +1,8 @@
 # 改进调研（improvement-research）
 
-本文件夹集中存放对本项目前后端的改进调研：可以增加的新功能、可优化的点、未完善的点、潜在问题，以及对应的可行代码方案和所需第三方库。
+**定位（2026-11-05 起）**：本文件夹从此是「调研档案 + 未实现 backlog」。已实现的条目不再维护正文：只保留标题、编号和标题下的一条墓碑注记（一句现状摘要 + 指向 docs/ 根目录的现状文档），调研原文以 LayerFS 历史为准。没实现的条目原地不动——这里是它们唯一的追踪处。条目编号被全仓引用，永久保留，不要因为任何整理而重排。
+
+功能现状描述在 docs/ 根目录：聊天流协议与轮次生命周期 [CHAT_STREAM_PROTOCOL.md](../CHAT_STREAM_PROTOCOL.md)、登录态令牌与限流 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](../LOGIN_SESSIONS_AND_RATE_LIMITING.md)、轮次日志与排查 [TURN_LOGGING_AND_DIAGNOSTICS.md](../TURN_LOGGING_AND_DIAGNOSTICS.md)、聊天页面行为 [CHAT_PAGE_BEHAVIOR.md](../CHAT_PAGE_BEHAVIOR.md)、消息操作区 [MESSAGE_ACTIONS.md](../MESSAGE_ACTIONS.md)。
 
 调研只读代码、不改代码；所有结论都以「建议」形式给出，由维护者决定是否采纳。第三方库一律只点名、不擅自安装（见根目录 AGENTS.md 的守则）。
 
@@ -15,6 +17,8 @@
 | dx-tooling.md | 工程化：构建、lint/格式化、类型检查、文档体系、依赖管理 | 28（构建 / 检查 / 依赖 / 文档 / 卫生五节） | ~46 KB |
 
 共 154 条编号发现。五份文档交叉引用了彼此的发现（例如登录端点无限流在前端外壳、后端接口、后端基建三份里从不同视角各有一条），落地时以对应领域的文档为主、其余为佐证。
+
+> **2026-11-05 文档收编**：上表的「条目数 / 大小」是调研时的状态；已实现条目正文已迁出、只留墓碑，实际文件相应变薄。墓碑化清单——backend-api N1/N6/N9/O1/O2/O7/O8/O11/P1/P5 与 P2（部分实现：nginx 请求体兜底留部署日）；backend-infra 第 1/13 条、第 4 条（部分实现：清扫定时化与索引已做，绝对上限被拍板否掉，Secure cookie 留部署日）、第 23 条（a 档已实现）；dx-tooling 第 8 条、第 12 条（部分实现：只加了 ASYNC）；frontend-chat N1/N2/N4/N5/N6/N7/N8/O3/O4/O5/O6/P1/P2/P3/P5/P6 与 P9（已随 done 事件批演化）；frontend-app P2、N1（部分实现：最小 HTTP 版已做，推送通道未做）、P9。没实现的条目一律保留原样；frontend-chat O1/O2（渲染合批）为搁置条目，已加拍板注记。
 
 ## 约定
 
@@ -38,6 +42,8 @@
 其余点名的库要么不需要（slowapi、husky、lint-staged、pnpm catalog），要么绑定前提条件（structlog、sentry-sdk、prometheus-client、@ariakit/react、pg_trgm 扩展、cachetools），要么已在依赖里只是用法要改（redis.asyncio）。
 
 ## 建议落地顺序（跨文档汇总）
+
+> **2026-11-05 注**：下面各批已大部分实现或搁置，落地状态以各条目的墓碑注记为准；本节保留作调研档案。
 
 1. **第一批（全部 S 级、互相独立、不动接口契约）**：聊天区滚动跟随（frontend-chat N1）、流式 rAF 合批（O1）、弱网重试三个洞（P1/P2/P4）、fetch 超时（frontend-app P2）、POST 不盲目重试（三份文档共同指出）、登录端点接现成限流（backend-api P1 / backend-infra 第 1 条）、输入 max_length、avatar 字段 deferred、日志收窄、ruff 加 ASYNC 组、check 并入 tsc。
 2. **第二批（安全与部署加固）**：cookie Secure/__Host- + TLS、nginx 完善（client_max_body_size、安全头）、systemd 守护、优雅停机、连接池 pre_ping、绝对会话上限。
