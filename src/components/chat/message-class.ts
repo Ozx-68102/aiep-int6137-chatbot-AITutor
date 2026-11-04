@@ -19,14 +19,6 @@ export function bubbleClass(role: Message['role'], entering: boolean): BubbleCla
         : 'chat-bubble chat-bubble-primary max-w-[600px] whitespace-pre-wrap break-words',
     };
   }
-  if (role === 'error') {
-    return {
-      wrap: 'chat chat-start',
-      bubble: entering
-        ? 'chat-bubble chat-bubble-error max-w-[600px] animate-in whitespace-pre-wrap break-words fade-in slide-in-from-bottom-2 duration-200'
-        : 'chat-bubble chat-bubble-error max-w-[600px] whitespace-pre-wrap break-words',
-    };
-  }
   return {
     wrap: 'chat chat-start',
     bubble: entering

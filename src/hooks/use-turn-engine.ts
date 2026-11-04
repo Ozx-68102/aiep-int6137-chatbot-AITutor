@@ -74,7 +74,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     let cancelled = false;
     flights.add(sessionId);
     setHistoryLoadingId(sessionId);
-    void loadThread(sessionId, depsRef.current.locale)
+    void loadThread(sessionId)
       .then((thread) => {
         if (cancelled) {
           return;
@@ -209,20 +209,31 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }));
   }
 
-  /** 把这一轮的错误提示去掉（重发之前）。 */
-  function removeFailedNotice(sessionId: string, turnId: string) {
+  /**
+   * 把这一轮的回答标成失败/被停：脚注里的常驻状态提示和重试按钮由消息
+   * 自身的标志驱动（docs/MESSAGE_ACTIONS.md），实时流程里就打标，不只靠
+   * 刷新后的服务器标志。waiting 一并清掉，零文字的轮次不再显示三个点；
+   * 气泡不去掉——没有文字时只渲染脚注。
+   */
+  function markTurnStatus(sessionId: string, turnId: string, status: 'failed' | 'aborted') {
+    if (turnId === '') {
+      return;
+    }
+    const mark = status === 'failed' ? {failed: true} : {aborted: true};
     depsRef.current.updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.filter(
-        (message) => !(message.turnId === turnId && message.role === 'error'),
+      messages: session.messages.map((message) =>
+        message.turnId === turnId && message.role === 'assistant'
+          ? {...message, waiting: false, ...mark}
+          : message,
       ),
     }));
   }
 
   /**
-   * 重发一轮：把失败的回答换成重新答一遍同一句提问。
+   * 重发一轮：把失败/被停的回答换成重新答一遍同一句提问。
    *
-   * 提问留在原处，失败的回答和它的提示去掉。新的回答算新的一轮，
+   * 提问留在原处，旧的回答（连同脚注里的状态提示）去掉。新的回答算新的一轮，
    * 服务器会把上一轮在上游留下的记录删掉，历史里不会出现两遍问答。
    */
   async function retryTurn(sessionId: string, turnId: string) {
@@ -235,7 +246,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       return;
     }
     removeTurnAnswer(sessionId, turnId);
-    removeFailedNotice(sessionId, turnId);
     const newTurnId = crypto.randomUUID();
     sendingRef.current.add(sessionId);
     setPendingIds((current) => new Set(current).add(sessionId));
@@ -247,44 +257,25 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   /**
    * 某一轮问的是什么。
    *
-   * 提问那条不一定带这一轮的编号：刷新以后看到的提问是上游的记录，
-   * 上游不知道我们的编号。那就按位置找 —— 失败提示前面最近的一条提问。
+   * 先按轮次编号认提问那条。提问不一定带这一轮的编号：刷新以后看到的
+   * 提问是上游的记录，上游不知道我们的编号。那就按位置找 —— 这一轮的
+   * 回答前面最近的一条提问。
    */
   function questionOfTurn(sessionId: string, turnId: string): string | null {
     const messages = depsRef.current.sessions.find((item) => item.id === sessionId)?.messages ?? [];
-    const notice = messages.findIndex(
-      (message) => message.role === 'error' && message.turnId === turnId,
+    const own = messages.find((message) => message.role === 'user' && message.turnId === turnId);
+    if (own !== undefined) {
+      return own.text;
+    }
+    const answer = messages.findIndex(
+      (message) => message.role === 'assistant' && message.turnId === turnId,
     );
-    for (let index = notice - 1; index >= 0; index -= 1) {
+    for (let index = answer - 1; index >= 0; index -= 1) {
       if (messages[index].role === 'user') {
         return messages[index].text;
       }
     }
-    const own = messages.find((message) => message.role === 'user' && message.turnId === turnId);
-    return own?.text ?? null;
-  }
-
-  /**
-   * 聊天记录里的错误提示。带着这一轮的编号时，用户可以重发这一轮。
-   */
-  function addErrorMessage(
-    sessionId: string,
-    content: string,
-    messageLocale: Locale,
-    turnId?: string,
-  ) {
-    const message: Message = {
-      id: crypto.randomUUID(),
-      role: 'error',
-      text: content,
-      locale: messageLocale,
-      turnId,
-    };
-    depsRef.current.updateSession(sessionId, (session) => ({
-      ...session,
-      messages: [...session.messages, message],
-    }));
-    depsRef.current.markEntering(message.id);
+    return null;
   }
 
   function clearPending(sessionId: string) {
@@ -295,7 +286,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     });
   }
 
-  /** 新的一轮开始了：上一轮的提示（比如「对话已停止」）不再占着位置。 */
+  /** 新的一轮开始了：上一轮的横幅（比如「这场对话还有一条正在回答」）不再占着位置。 */
   function clearSessionWarning(sessionId: string) {
     setSessionWarning((current) => (current?.sessionId === sessionId ? null : current));
   }
@@ -321,15 +312,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         stopPolling(sessionId);
         clearPending(sessionId);
         if (partial.status === 'failed') {
-          addErrorMessage(
-            sessionId,
-            textRef.current.replyInterrupted,
-            depsRef.current.locale,
-            turnId,
-          );
+          markTurnStatus(sessionId, turnId, 'failed');
         }
         if (partial.status === 'aborted') {
-          setSessionWarning({sessionId, text: textRef.current.replyStopped});
+          markTurnStatus(sessionId, turnId, 'aborted');
         }
       },
       () => {
@@ -357,15 +343,15 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     try {
       partial = await readPartial(sessionId);
     } catch {
-      // 问不到服务器：不知道这一轮到底怎么样，只能报连不上。
+      // 问不到服务器：不知道这一轮到底怎么样，只能报连不上（归横幅）。
       removeTurnAnswer(sessionId, turnId);
-      addErrorMessage(sessionId, textRef.current.connectionError, depsRef.current.locale);
+      depsRef.current.setNotice(textRef.current.connectionError);
       return;
     }
     if (partial.turnId !== null && partial.turnId !== turnId) {
-      // Redis 里留着的是别的轮次，这一轮其实没写出来。
+      // Redis 里留着的是别的轮次，这一轮其实没写出来。归横幅。
       removeTurnAnswer(sessionId, turnId);
-      addErrorMessage(sessionId, textRef.current.connectionError, depsRef.current.locale);
+      depsRef.current.setNotice(textRef.current.connectionError);
       return;
     }
     if (partial.status === 'streaming') {
@@ -375,28 +361,28 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }
     if (partial.status === 'failed') {
       applyPartialText(sessionId, turnId, partial);
-      addErrorMessage(sessionId, textRef.current.replyInterrupted, depsRef.current.locale, turnId);
+      markTurnStatus(sessionId, turnId, 'failed');
       return;
     }
     if (partial.status === 'aborted') {
       applyPartialText(sessionId, turnId, partial);
-      setSessionWarning({sessionId, text: textRef.current.replyStopped});
+      markTurnStatus(sessionId, turnId, 'aborted');
       return;
     }
     if (partial.status === 'finished') {
       if (partial.turnId === null && partial.text.trim() === lastAssistantText(sessionId)?.trim()) {
-        // Redis 里没有编号，只能靠文字分辨：留着的是上一轮的收尾，这一轮其实没开始。
+        // Redis 里没有编号，只能靠文字分辨：留着的是上一轮的收尾，这一轮其实没开始。归横幅。
         removeTurnAnswer(sessionId, turnId);
-        addErrorMessage(sessionId, textRef.current.connectionError, depsRef.current.locale);
+        depsRef.current.setNotice(textRef.current.connectionError);
         return;
       }
       applyPartialText(sessionId, turnId, partial);
       return;
     }
-    // 这一轮根本没写出来（上游还没接上就断了）：提示照样给，
-    // 也照样能重发 —— 这一轮在上游没有留下什么，重发就是重新问一遍。
-    removeTurnAnswer(sessionId, turnId);
-    addErrorMessage(sessionId, textRef.current.replyInterrupted, depsRef.current.locale, turnId);
+    // 这一轮根本没写出来（上游还没接上就断了）：标成失败，照样能重发 ——
+    // 这一轮在上游没有留下什么，重发就是重新问一遍。零文字的回答气泡留着
+    // （只渲染脚注），提示落在用户提问下方。
+    markTurnStatus(sessionId, turnId, 'failed');
   }
 
   /** 这一场会话里最后一条助手回答，用来分辨 Redis 里那份是上一轮留下的还是这一轮的。 */
@@ -421,7 +407,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
     aborters.current.set(sessionId, {controller, turnId});
-    let received = '';
     try {
       addWaitingMessage(sessionId, assistantId, turnId);
       const outcome = await streamReply(
@@ -430,7 +415,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         depsRef.current.locale,
         turnId,
         (chunk) => {
-          received += chunk;
           applyStreamText(sessionId, assistantId, chunk);
         },
         controller.signal,
@@ -447,16 +431,14 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       }
       if (outcome === 'aborted') {
         // 用户按了停止。停止流程负责收尾：它去问服务器这一轮到底怎么样，
-        // 页面上说的话要跟服务器一致。
+        // 页面上打的标记要跟服务器一致。
         const stop = stoppers.current.get(sessionId);
         if (stop) {
           await stop;
           return;
         }
-        if (received.trim() === '') {
-          removeTurnAnswer(sessionId, turnId);
-        }
-        setSessionWarning({sessionId, text: textRef.current.replyStopped});
+        // 没有收尾流程可等（理论上不会发生）：就地把这一轮标成被停。
+        markTurnStatus(sessionId, turnId, 'aborted');
         return;
       }
       if (outcome === 'interrupted') {
@@ -464,8 +446,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (outcome === 'not-started') {
+        // 请求没落地，服务器上没有这一轮：空的气泡去掉，连不上归横幅报。
         removeTurnAnswer(sessionId, turnId);
-        addErrorMessage(sessionId, textRef.current.connectionError, depsRef.current.locale);
+        depsRef.current.setNotice(textRef.current.connectionError);
       }
     } catch (error) {
       removeTurnAnswer(sessionId, turnId);
@@ -480,13 +463,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         depsRef.current.onConnectionWarning();
         return;
       }
+      // 后端没接下（ApiError 带 detail）或别的异常：归横幅报，不再往消息流里插错误消息。
       const detail = error instanceof ApiError ? error.detail : null;
-      addErrorMessage(
-        sessionId,
-        detail ?? textRef.current.connectionError,
-        detail ? 'zh-CN' : depsRef.current.locale,
-        turnId,
-      );
+      depsRef.current.setNotice(detail ?? textRef.current.connectionError);
     } finally {
       aborters.current.delete(sessionId);
       stoppers.current.delete(sessionId);
@@ -500,7 +479,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   /** 重新读一次线程：这一轮是在别的页面发出去的，本页还不知道。 */
   async function refreshThread(sessionId: string) {
     try {
-      const thread = await loadThread(sessionId, depsRef.current.locale);
+      const thread = await loadThread(sessionId);
       depsRef.current.updateSession(sessionId, (session) => ({
         ...session,
         messages: thread.messages,
@@ -518,8 +497,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 用户按了停止之后的收尾。
    *
    * 先让服务器记下停止（服务器写停止标记，再取消正在跑的任务），
-   * 再问服务器这一轮到底怎么样：服务器说还在写就接着等，
-   * 说停了就显示「对话已停止」。页面不自己宣布停了。
+   * 再问服务器这一轮到底怎么样：服务器说还在写就接着等，说停了就把
+   * 这一轮的回答标成 aborted（气泡下方的脚注显示「对话已停止」）。
+   * 页面不自己宣布停了。
    */
   async function finishStop(sessionId: string, turnId: string) {
     try {
@@ -536,9 +516,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }
 
     if (partial === null || (partial.turnId !== null && partial.turnId !== turnId)) {
-      // 问不到服务器，或者 Redis 里留着的是别的轮次：按停掉了处理。
-      removeTurnAnswer(sessionId, turnId);
-      setSessionWarning({sessionId, text: textRef.current.replyStopped});
+      // 问不到服务器，或者 Redis 里留着的是别的轮次：按停掉了处理，
+      // 把这一轮的回答标成 aborted（零文字也留着，只渲染脚注）。
+      markTurnStatus(sessionId, turnId, 'aborted');
       return;
     }
     if (partial.status === 'streaming') {
@@ -549,7 +529,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }
     if (partial.status === 'failed') {
       applyPartialText(sessionId, turnId, partial);
-      addErrorMessage(sessionId, textRef.current.replyInterrupted, depsRef.current.locale, turnId);
+      markTurnStatus(sessionId, turnId, 'failed');
       return;
     }
     if (partial.status === 'finished') {
@@ -557,11 +537,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       applyPartialText(sessionId, turnId, partial);
       return;
     }
-    // aborted，或者这一轮根本没开始。
-    if (partial.text.trim() === '') {
-      removeTurnAnswer(sessionId, turnId);
-    }
-    setSessionWarning({sessionId, text: textRef.current.replyStopped});
+    // aborted，或者这一轮根本没开始：把这一轮的回答标成 aborted，
+    // 零文字也留着气泡（只渲染脚注），不再进横幅。
+    markTurnStatus(sessionId, turnId, 'aborted');
   }
 
   async function stopSending(sessionId: string) {

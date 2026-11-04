@@ -6,8 +6,8 @@ import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {bubbleClass} from './message-class.ts';
-import {FailedReply} from './FailedReply.tsx';
 import {MarkdownText} from './MarkdownText.tsx';
+import {MessageActions} from './MessageActions.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
 import {WarningBox, type WarningItem} from './WarningBox.tsx';
 
@@ -67,71 +67,71 @@ export function ChatMain({
       <div className="min-h-0 flex-1 overflow-auto p-4" aria-live="polite" aria-busy={pending}>
         {active && active.messages.length > 0
           ? active.messages.map((message) => {
+              const entering = enteringIds.includes(message.id);
               const textShown = visibleText(message.role, message.text);
               if (textShown === '') {
-                if (!waitingForText(message)) {
-                  return null;
+                if (waitingForText(message)) {
+                  return (
+                    <ThinkingBubble
+                      key={message.id}
+                      entering={entering}
+                      label={text.thinking}
+                      onAnimationEnd={() => onAnimationEnd(message.id)}
+                    />
+                  );
                 }
-                return (
-                  <ThinkingBubble
-                    key={message.id}
-                    entering={enteringIds.includes(message.id)}
-                    label={text.thinking}
-                    onAnimationEnd={() => onAnimationEnd(message.id)}
-                  />
-                );
-              }
-              if (message.role === 'error' && message.turnId !== undefined) {
-                return (
-                  <FailedReply
-                    key={message.id}
-                    text={textShown}
-                    retryLabel={text.retry}
-                    entering={enteringIds.includes(message.id)}
-                    onRetry={() => {
-                      onRetry(message.turnId ?? '');
-                    }}
-                    onAnimationEnd={() => onAnimationEnd(message.id)}
-                  />
-                );
+                if (
+                  message.role === 'assistant' &&
+                  (message.failed === true || message.aborted === true)
+                ) {
+                  // 零文字的失败/被停轮：没有气泡，只有脚注，
+                  // 位置自然落在用户提问下方（docs/MESSAGE_ACTIONS.md）。
+                  const classes = bubbleClass('assistant', false);
+                  return (
+                    <div key={message.id} className={`${classes.wrap} group`}>
+                      <MessageActions
+                        message={message}
+                        failedText={text.replyInterrupted}
+                        stoppedText={text.replyStopped}
+                        retryLabel={text.retry}
+                        entering={entering}
+                        onRetry={onRetry}
+                        onAnimationEnd={() => onAnimationEnd(message.id)}
+                      />
+                    </div>
+                  );
+                }
+                return null;
               }
               if (message.role === 'assistant') {
-                const entering = enteringIds.includes(message.id);
                 const classes = bubbleClass(message.role, entering);
                 return (
-                  <div key={message.id}>
-                    {textShown === '' ? null : (
-                      <div className={classes.wrap}>
-                        <div
-                          lang={message.locale ? htmlLang[message.locale] : undefined}
-                          className={classes.bubble}
-                          onAnimationEnd={() => onAnimationEnd(message.id)}
-                        >
-                          <MarkdownText text={textShown} />
-                        </div>
-                      </div>
-                    )}
-                    {message.aborted === true ? (
-                      <p
-                        className={
-                          entering
-                            ? 'mb-3 m-0 animate-in text-sm text-stone-500 fade-in duration-200'
-                            : 'mb-3 m-0 text-sm text-stone-500'
-                        }
-                        onAnimationEnd={() => onAnimationEnd(message.id)}
-                      >
-                        {text.replyStopped}
-                      </p>
-                    ) : null}
+                  <div key={message.id} className={`${classes.wrap} group`}>
+                    <div
+                      lang={message.locale ? htmlLang[message.locale] : undefined}
+                      className={classes.bubble}
+                      onAnimationEnd={() => onAnimationEnd(message.id)}
+                    >
+                      <MarkdownText text={textShown} />
+                    </div>
+                    <MessageActions
+                      message={message}
+                      failedText={text.replyInterrupted}
+                      stoppedText={text.replyStopped}
+                      retryLabel={text.retry}
+                      entering={entering}
+                      onRetry={onRetry}
+                      onAnimationEnd={() => onAnimationEnd(message.id)}
+                    />
                   </div>
                 );
               }
-              // TODO：每一轮下面加一个小的「编辑」按钮，点开是修改框
-              //（右下角「取消」「发送」），改完发出去等于把这一轮重问一遍，
-              //用户视角跟「重试」一样。设计和待定的问题写在 docs/EDIT_MESSAGE.md。
-              const classes = bubbleClass(message.role, enteringIds.includes(message.id));
+              // TODO（docs/MESSAGE_ACTIONS.md 第三期）：最后一轮用户提问的脚注 hover 区里
+              // 加「编辑」按钮，点开是就地展开的编辑框（Enter/「发送」发出、Shift+Enter 换行、
+              // Esc 取消），发出去等于把这一轮重问一遍，用户视角跟「重试」一样。
+              const classes = bubbleClass(message.role, entering);
               return (
-                <div key={message.id} className={classes.wrap}>
+                <div key={message.id} className={`${classes.wrap} group`}>
                   <p
                     lang={message.locale ? htmlLang[message.locale] : undefined}
                     className={classes.bubble}
@@ -139,6 +139,13 @@ export function ChatMain({
                   >
                     {textShown}
                   </p>
+                  <MessageActions
+                    message={message}
+                    failedText={text.replyInterrupted}
+                    stoppedText={text.replyStopped}
+                    retryLabel={text.retry}
+                    onRetry={onRetry}
+                  />
                 </div>
               );
             })
@@ -147,16 +154,22 @@ export function ChatMain({
           <p className="m-0 text-stone-500">{text.empty}</p>
         ) : null}
       </div>
+      {/* 警示横幅：聊天滚动区与输入区之间的流内兄弟节点。分隔线固定在输入区顶上，
+          横幅坐在线的正上方，出现时压缩滚动区高度、不遮挡内容；多条纵向堆叠。 */}
+      {warnings.length > 0 ? (
+        <div className="px-4 pt-3">
+          {warnings.map((warning) => (
+            <WarningBox
+              key={warning.id}
+              tone={warning.tone}
+              text={warning.text}
+              dismissLabel={text.close}
+              onDismiss={warning.onDismiss}
+            />
+          ))}
+        </div>
+      ) : null}
       <div className="border-t border-stone-300 px-4 pt-3 pb-4">
-        {warnings.map((warning) => (
-          <WarningBox
-            key={warning.id}
-            tone={warning.tone}
-            text={warning.text}
-            dismissLabel={text.close}
-            onDismiss={warning.onDismiss}
-          />
-        ))}
         <form className="flex items-center gap-2" onSubmit={onSubmit}>
           <input
             className="input min-w-0 flex-1"

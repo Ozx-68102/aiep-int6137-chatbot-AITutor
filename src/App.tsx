@@ -159,7 +159,7 @@ function ChatApp() {
   const activePending = active ? engine.pendingIds.has(active.id) : false;
   const inputLocked = sendingNew || activePending;
   const historyLocked = engine.historyLoadingId === active?.id && active.messages.length === 0;
-  // 会话级的提示都在聊天区顶部的警示框里，只有一种样子。
+  // 会话级的提示都在输入区分隔线上方的警示框里（聊天滚动区与输入区之间的流内节点），只有一种样子。
   const warnings: WarningItem[] = [];
   if (serviceNotice !== null) {
     warnings.push({id: 'service', tone: 'warning', text: serviceNotice});
