@@ -377,7 +377,7 @@ store-dir=node_modules/.pnpm-store
 - **位置**：/docs/ 目录（14 个文件 + 开发手册）。
 - **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY——已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）、部署手册（NGINX 指南）、**待办**（MESSAGE_ACTIONS 整篇原是「以后要做的事」——2026-11-04 第一至三期已实现、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单——已退役，并入 docs/CHAT_STREAM_PROTOCOL.md 等）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
 - **影响**：待办埋在文档里没有跟踪机制，容易遗忘；新人分不清「这是现状还是计划」。
-- **方案**：①新增 docs/README.md 索引表：文件、一句话范围、性质（现行事实/机制记录/待办/手册/决策）、最后核实日期；AGENTS.md「去哪儿找什么」改为链接它，消灭双索引；②每篇文档头部加统一状态行：`> 状态：现行事实 ｜ 最后核实 2026-11-03`；③MESSAGE_ACTIONS 与 CHAT_STREAM_KNOWN_ISSUES 里的可执行条目由维护者决定是否登记 GitHub Issues，文档保留背景分析、头部标「已建 issue #N 跟踪」。
+- **方案**：①新增 docs/README.md 索引表：文件、一句话范围、性质（现行事实/机制记录/待办/手册/决策）、最后核实日期；AGENTS.md「去哪儿找什么」改为链接它，消灭双索引；②每篇文档头部加统一状态行：`> 状态：现行事实 ｜ 最后核实 2026-11-03`；③MESSAGE_ACTIONS 与原 CHAT_STREAM_KNOWN_ISSUES（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md 等）里的可执行条目由维护者决定是否登记 GitHub Issues，文档保留背景分析、头部标「已建 issue #N 跟踪」。
 - **第三方库/工具**：无（GitHub Issues 现成）。
 - **风险**：「最后核实日期」需要维护纪律，否则成为新漂移源——建议只对机制记录类要求，现行事实类随第 21 条改造后不再需要。
 - **工作量**：S（索引 + 状态行）；issue 迁移另计 M。

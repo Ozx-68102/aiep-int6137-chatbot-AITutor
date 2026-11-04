@@ -16,7 +16,7 @@
 
 ### 架构简述
 
-后端是 Backend for Frontend：浏览器只访问它（生产经 nginx 把 `/api/` 反代到 `127.0.0.1:3001`，开发直连），它再用 httpx2 异步客户端代理内部部署的 FastGPT v4.14.5（`POST /v2/chat/completions` 流式对话、`POST /v2/chat/stop` 停止、`getPaginationRecords` 取历史、`item/delete` 与 `delHistory` 删记录）。uvicorn 单进程跑（模块级可变状态决定只能单进程，`app.py:131-141`、CHAT_STREAM_KNOWN_ISSUES 第 12 条）。
+后端是 Backend for Frontend：浏览器只访问它（生产经 nginx 把 `/api/` 反代到 `127.0.0.1:3001`，开发直连），它再用 httpx2 异步客户端代理内部部署的 FastGPT v4.14.5（`POST /v2/chat/completions` 流式对话、`POST /v2/chat/stop` 停止、`getPaginationRecords` 取历史、`item/delete` 与 `delHistory` 删记录）。uvicorn 单进程跑（模块级可变状态决定只能单进程，`app.py:131-141`、原 CHAT_STREAM_KNOWN_ISSUES 第 12 条——已退役，单进程前提见 docs/CHAT_STREAM_PROTOCOL.md）。
 
 一轮对话的完整路径：`POST /api/chat`（`app.py:854-909`）先做轮次幂等检查（同一 `turn_id` 不重开）、单轮占用检查（`round_in_flight`，409）、停止标记检查（`stop_requested`），然后在 Redis 登记这一轮（`begin_reply`），起后台任务 `_relay` 拉上游流，**立刻**返回 SSE 响应头。`_relay`（`app.py:912-970`）把上游每个内容块写进 Redis（`append_chunk`）并推进 SSE 队列；上游 `[DONE]` 到达则 `mark_finished`。落定后 `_settle_round`/`_write_round_end`（`app.py:978-1015`）把最终文字和状态写进自有 `message` 表，失败轮还会叫停上游并按 `turn_id` 与上游对账一次。
 
