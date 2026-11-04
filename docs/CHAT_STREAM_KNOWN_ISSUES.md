@@ -26,12 +26,12 @@
 
 ## 1. 同一个状态有四份，互相不通
 
-| 在哪 | 词表 | 谁写 | 谁读 |
-|---|---|---|---|
-| Redis `h2botapp-chat:{id}:status` | `streaming` / `finished` / `failed` / `aborted` | [server/src/server/reply_store.py:17](../server/src/server/reply_store.py#L17) | `/partial` 接口 → 页面轮询 |
-| 数据库 `message.status` | `streaming` / `completed` / `failed` / `aborted` | [server/src/server/chat_log.py:29](../server/src/server/chat_log.py#L29) | `/messages` 接口 |
-| 上游 FastGPT 的记录 | 那边自己的格式 | FastGPT | `/messages` 的回填 |
-| 浏览器内存 | `waiting` / `failed` / `aborted` 三个布尔 + `pendingIds` | [src/App.tsx:97](../src/App.tsx#L97) | 界面 |
+| 在哪                              | 词表                                                     | 谁写                                                                           | 谁读                       |
+|-----------------------------------|----------------------------------------------------------|--------------------------------------------------------------------------------|----------------------------|
+| Redis `h2botapp-chat:{id}:status` | `streaming` / `finished` / `failed` / `aborted`          | [server/src/server/reply_store.py:17](../server/src/server/reply_store.py#L17) | `/partial` 接口 → 页面轮询 |
+| 数据库 `message.status`           | `streaming` / `completed` / `failed` / `aborted`         | [server/src/server/chat_log.py:29](../server/src/server/chat_log.py#L29)       | `/messages` 接口           |
+| 上游 FastGPT 的记录               | 那边自己的格式                                           | FastGPT                                                                        | `/messages` 的回填         |
+| 浏览器内存                        | `waiting` / `failed` / `aborted` 三个布尔 + `pendingIds` | [src/App.tsx:97](../src/App.tsx#L97)                                           | 界面                       |
 
 四处各写各的，同一轮的事实在四个地方各有一份。
 
