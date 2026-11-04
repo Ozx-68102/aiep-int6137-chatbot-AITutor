@@ -735,15 +735,29 @@ def _merge_current_turn(
     历史来自我们自己存的表：写完的轮次都在里面。正在写的那一轮还没落定，
     Redis 里那份更新（有半截文字），用它把表里那一条补上。
     """
+    # 轮次结局（还在写/失败/被停）只挂在回答行上：提问和回答共用一个
+    # 状态，两边都显示的话页面脚注会把同一条提示显示两遍。只有提问、
+    # 没有回答的轮次（上游一个字没写出来就被停、从上游抄来的老会话）
+    # 留在提问行。
+    turns_with_answer = {
+        item.turn_id for item in stored if item.role == chat_log.ROLE_ASSISTANT
+    }
+
+    def status_row(item: chat_log.StoredMessage) -> bool:
+        return (
+            item.role == chat_log.ROLE_ASSISTANT
+            or item.turn_id not in turns_with_answer
+        )
+
     messages = [
         HistoryMessageResponse(
             id=item.id,
             role=item.role,
             text=item.text,
             turn_id=item.turn_id,
-            waiting=item.status == chat_log.STREAMING,
-            failed=item.status == chat_log.FAILED,
-            aborted=item.status == chat_log.ABORTED,
+            waiting=item.status == chat_log.STREAMING and status_row(item),
+            failed=item.status == chat_log.FAILED and status_row(item),
+            aborted=item.status == chat_log.ABORTED and status_row(item),
         )
         for item in stored
     ]

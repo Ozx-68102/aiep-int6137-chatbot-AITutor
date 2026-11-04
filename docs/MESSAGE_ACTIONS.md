@@ -41,6 +41,7 @@
 - **「消息生成失败」icon**：lucide `CircleAlert`，**黄色**（amber 系）。
 - **「对话已停止」icon**：lucide `CircleStop`，黑色——与输入区的停止按钮同一个 icon，「你按了停止」的因果一眼对上。
 - **重试按钮**：黑色中性描边（替换现在 `FailedReply.tsx` 的红色 `btn-error` 样式），icon 沿用 `RotateCcw`。
+- 状态标志只挂在轮次的**回答行**上（该轮没有回答行时挂提问行）：提问与回答在表里共用一个结局状态，接口若两边都发给页面，脚注会把同一条提示显示两遍（2026-11-04 修复，`_merge_current_turn`）。
 - 状态提示**不再是独立的错误消息**。现在的实现是往消息流里插一条 `role:'error'` 的红框气泡（实时流程 `addErrorMessage`、刷新流程 `session/thread.ts` 的 `withFailureNotice` 合成）；改成由消息自身的 `failed` / `aborted` 标志直接渲染脚注，消息流里只留真正的对话内容。这也是状态收敛，方向与 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 第 1、4 条一致。
 - 与轮次无关的错误提示（「无法连接到服务器」这类）统一归横幅，消息流里的无按钮红气泡退役。
 
