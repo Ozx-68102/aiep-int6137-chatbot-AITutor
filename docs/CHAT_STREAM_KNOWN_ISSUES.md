@@ -155,6 +155,8 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 ## 9. 会话过期时，正在写的那一轮没有说法
 
+**2026-11-05 已修（最小版），待浏览器手点验证**：会话类 401 现在带 `reason` 字段（`expired`/`disabled`），客户端收到后聊天页原地保留、输入区上方挂常驻警示条、就地弹登录框，不再整页清空（最小 HTTP 版，见 [ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」的注记）；`/api/events` 推送通道仍未做。以下保留原始记录。
+
 `_authorize_session` 只在请求开头查一次（[server/src/server/app.py:932](../server/src/server/app.py#L932)）。会话后来过期了，那一轮照旧写完、写进库——这是对的，用户改密码不该掐掉正在写的答案。
 
 但页面不知道它后来怎么了：流断掉 → 去问 `/partial` → 401 → 「无法连接到服务器」（见存档第 11 条）。
