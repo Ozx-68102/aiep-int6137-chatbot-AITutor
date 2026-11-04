@@ -123,6 +123,12 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 _UNAUTHORIZED = "用户名或密码不正确"
 _LOGIN_REQUIRED = "未登录"
+# 会话类 401 的 reason 词表（docs/ACCOUNT_MANAGEMENT.md「会话状态通道」的最小
+# HTTP 版）：令牌不认识/已过期/被吊销一律 expired（无法也无需细分）；disabled
+# （账号被停用）等 account.disabled 列建好再接上（见同文档「数据库要加的」）。
+# 登录端点自己的 401（密码不对）不带 reason——那不是会话过期，前端走表单错误路径。
+_REASON_EXPIRED = "expired"
+_REASON_DISABLED = "disabled"
 _COOKIE_NAME = "login"
 _COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 # 控制台那一边独立的 cookie（docs/ACCOUNT_MANAGEMENT.md 顺序第 2 步）。
@@ -184,6 +190,18 @@ _DONE_FRAME = "data: [DONE]\n\n"
 _REQUEST_ACCOUNT: contextvars.ContextVar[tuple[str, UUID] | None] = (
     contextvars.ContextVar("request_account", default=None)
 )
+
+
+class _SessionUnauthorized(HTTPException):
+    """会话类 401：响应体在 detail 之外多带一个 reason 字段。
+
+    加字段是向后兼容的：老前端只读 detail，不受影响。reason 的词表见
+    _REASON_* 常量的注释；现在只会发出 expired（disabled 等停用列建好）。
+    """
+
+    def __init__(self, reason: str = _REASON_EXPIRED) -> None:
+        super().__init__(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+        self.reason = reason
 
 
 class _Relay:
@@ -284,6 +302,21 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": _SERVER_ERROR},
+    )
+
+
+@app.exception_handler(_SessionUnauthorized)
+async def _session_unauthorized_response(
+    request: Request, exc: _SessionUnauthorized
+) -> Response:
+    """会话类 401 的响应体：{"detail": 中文句子, "reason": 词表词}。
+
+    detail 保持字符串，加 reason 字段向后兼容。这个处理器比
+    HTTPException 的更具体，按 MRO 优先分派到这里。
+    """
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"detail": exc.detail, "reason": exc.reason},
     )
 
 
@@ -433,7 +466,7 @@ def admin_logout(
         if not _revoke_login_token(session, admin_cookie):
             result = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": _LOGIN_REQUIRED},
+                content={"detail": _LOGIN_REQUIRED, "reason": _REASON_EXPIRED},
             )
             _clear_cookie(result, _ADMIN_COOKIE_NAME)
             return result
@@ -449,9 +482,10 @@ def logout(
 ) -> Response:
     with db_session() as session:
         if not _revoke_login_token(session, login_cookie):
+            # 令牌已死时的退出也是会话类 401：同样带上 reason。
             result = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": _LOGIN_REQUIRED},
+                content={"detail": _LOGIN_REQUIRED, "reason": _REASON_EXPIRED},
             )
             _clear_cookie(result, _COOKIE_NAME)
             return result
@@ -1659,7 +1693,7 @@ def _account_from_cookie(session: Session, login_cookie: str | None) -> Account:
         account_id = _renew_login_token(session, login_cookie)
         account = None if account_id is None else _account_by_id(session, account_id)
     if account is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+        raise _SessionUnauthorized()
     _require_role(account, _ROLE_CHAT)
     return account
 
@@ -1675,7 +1709,7 @@ def _admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
     account_id = _renew_login_token(session, admin_cookie)
     account = None if account_id is None else _account_by_id(session, account_id)
     if account is None or account.role != _ROLE_ADMIN:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+        raise _SessionUnauthorized()
     return account
 
 
@@ -1700,7 +1734,7 @@ def _password_account(
     account = None if account_id is None else _account_by_id(session, account_id)
     if account is not None and account.role == _ROLE_ADMIN:
         return account
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, _LOGIN_REQUIRED)
+    raise _SessionUnauthorized()
 
 
 def _renew_login_token(session: Session, login_cookie: str | None) -> UUID | None:
