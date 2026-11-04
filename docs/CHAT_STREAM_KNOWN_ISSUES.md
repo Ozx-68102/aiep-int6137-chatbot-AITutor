@@ -26,6 +26,39 @@
 
 于是客户端只能靠「流怎么断的」去反推，答案要去别处找。下面的问题，绝大部分是这个洞长出来的。
 
+## 上游的真实节奏：整块到达，不是逐字（2026-11-04 实测）
+
+修这一层之前先认清一个事实：**上游的答案不是逐字流出来的，是整块蹦出来的。** 别按「每秒几十个字」的想象去调这一层。
+
+**日志量化**（logs/server.log，2026-10-28 ~ 11-04，152 轮）：每一轮都是同一个节奏——请求发出，换行符小帧通常很快到（0.3~2 秒，个别 10.5 秒），然后彻底静默，上游把答案写完，整体一次到达。偶尔答案被拆成 32~44 个小帧，但全部帧在 10~20 毫秒内到齐，和一整块没有区别。静默最短 0.3 秒、最长 12.8 秒；最极端的一轮等了约 23 秒，换来 378 字节。152 轮里没有一轮真正逐字到达。
+
+**锅不在我们这边**：发给上游的请求一直带着 `stream: true`（[server/src/server/fastgpt.py:58](../server/src/server/fastgpt.py#L58)）；换行帧能立刻到，说明连接和代理都没憋流。[FASTGPT_API.md](FASTGPT_API.md)「流式行为」一节 2026-10-29 就实测记录过。
+
+**detail:true 对照实验**（2026-11-04，curl 直连上游，两种设置各测两轮短问题）：
+
+| | detail:false（现状） | detail:true |
+| --- | --- | --- |
+| 响应头 | 0.3~3.8 秒（不稳） | 约 0.19 秒 |
+| 静默期 | 没有任何字节 | 节点事件持续到达：flowNodeStatus 10~14 条、flowNodeResponse 十几条 |
+| 答案 | 整块到达（90 字全文一帧，+2.4 秒；另测一次正文 34 字后隔 0.4 秒补一帧尾巴） | **同样整块**：fastAnswer 事件下一帧到齐（134 字全文，+2.3 秒） |
+| 收尾 | finish_reason + `[DONE]` | 多 updateVariables、workflowDuration；`[DONE]` 挂在 answer 事件下 |
+
+事件载荷要点：
+
+- `flowNodeStatus`：只有 `{name, status}` 两个字段，几十字节一条——进度显示需要的全部信息。
+- `flowNodeResponse`：节点输出明细，单条最大 11.7 KB，**内含对话历史预览（historyPreview）和 codeLog**。
+- `updateVariables`：工作流变量全量，**带学生数据**（实测键名有 academy_lesson_id、academy_progress、cls 等）。
+- 后两类绝不能转发给页面，也别整条进日志。一轮短问题合计 30~50 条事件、最多约 55 KB。
+
+**现有解析器天然容忍这套事件**：后端 `_piece` 只认 `data:` 行、没有 choices 字段的载荷直接跳过（[server/src/server/fastgpt.py:220](../server/src/server/fastgpt.py#L220)）；前端 `pieceFromEvent` 同样只挑 `data:` 行里的内容（[src/api/chat.ts:142](../src/api/chat.ts#L142)）。所以把请求里的 `detail` 翻成 true，现有链路不会坏——但进度事件会在 `fastgpt.events()` 里被消费掉、到不了页面；页面要显示进度，得在中继层挑出 flowNodeStatus 自己组命名事件帧转发（见第 13 条）。
+
+**翻开关之前的两个硬前置**：
+
+1. 日志收窄（第 7 条）先做：[server/src/server/fastgpt.py:87](../server/src/server/fastgpt.py#L87) 现在把上游每一行都以 INFO 写进日志，detail:true 后一轮上游是几十行、几十 KB，日志会爆炸，还会把学生数据写得更全。
+2. 转发必须挑拣：只转 flowNodeStatus 的 name 和 status，updateVariables 和 flowNodeResponse 一个字都不能出后端。
+
+**对修复计划的影响**：针对「逐字上屏」的前端渲染优化（流式合批那一类）优先级下调——现在它们只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间是空转；上游哪天真逐字了才真正生效。和帧粒度无关的活不受影响：结局事件（收敛顺序第 1 条）、心跳、停止、续传，照旧。逐字输出本身是 FastGPT 那边（maas.eduhk.hk）工作流的事：实测答案文本按节点整块写出，答案出口的节点能不能流式，要那边对着 v4.14.5 源码查；按 [AGENTS.md](../AGENTS.md) 的分工，工作流不在本仓库改。
+
 ## 1. 同一个状态有四份，互相不通
 
 | 在哪                              | 词表                                                     | 谁写                                                                           | 谁读                       |
@@ -122,6 +155,14 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 多 worker 的话，对话请求和停止请求可能落在不同进程，「停止」就找不到那个任务。这是单进程假设，不是 bug——但要写下来，别以后有人顺手加 `--workers 4`。
 
+## 13. 静默期没有进度可显示：detail:false 把上游在发的进度事件挡在门外
+
+**2026-11-04 实测确认可以做**（细节见上面「上游的真实节奏」一节）。
+
+页面等答案的 0.3~12.8 秒里，只有一个「正在思考」气泡。而上游 v2 接口带 `detail: true` 时会全程发工作流节点事件（flowNodeStatus，载荷只有 name 和 status 两个字段）——我们的请求写死了 `detail: false`（[server/src/server/fastgpt.py:59](../server/src/server/fastgpt.py#L59)），这些事件根本没要。
+
+**怎么修**：请求翻成 `detail: true`；中继层从上游事件里挑出 flowNodeStatus，自己组一个命名事件帧（比如 `event: progress`，内容只有节点名和状态）转发给页面；前端在等待气泡的位置显示当前节点名。两个硬前置：日志收窄（第 7 条）先做，不然每轮几十 KB 的上游明细全进日志；updateVariables 和 flowNodeResponse 含学生数据，绝不转发。产品方向里规划的图像/视频生成要静默几分钟，到那时进度显示是必需品，这条路现在就能铺。
+
 ## 这一层做对的地方（修的时候别推翻）
 
 - **轮次编号的幂等**：同一个 turn_id 不会开第二轮（[server/src/server/app.py:643](../server/src/server/app.py#L643)）。挡住了重复点击、页面重发导致上游生成两遍。
@@ -138,6 +179,7 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 3. **`/partial` 收窄**：只回答「还在写吗」。
 4. **中间件里的查库去掉**：清扫改成定时任务。
 5. **每轮一行结构化日志**：带 turn_id，能 grep。
+6. **静默期进度显示**：detail:true + 只转发节点状态（第 13 条）。改动小、独立；前置是第 5 条的日志收窄先做完。
 
 第 1 条是动流式核心链路的改动，要单独做、单独验收，别跟别的活混在一起。
 

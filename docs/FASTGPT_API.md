@@ -79,6 +79,8 @@
 
 传 `stream: true`、响应头也是 `text/event-stream`，但**上游一整块返回，不是逐字**（实测 2026-10-29，连续三次对话同一节奏）：先来一个只含换行符的事件，隔 2 到 5 秒整段答案一次性到达，再来一个换行符事件，最后是 `finish_reason` 和 `[DONE]`。第一个事件 0.3 秒左右就到，所以不是反向代理把响应攒住才发，是 FastGPT 那边（maas.eduhk.hk）自己把答案写完才写成一条事件。要改成逐字输出是那边的事。
 
+**2026-11-04 复测（detail:false 与 detail:true 各两轮短问题，curl 直连）**：detail:false 的模式和 2026-10-29 的记录一致——换行帧、静默 2~4 秒、整段答案一帧到齐（90 字全文一帧）、换行帧、finish_reason、`[DONE]`；答案正文偶尔分成两帧（正文后隔约 0.4 秒补一帧尾巴）；响应头到达时间不稳（一次 0.3 秒、一次 3.8 秒）。**detail:true 时答案同样整块到达**（134 字全文在 fastAnswer 事件下一帧到齐，+2.3 秒）——开了 detail 也不会逐字输出；区别是响应头约 0.19 秒就到，且整个运行期间持续发命名事件：`event: flowNodeStatus`（载荷 `{name, status}`，几十字节一条，一轮 10~14 条）、`event: flowNodeResponse`（节点输出明细，单条最大 11.7 KB，含 historyPreview 和 codeLog）、`event: fastAnswer`（答案内容帧）、`event: updateVariables`（工作流变量全量，实测键名有 academy_lesson_id、academy_progress、cls 等学生数据键）、`event: workflowDuration`（总耗时）、`event: answer`（finish_reason 和 `[DONE]` 挂在这个事件名下）。一轮短问题合计 30~50 条事件、最多约 55 KB。答案文本按节点整块写出，答案出口的节点能不能改成逐字，要那边对着 v4.14.5 源码查。我们这层怎么用这些事件（转节点状态、不转变量和明细）见 [CHAT_STREAM_KNOWN_ISSUES.md](CHAT_STREAM_KNOWN_ISSUES.md) 的「上游的真实节奏」一节。
+
 ## 杂项
 
 - **没有「分享某一场会话」的接口**（对着文档和 v4.14.5 源码核过，2026-10-26 / 10-31）：和某一场 `chatId` 有关的操作就是列会话、改标题、改置顶、删除这场会话、取基本信息、取消息、取运行详情、删一条消息、点赞或点踩。文档里的「分享」指应用的免登录窗口：控制台发布渠道里创建的带 `shareId` 的链接，打开的是整个应用，不是我们某一场会话。决定：不把免登录窗口当成我们的分享；以后要分享某一场会话，做法是读出这场已完成的消息、把问答写成 Markdown 再下载（现在没有这个需求，先不做）。置顶只存在我们自己的数据库里，不调用 FastGPT 的置顶接口（生成回答用不到它）。
