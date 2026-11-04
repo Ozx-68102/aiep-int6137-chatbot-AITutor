@@ -77,13 +77,14 @@
 
 ## 点赞与点踩
 
-`POST {访问地址}/core/chat/feedback/updateUserFeedback`（对着 v4.14.5 源码核过，2026-11-04；实现 `projects/app/src/pages/api/core/chat/feedback/updateUserFeedback.ts`，参数定义 `packages/global/openapi/core/chat/feedback/api.ts`。**尚未实际请求过**，第一次实测放在消息操作第四期实现时）：
+`POST {访问地址}/core/chat/feedback/updateUserFeedback`（对着 v4.14.5 源码核过，2026-11-04；实现 `projects/app/src/pages/api/core/chat/feedback/updateUserFeedback.ts`，参数定义 `packages/global/openapi/core/chat/feedback/api.ts`。**2026-11-05 已首测**，消息操作第四期实现时做的一次性探针，见本节末尾）：
 
 - 鉴权走 `authChatCrud`，`authApiKey: true`——和删单条记录同一套，我们后端的 API key 就能调。
 - body：`{appId, chatId, dataId, userGoodFeedback?, userBadFeedback?}`。`dataId` 是那条 AI 回答的记录 ID，**就是我们的轮次编号**（`responseChatItemId` 那条的结论，见「历史与上下文」）。两个反馈字段是自由文本（可空可省），语义是**传什么设什么、不传就删什么**：源码里字段出现就 `$set`、没出现（undefined）就 `$unset`。所以点赞 = 只传 `userGoodFeedback`（顺带清掉点踩），点踩 = 只传 `userBadFeedback`，取消 = 两个都不传。
 - 响应是 FastGPT 惯常的壳 `{code:200,...,data:{}}`，`data` 是空对象；成功看 `code`。
 - 副作用都在上游侧：更新这场会话的反馈计数和应用日志表的好差评计数，对我们无影响。
 - 注意：**v2 目录下没有这个接口**——`v2/chat/` 只有 completions 和 stop；点赞点踩在 `core/chat/feedback/` 路径下。同目录还有 adminUpdate（管理员代改反馈）、getFeedbackRecordIds（按好差评筛记录）、updateFeedbackReadStatus（标已读）等运营接口，第四期用不到，留档备查。
+- **首测记录（2026-11-05**，消息操作第四期实现时的一次性探针，测完即删**）**：`v2/chat/completions` 开一轮探针会话（`chatId=probe-fb-随机8位`、`responseChatItemId=probe-fb-turn-随机8位`，「1+1=?」，`stream:true`、`detail:false`，HTTP 200，收到 `[DONE]`），然后依次调 updateUserFeedback：`{userGoodFeedback:""}` → HTTP 200、壳 `code:200`；`{userBadFeedback:""}` → 200 / `code:200`；`{}`（两个字段都省，即清空）→ 200 / `code:200`；最后 `DELETE core/chat/history/delHistory` 清理 → 200 / `code:200`。三次反馈调用的返回壳都符合「传什么设什么、不传就删什么」的预期，接口行为与源码结论一致。
 
 ## 流式行为
 

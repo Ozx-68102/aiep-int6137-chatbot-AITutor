@@ -1,6 +1,6 @@
 # 消息操作区：气泡下方的提示、重试与编辑重发
 
-> 状态：第一、二、三期已实现（2026-11-04），第四期未实现 ｜ 定稿 2026-11-04
+> 状态：第一至四期已实现（2026-11-05），待浏览器手点验证 ｜ 定稿 2026-11-04
 > 本文取代原 EDIT_MESSAGE.md（已于 2026-11-04 删除）：编辑重发的设计已并入，其待定问题全部有了结论（见「与旧文档的关系」）。
 
 ## 要解决的问题
@@ -75,7 +75,7 @@
 ## 未来的按钮（占位登记，不在本期）
 
 - **复制**：用户提问和助手回答气泡下方都有。助手侧复制原始 Markdown（`message.text`，不序列化 DOM——复制渲染结果会把表格、公式的排版带走），用户侧复制纯文本。clipboard 不可用时静默失败（本部署 https/localhost，正常可用）。见调研 [frontend-chat.md](improvement-research/frontend-chat.md) N6。
-- **点赞 / 点踩**：只在助手气泡下方；**失败、被停的轮次不显示**（没答完的东西没什么可评价）。后端待办：看 FastGPT v4.14.5 源码核实点赞点踩接口——[FASTGPT_API.md](FASTGPT_API.md) 已核实和 chatId 有关的操作里有「点赞或点踩」，但具体路径、参数、鉴权没记录。
+- **点赞 / 点踩**：只在助手气泡下方；**失败、被停的轮次不显示**（没答完的东西没什么可评价）。后端核实已完成：接口的路径、参数、鉴权见 [FASTGPT_API.md](FASTGPT_API.md)「点赞与点踩」一节（对着 v4.14.5 源码核实，2026-11-05 首测通过），第四期已实现。
 - 未来按钮都进脚注的 hover 区，服从同一套矩阵和交互规则。
 
 ## 分期
@@ -85,11 +85,18 @@
 3. **第三期 · 编辑重发**（前置：N2 多行输入）：编辑按钮、popover、编辑框、`retryTurn` 泛化、发送失败回滚、与方案①联调。
 4. **第四期 · 复制与点赞点踩**：后端先核实 FastGPT 的点赞点踩接口。
    > **2026-11-04 前置已完成**：接口已对着 v4.14.5 源码核实——`POST {访问地址}/core/chat/feedback/updateUserFeedback`，API key 鉴权，`dataId` 直接用我们的轮次编号，传什么设什么、不传就删什么。细节见 [FASTGPT_API.md](FASTGPT_API.md)「点赞与点踩」一节。实际请求留到实现时首测。
+   >
+   > **2026-11-05 已实现**（上游接口同批首测通过，状态码序列记在 [FASTGPT_API.md](FASTGPT_API.md)「点赞与点踩」）。实现与设计的差异点、设计没写死的点：
+   > - **点赞点踩不跨刷新持久**：状态放在脚注组件的会话内组件级状态里，刷新后按钮回到未选的样子。设计文档未要求持久化，上游也没有「读回我这一轮好差评」的接口；上游那边其实记着。
+   > - **老消息没有轮次编号时隐藏**：`message.turnId` 为空就不出点赞点踩按钮——从上游回填的老会话消息映射不到上游的 `dataId`（`responseChatItemId` 那条），发过去也是打空（原因注在 `MessageActions.tsx` 代码注释里）。
+   > - **流式输出期间不显示**（pending 时不出现，与编辑按钮一致）：没答完的回答没什么可评价，上游记录里此时也还没有那条 `dataId`。
+   > - **代码块语法高亮同批接入**（[frontend-chat.md](improvement-research/frontend-chat.md) N4）：react-syntax-highlighter 的 prism-light 按需路线，语言集只有 python / javascript / typescript / java，没命中的语言保持纯文本 `<pre>`（markdown.css 深色底兜底）；`@types/react-syntax-highlighter` 没装，类型走 `src/types/react-syntax-highlighter.d.ts` 的临时垫片，维护者装好官方类型后删除垫片。
 
 ## i18n
 
 - 已有（三语齐）：`replyStopped`（对话已停止）、`replyInterrupted`（消息生成失败）、`retry`（重试）、`close`。
 - 要新增：第三期「编辑」（popover）、「取消」、「发送」；第四期「复制」、「已复制」、点赞点踩。三种语言（简中、繁中、英文）都要，`src/i18n.ts` 加键，仓库惯例。
+- 第四期键已加（2026-11-05，三语齐）：`copy`（复制）、「已复制」`copied`、`like`（点赞）、`dislike`（点踩）；代码块复制按钮复用 `copy` / `copied`。
 
 ## 与旧文档的关系
 
