@@ -4,7 +4,7 @@
 
 ## 概览
 
-**读了哪些文件**：/package.json、/pnpm-workspace.yaml、/vite.config.ts、/tsconfig.json、/.oxlintrc.json、/.oxfmtrc.json、/index.html、/.gitignore、/.nvmrc、/.lww、/.env.example、/src/vite-env.d.ts、/src/index.css、/server/pyproject.toml、/server/.python-version、/server/AGENTS.md；/scripts/ 全部 3 个脚本（check-server.sh、setup-hooks.sh、start-server.sh）；/.githooks/ 两个钩子（commit-msg、pre-push）；/README.md、/AGENTS.md；/docs/ 全部文件（TECH、FINDINGS、UI_WARNINGS、ACCOUNT_MANAGEMENT、CHAT_STREAM_KNOWN_ISSUES、EDIT_MESSAGE、FASTGPT_API、INTERRUPTED_REPLY、NGINX_SPA_DEPLOYMENT_GUIDE、PARENT_PORTAL_PRIVACY）与开发手册全部 4 篇；/public/、/dist/、/src/assets/ 目录清单与 dist 各 chunk 的实测大小；用 glob 统计了 src 下约 59 个 .ts/.tsx 文件，用范围限定的 grep 实测了 console.*、TODO、FIXME、@ts-expect-error、any 等在 /src 与 /server/src 两个范围的密度。未读取 /.env 与 /logs/server.log 的内容（敏感），只确认了它们存在于 LayerFS main 树中。
+**读了哪些文件**：/package.json、/pnpm-workspace.yaml、/vite.config.ts、/tsconfig.json、/.oxlintrc.json、/.oxfmtrc.json、/index.html、/.gitignore、/.nvmrc、/.lww、/.env.example、/src/vite-env.d.ts、/src/index.css、/server/pyproject.toml、/server/.python-version、/server/AGENTS.md；/scripts/ 全部 3 个脚本（check-server.sh、setup-hooks.sh、start-server.sh）；/.githooks/ 两个钩子（commit-msg、pre-push）；/README.md、/AGENTS.md；/docs/ 全部文件（TECH、FINDINGS、UI_WARNINGS、ACCOUNT_MANAGEMENT、CHAT_STREAM_KNOWN_ISSUES、MESSAGE_ACTIONS、FASTGPT_API、INTERRUPTED_REPLY、NGINX_SPA_DEPLOYMENT_GUIDE、PARENT_PORTAL_PRIVACY）与开发手册全部 4 篇；/public/、/dist/、/src/assets/ 目录清单与 dist 各 chunk 的实测大小；用 glob 统计了 src 下约 59 个 .ts/.tsx 文件，用范围限定的 grep 实测了 console.*、TODO、FIXME、@ts-expect-error、any 等在 /src 与 /server/src 两个范围的密度。未读取 /.env 与 /logs/server.log 的内容（敏感），只确认了它们存在于 LayerFS main 树中。
 
 **现状简述**：这是一个工程化纪律相当好的项目——TypeScript strict 全开、oxlint 开了 typeAware 类型规则（同类项目少见）、ruff 配了 7 组规则集含 banned-api、git 双钩子管提交信息和分支名、文档体系分工明确（FINDINGS 文件头的分流规则且被实际执行过）。代码卫生实测干净：src 与 server/src 里 0 个 console 残留、0 个 any、0 个 @ts-expect-error、0 个 FIXME，仅 2 个 TODO 且都有文档追踪。主要缺口集中在四处：
 
@@ -409,9 +409,9 @@ store-dir=node_modules/.pnpm-store
 ### 23. docs/ 缺索引与状态标注，待办与现行事实混排
 
 - **位置**：/docs/ 目录（14 个文件 + 开发手册）。
-- **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY）、部署手册（NGINX 指南）、**待办**（EDIT_MESSAGE 整篇是「以后要做的事」、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
+- **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY）、部署手册（NGINX 指南）、**待办**（MESSAGE_ACTIONS 整篇是「以后要做的事」、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
 - **影响**：待办埋在文档里没有跟踪机制，容易遗忘；新人分不清「这是现状还是计划」。
-- **方案**：①新增 docs/README.md 索引表：文件、一句话范围、性质（现行事实/机制记录/待办/手册/决策）、最后核实日期；AGENTS.md「去哪儿找什么」改为链接它，消灭双索引；②每篇文档头部加统一状态行：`> 状态：现行事实 ｜ 最后核实 2026-11-03`；③EDIT_MESSAGE 与 CHAT_STREAM_KNOWN_ISSUES 里的可执行条目由维护者决定是否登记 GitHub Issues，文档保留背景分析、头部标「已建 issue #N 跟踪」。
+- **方案**：①新增 docs/README.md 索引表：文件、一句话范围、性质（现行事实/机制记录/待办/手册/决策）、最后核实日期；AGENTS.md「去哪儿找什么」改为链接它，消灭双索引；②每篇文档头部加统一状态行：`> 状态：现行事实 ｜ 最后核实 2026-11-03`；③MESSAGE_ACTIONS 与 CHAT_STREAM_KNOWN_ISSUES 里的可执行条目由维护者决定是否登记 GitHub Issues，文档保留背景分析、头部标「已建 issue #N 跟踪」。
 - **第三方库/工具**：无（GitHub Issues 现成）。
 - **风险**：「最后核实日期」需要维护纪律，否则成为新漂移源——建议只对机制记录类要求，现行事实类随第 21 条改造后不再需要。
 - **工作量**：S（索引 + 状态行）；issue 迁移另计 M。
@@ -431,7 +431,7 @@ store-dir=node_modules/.pnpm-store
 ### 25. 卫生基线实测干净，建议用规则锁定
 
 - **位置**：/src（约 59 个 .ts/.tsx 文件）、/server/src。
-- **现状**（范围限定 grep 实测，已排除 node_modules/.venv/.pnpm-store 第三方目录）：`console.log/debug/info/warn/error` 0 处；`: any` / `as any` / `<any>` 0 处；`@ts-expect-error` / `@ts-ignore` 0 处；FIXME 0 处；TODO 仅 2 处——src/components/chat/ChatMain.tsx:129（每轮加编辑按钮，EDIT_MESSAGE.md 整篇追踪）与 src/components/chat/MarkdownText.tsx:17（图片只渲染链接不加载，FINDINGS 2026-10-31 有决策记录）。**两个 TODO 都有文档归属，不是孤儿注释**。这个基线在同规模项目中属于非常干净的一档。
+- **现状**（范围限定 grep 实测，已排除 node_modules/.venv/.pnpm-store 第三方目录）：`console.log/debug/info/warn/error` 0 处；`: any` / `as any` / `<any>` 0 处；`@ts-expect-error` / `@ts-ignore` 0 处；FIXME 0 处；TODO 仅 2 处——src/components/chat/ChatMain.tsx:129（每轮加编辑按钮，MESSAGE_ACTIONS.md 整篇追踪）与 src/components/chat/MarkdownText.tsx:17（图片只渲染链接不加载，FINDINGS 2026-10-31 有决策记录）。**两个 TODO 都有文档归属，不是孤儿注释**。这个基线在同规模项目中属于非常干净的一档。
 - **影响**：无现存问题；风险仅在增量——没有守护规则时基线会被无声突破。
 - **方案**：即第 7 条的 `no-console` 与 `typescript/no-explicit-any` 两条规则（增量锁定）；另在 AGENTS.md 守则加一句「TODO 注释必须同时指向追踪文档或 issue」。存量已清点完毕，无需专项清理。
 - **第三方库/工具**：无。

@@ -12,7 +12,7 @@
 - `server/src/server/`：`app.py`（1375 行，全部路由和流式转发）、`fastgpt.py`（上游客户端）、`chat_log.py`（自有 message 表读写）、`reply_store.py`（Redis 半截回复）、`ratelimit.py`（失败计数限流）、`url.py`、`settings.py`、`log.py`、`avatar.py`、`passwords.py`、`__init__.py`（uvicorn 入口）
 - `server/src/server/types/`：`api.py`（接口模型）、`env.py`（配置模型）、`__init__.py`
 - `server/src/server/db/`：`models.py`（表结构与索引）、`session.py`（引擎与会话）、`init.py`（幂等建表/补列）、`backfill.py`（历史搬迁命令）
-- 文档：`docs/FASTGPT_API.md`、`docs/INTERRUPTED_REPLY.md`、`docs/ACCOUNT_MANAGEMENT.md`、`docs/CHAT_STREAM_KNOWN_ISSUES.md`、`docs/EDIT_MESSAGE.md`、`docs/TECH.md`、`docs/FINDINGS.md`（相关条目）、`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md`（SSE 反代部分）
+- 文档：`docs/FASTGPT_API.md`、`docs/INTERRUPTED_REPLY.md`、`docs/ACCOUNT_MANAGEMENT.md`、`docs/CHAT_STREAM_KNOWN_ISSUES.md`、`docs/MESSAGE_ACTIONS.md`、`docs/TECH.md`、`docs/FINDINGS.md`（相关条目）、`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md`（SSE 反代部分）
 
 ### 架构简述
 
@@ -212,13 +212,13 @@
 
 ### N9. 编辑重发的服务端评估：现有 retryOf 路径已可复用，缺口在约定（新增）
 
-- **位置**：`docs/EDIT_MESSAGE.md`（只写记录未实现）、`app.py:897-898`（`retry_of` 入口）、`app.py:801-851`（`_clear_failed_turn`/`_failed_turn_content_ids`）。
-- **现状**：EDIT_MESSAGE 定的方向是「编辑 = 改内容后按重试的路重发」，服务端要做的两件事（删上下游旧记录、新 turn_id 开新轮）现有 `retryOf` 机制全都做了。细读 `_clear_failed_turn`：删我们表的 `delete_round` 与问题文本无关；删上游按「回答记录的 dataId == turn_id」精确匹配，也与文本无关；只有 fallback 分支（回答没写下来时按 question 文本匹配最后一条提问记录）会因内容被改而失配——失配的后果按代码注释就是「宁可历史里多一遍，不删别人那轮」，安全。
+- **位置**：`docs/MESSAGE_ACTIONS.md`（只写记录未实现）、`app.py:897-898`（`retry_of` 入口）、`app.py:801-851`（`_clear_failed_turn`/`_failed_turn_content_ids`）。
+- **现状**：MESSAGE_ACTIONS 定的方向是「编辑 = 改内容后按重试的路重发」，服务端要做的两件事（删上下游旧记录、新 turn_id 开新轮）现有 `retryOf` 机制全都做了。细读 `_clear_failed_turn`：删我们表的 `delete_round` 与问题文本无关；删上游按「回答记录的 dataId == turn_id」精确匹配，也与文本无关；只有 fallback 分支（回答没写下来时按 question 文本匹配最后一条提问记录）会因内容被改而失配——失配的后果按代码注释就是「宁可历史里多一遍，不删别人那轮」，安全。
 - **影响**：如果按「新接口」去做会白做一遍；真正缺的是几个待定项的服务端表态。
 - **方案**：接口层不需要新端点——前端发 `POST /api/chat`，`message` = 改后的内容，`retryOf` = 被编辑轮的 turn_id 即可。服务端要补的约定：
   1. 现在 `_clear_failed_turn` 对任何状态的旧轮都会删（不限 failed）——编辑一个 completed 轮在机制上已可行，确认这是预期；
-  2. EDIT_MESSAGE 说编辑重发顺带清掉「被按停止那一轮上游悬空的提问」：aborted 轮的回答记录上游可能没有，走的正是上面那个文本 fallback，编辑后文本不同会失配。若在意，可给 fallback 加一个「上游最后一条是 user 记录且其后无 assistant、且该 chat 的 Redis/表状态是 aborted」的按状态匹配分支，而不是按文本；
-  3. 把「编辑重发复用 retryOf」写进 EDIT_MESSAGE.md 的待定清单，免得将来重复设计。
+  2. MESSAGE_ACTIONS 说编辑重发顺带清掉「被按停止那一轮上游悬空的提问」：aborted 轮的回答记录上游可能没有，走的正是上面那个文本 fallback，编辑后文本不同会失配。若在意，可给 fallback 加一个「上游最后一条是 user 记录且其后无 assistant、且该 chat 的 Redis/表状态是 aborted」的按状态匹配分支，而不是按文本；
+  3. 把「编辑重发复用 retryOf」写进 MESSAGE_ACTIONS.md 的待定清单，免得将来重复设计。
 - **第三方库**：无。
 - **风险**：低（主要是文档和一个可选 fallback 分支）。
 - **工作量**：S。

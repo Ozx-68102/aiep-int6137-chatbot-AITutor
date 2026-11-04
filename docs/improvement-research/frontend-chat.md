@@ -11,7 +11,7 @@
 - `/src/components/chat/` 全部七个文件（ChatMain.tsx、FailedReply.tsx、MarkdownText.tsx、ThinkingBubble.tsx、WarningBox.tsx、markdown.css、message-class.ts）
 - `/src/session/` 全部八个文件（thread.ts、poll.ts、unsent.ts、text.ts、title.ts、pin-order.ts、empty.ts、profile-cache.ts）
 - `/src/type/chat.ts`、`/src/App.tsx`（集成层，用于确认滚动/草稿/提交的实际行为）、`/src/i18n.ts`（文案键）、`/package.json`（依赖版本）
-- 文档：`/docs/CHAT_STREAM_KNOWN_ISSUES.md`、`/docs/INTERRUPTED_REPLY.md`、`/docs/EDIT_MESSAGE.md`、`/docs/FINDINGS.md`
+- 文档：`/docs/CHAT_STREAM_KNOWN_ISSUES.md`、`/docs/INTERRUPTED_REPLY.md`、`/docs/MESSAGE_ACTIONS.md`、`/docs/FINDINGS.md`
 
 文档里已记录且已修好的事（轮询 401 死循环、被踢时输入丢失、422 detail 数组）不再重复报告；`remark-math` 吃 `$`、流式公式跳变、会话行浮层必须走 portal 这些已有记录的固有行为也不再当新问题提。
 
@@ -71,7 +71,7 @@
 ### N2. 多行输入框：textarea 自动增高，Enter 发送 / Shift+Enter 换行
 
 - **位置**：`/src/components/chat/ChatMain.tsx` L161（`<input className="input min-w-0 flex-1">`）。grep 全仓库无 `textarea`。
-- **现状**：单行 input，只能靠原生 form 行为回车提交。打不了换行，长问题看不全（只能横向滚动一小窗）。`/docs/EDIT_MESSAGE.md`「待定的问题」里也已经预见到多行输入的发送键问题。
+- **现状**：单行 input，只能靠原生 form 行为回车提交。打不了换行，长问题看不全（只能横向滚动一小窗）。`/docs/MESSAGE_ACTIONS.md`「待定的问题」里也已经预见到多行输入的发送键问题。
 - **影响**：AI 辅导场景里学生经常要贴多行的题目/代码，单行输入是硬伤；也是编辑重发功能（N5）的前置。
 - **方案**：换成 daisyUI `textarea`，行数随内容自动增高（封顶约 160px 后内部滚动）；`Enter` 提交、`Shift+Enter` 换行；用 `e.nativeEvent.isComposing` 避开中文输入法组合期的回车误发。
 
@@ -185,11 +185,11 @@
 - **风险**：复制按钮本身低（`navigator.clipboard` 在 http 非安全上下文不可用，本部署走 https/localhost 没问题，失败时静默即可）。高亮库引入是包体决策，中。
 - **工作量**：复制按钮 S；加高亮 M。
 
-### N5. 消息编辑重发（对齐 EDIT_MESSAGE.md，前端部分）
+### N5. 消息编辑重发（对齐 MESSAGE_ACTIONS.md，前端部分）
 
-- **位置**：`/src/components/chat/ChatMain.tsx` L129-131 已有 TODO 注释指向 `/docs/EDIT_MESSAGE.md`；重试通路在 `/src/hooks/use-turn-engine.ts` `retryTurn` L226。
+- **位置**：`/src/components/chat/ChatMain.tsx` L129-131 已有 TODO 注释指向 `/docs/MESSAGE_ACTIONS.md`；重试通路在 `/src/hooks/use-turn-engine.ts` `retryTurn` L226。
 - **现状**：设计文档已写清产品形态（每轮下方小编辑按钮 → 展开修改框 → 右下角取消/发送，用户视角等同重试），并明确不做版本历史/分支；后端接口字段未定（`retryOf` 之外要带新提问文本）。前端没有任何实现。
-- **影响**：问错字、想换问法时只能原句重试；另外 EDIT_MESSAGE.md 指出编辑重发顺带能清掉「被停止轮次在上游留下的悬空提问」。
+- **影响**：问错字、想换问法时只能原句重试；另外 MESSAGE_ACTIONS.md 指出编辑重发顺带能清掉「被停止轮次在上游留下的悬空提问」。
 - **方案**（前端侧，依赖后端加字段后才联调）：
   1. user 消息气泡下加 `chat-footer` 小编辑按钮（ghost/xs，lucide `Pencil`），点击进入编辑态：气泡原地换成 textarea（复用 N2 的 autoGrow）+ 取消/发送。
   2. 发送走 `retryTurn` 的变体：`engine.retryTurn(sessionId, turnId, newText)`；`retryTurn` 内部把本地 user 消息文本替换成 `newText` 再走既有流程（removeTurnAnswer → removeFailedNotice → 新 turnId → `sendQuestion(..., retryOf)`）。
@@ -212,7 +212,7 @@
   }
   ```
 
-  EDIT_MESSAGE.md 的待定项（哪些轮次给按钮、停止轮要不要给）建议按文档倾向落：只给用户自己的提问、被停止的轮次也给（正好清悬空记录）。
+  MESSAGE_ACTIONS.md 的待定项（哪些轮次给按钮、停止轮要不要给）建议按文档倾向落：只给用户自己的提问、被停止的轮次也给（正好清悬空记录）。
 - **第三方库**：无。
 - **风险**：中。跨前后端；「改前面某一轮，后面轮次留着」的语义要和后端删记录的范围对齐（文档倾向只动这一轮）。
 - **工作量**：L（前端 M + 后端接口 + 联调，建议单独排期）。
@@ -633,6 +633,6 @@
 2. **再做交互升级**：N2（多行输入）→ N3（按会话草稿）→ N9（流式可打字）→ N6/N4（复制按钮）。N2 是 N5（编辑重发）的前置。
 3. **单独立项**：O2 第 2 步（流式文本与 sessions 解耦）、N5（编辑重发，跨前后端）、N7+P3（断线恢复，要按 INTERRUPTED_REPLY.md 场景清单手测）、高亮库/虚拟化等依赖引入（维护者决策）。
 
-所有涉及新界面文案的条目（N1 的「回到底部」、N6 的「复制」、N5 的「编辑/取消/发送」等）都要在 `/src/i18n.ts` 三种语言各补一条键，这是仓库惯例（EDIT_MESSAGE.md 也特别点了这一条）。
+所有涉及新界面文案的条目（N1 的「回到底部」、N6 的「复制」、N5 的「编辑/取消/发送」等）都要在 `/src/i18n.ts` 三种语言各补一条键，这是仓库惯例（MESSAGE_ACTIONS.md 也特别点了这一条）。
 
 所有方案均不引入测试框架、不新增未被点名的依赖、密钥不进前端；UI 全部使用 daisyUI 5 组件类；气泡保持 `.chat` + `.chat-bubble` 双层结构；未触碰会话行/语言菜单浮层的 createPortal 约束。
