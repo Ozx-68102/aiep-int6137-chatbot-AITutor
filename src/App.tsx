@@ -7,6 +7,7 @@ import {useSessionActions} from './hooks/use-session-actions.ts';
 import {serviceNoticeText, useServiceStatus} from './hooks/use-service-status.ts';
 import {useTurnEngine} from './hooks/use-turn-engine.ts';
 import {connectionFailure, explain} from './api/failure.ts';
+import {sendFeedback} from './api/feedback.ts';
 import {ApiError} from './api/http.ts';
 import {logout, readProfile} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
@@ -711,6 +712,29 @@ function ChatApp() {
         onEditResend={(turnId, text) => {
           if (active) {
             void engine.retryTurn(active.id, turnId, text);
+          }
+        }}
+        onFeedback={async (turnId, feedback) => {
+          if (!active) {
+            return false;
+          }
+          try {
+            await sendFeedback(active.id, turnId, feedback);
+            return true;
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 401) {
+              // 点赞途中被踢：跟其他动作一样回登录页。
+              enterLogin(error.detail);
+              return false;
+            }
+            if (connectionFailure(error)) {
+              service.showConnectionWarning();
+              return false;
+            }
+            // 后端拒绝（404 轮次不存在、502 上游没收到，detail 是中文字符串）
+            // 或别的错：进输入区上方的警示横幅；按钮状态由 MessageActions 回退。
+            setNotice(explain(error, text.actionFailed));
+            return false;
           }
         }}
       />

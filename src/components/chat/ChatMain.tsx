@@ -1,5 +1,6 @@
 import {ArrowDown, CircleStop, PanelLeftOpen, Send} from 'lucide-react';
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
+import type {FeedbackValue} from '../../api/feedback.ts';
 import {translations} from '../../i18n.ts';
 import {sessionTitle} from '../../session/empty.ts';
 import {visibleText, waitingForText} from '../../session/text.ts';
@@ -33,6 +34,7 @@ export function ChatMain({
   onStop,
   onRetry,
   onEditResend,
+  onFeedback,
 }: {
   locale: Locale;
   sidebarOpen: boolean;
@@ -51,6 +53,7 @@ export function ChatMain({
   onStop: () => void;
   onRetry: (turnId: string) => void;
   onEditResend: (turnId: string, text: string) => void;
+  onFeedback: (turnId: string, feedback: FeedbackValue) => Promise<boolean>;
 }) {
   const text = translations[locale];
   // 滚动跟随：距底 48px 以内算贴底。贴底时内容变化自动滚到底；用户往上滚
@@ -193,6 +196,8 @@ export function ChatMain({
                           entering={entering}
                           onRetry={onRetry}
                           onAnimationEnd={() => onAnimationEnd(message.id)}
+                          copyLabel={text.copy}
+                          copiedLabel={text.copied}
                         />
                       </div>
                     );
@@ -220,6 +225,12 @@ export function ChatMain({
                         entering={entering}
                         onRetry={onRetry}
                         onAnimationEnd={() => onAnimationEnd(message.id)}
+                        copyLabel={text.copy}
+                        copiedLabel={text.copied}
+                        canFeedback={!pending}
+                        likeLabel={text.like}
+                        dislikeLabel={text.dislike}
+                        onFeedback={onFeedback}
                       />
                     </div>
                   );
@@ -304,6 +315,8 @@ export function ChatMain({
                       stoppedText={text.replyStopped}
                       retryLabel={text.retry}
                       onRetry={onRetry}
+                      copyLabel={text.copy}
+                      copiedLabel={text.copied}
                       canEdit={canEdit}
                       editLabel={text.edit}
                       onEdit={
