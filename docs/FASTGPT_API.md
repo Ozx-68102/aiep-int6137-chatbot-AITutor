@@ -75,6 +75,16 @@
 
 回答那条记录的 `dataId` 就是我们的 `responseChatItemId`，提问那条的是 FastGPT 自己的，所以重发一轮时两条都能删；具体删法和「找不到就不删」的规矩见 [INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md) 的「重试按钮」一节。
 
+## 点赞与点踩
+
+`POST {访问地址}/core/chat/feedback/updateUserFeedback`（对着 v4.14.5 源码核过，2026-11-04；实现 `projects/app/src/pages/api/core/chat/feedback/updateUserFeedback.ts`，参数定义 `packages/global/openapi/core/chat/feedback/api.ts`。**尚未实际请求过**，第一次实测放在消息操作第四期实现时）：
+
+- 鉴权走 `authChatCrud`，`authApiKey: true`——和删单条记录同一套，我们后端的 API key 就能调。
+- body：`{appId, chatId, dataId, userGoodFeedback?, userBadFeedback?}`。`dataId` 是那条 AI 回答的记录 ID，**就是我们的轮次编号**（`responseChatItemId` 那条的结论，见「历史与上下文」）。两个反馈字段是自由文本（可空可省），语义是**传什么设什么、不传就删什么**：源码里字段出现就 `$set`、没出现（undefined）就 `$unset`。所以点赞 = 只传 `userGoodFeedback`（顺带清掉点踩），点踩 = 只传 `userBadFeedback`，取消 = 两个都不传。
+- 响应是 FastGPT 惯常的壳 `{code:200,...,data:{}}`，`data` 是空对象；成功看 `code`。
+- 副作用都在上游侧：更新这场会话的反馈计数和应用日志表的好差评计数，对我们无影响。
+- 注意：**v2 目录下没有这个接口**——`v2/chat/` 只有 completions 和 stop；点赞点踩在 `core/chat/feedback/` 路径下。同目录还有 adminUpdate（管理员代改反馈）、getFeedbackRecordIds（按好差评筛记录）、updateFeedbackReadStatus（标已读）等运营接口，第四期用不到，留档备查。
+
 ## 流式行为
 
 传 `stream: true`、响应头也是 `text/event-stream`，但**上游一整块返回，不是逐字**（实测 2026-10-29，连续三次对话同一节奏）：先来一个只含换行符的事件，隔 2 到 5 秒整段答案一次性到达，再来一个换行符事件，最后是 `finish_reason` 和 `[DONE]`。第一个事件 0.3 秒左右就到，所以不是反向代理把响应攒住才发，是 FastGPT 那边（maas.eduhk.hk）自己把答案写完才写成一条事件。要改成逐字输出是那边的事。
