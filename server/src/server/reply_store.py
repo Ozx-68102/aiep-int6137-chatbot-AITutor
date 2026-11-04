@@ -11,13 +11,14 @@ from redis.exceptions import RedisError
 from redis.retry import Retry
 
 from server.settings import load_settings
+from server.turn_status import ABORTED, COMPLETED, FAILED, STREAMING
 
 logger = logging.getLogger("server.reply_store")
 
-STREAMING = "streaming"
-FINISHED = "finished"
-FAILED = "failed"
-ABORTED = "aborted"
+# 状态词表归 turn_status.py 独家所有。Redis 的线上值是唯一例外：
+# 「写完了」历来写 "finished"，滚动部署时新旧进程交错读写也不错位。
+# 映射只发生在本模块的边界上（见 turn_status.py 的 docstring）。
+_REDIS_FINISHED = "finished"
 
 _STOP_TTL_SECONDS = 60
 
@@ -75,7 +76,7 @@ def mark_finished(chat_id: UUID) -> None:
     with _tolerate("mark_finished", chat_id):
         ttl = load_settings().redis_key_ttl_seconds
         pipe = _redis().pipeline(transaction=False)
-        pipe.set(_status_key(chat_id), FINISHED, ex=ttl)
+        pipe.set(_status_key(chat_id), _REDIS_FINISHED, ex=ttl)
         pipe.expire(_text_key(chat_id), ttl)
         pipe.expire(_turn_key(chat_id), ttl)
         pipe.execute()
@@ -115,6 +116,9 @@ def read_partial(chat_id: UUID) -> PartialReply:
         _status_key(chat_id), _text_key(chat_id), _turn_key(chat_id)
     )
     status = _as_text(raw_status)
+    if status == _REDIS_FINISHED:
+        # 线上值 -> 统一词表：读出来就映射，此后进程内只认 completed。
+        status = COMPLETED
     text = _as_text(raw_text)
     turn_id, question = _turn_parts(raw_turn)
     if status is None:

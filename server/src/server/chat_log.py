@@ -23,13 +23,9 @@ from sqlalchemy.orm import Session
 
 from server.db import ChatMessage, db_session
 from server.fastgpt import ChatRecord
+from server.turn_status import ABORTED, COMPLETED, STREAMING
 
 logger = logging.getLogger("server.chat_log")
-
-STREAMING = "streaming"
-COMPLETED = "completed"
-FAILED = "failed"
-ABORTED = "aborted"
 
 ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"

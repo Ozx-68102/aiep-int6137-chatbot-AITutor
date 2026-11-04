@@ -51,9 +51,6 @@ from server.passwords import (
 )
 from server.ratelimit import clear_failures, is_locked, register_failure
 from server.reply_store import (
-    ABORTED,
-    FAILED,
-    STREAMING,
     PartialReply,
     append_chunk,
     begin_reply,
@@ -69,6 +66,7 @@ from server.reply_store import (
     store_available,
 )
 from server.settings import load_settings
+from server.turn_status import ABORTED, COMPLETED, FAILED, STREAMING
 from server.types import (
     AbortRequest,
     AdminAccountItem,
@@ -179,7 +177,7 @@ class _Relay:
         # 这一轮已经写出来的文字。落库的时候要写它。
         self.text = ""
         # 这一轮最后的状态：写完了、被停了、还是失败了。
-        self.status = chat_log.COMPLETED
+        self.status = COMPLETED
         # 摘要行用的最小计时：开始时刻、首个内容帧时刻（monotonic 秒）。
         self.started_at = time.monotonic()
         self.first_content_at: float | None = None
@@ -815,9 +813,9 @@ def _merge_current_turn(
             role=item.role,
             text=item.text,
             turn_id=item.turn_id,
-            waiting=item.status == chat_log.STREAMING and status_row(item),
-            failed=item.status == chat_log.FAILED and status_row(item),
-            aborted=item.status == chat_log.ABORTED and status_row(item),
+            waiting=item.status == STREAMING and status_row(item),
+            failed=item.status == FAILED and status_row(item),
+            aborted=item.status == ABORTED and status_row(item),
         )
         for item in stored
     ]
@@ -984,7 +982,7 @@ async def chat(
             turn_id=turn_id,
             chat_id=body.chat_id,
             account_id=account_id,
-            outcome=chat_log.ABORTED,
+            outcome=ABORTED,
             started_at=started,
             first_content_at=None,
             bytes_sent=0,
@@ -1064,7 +1062,7 @@ async def _relay(
         # 用户按了停止。状态在这里写：任务被掐掉时它确实还在写，
         # 页面轮询 /partial 时就能看到 aborted。
         logger.info("这一轮被停止 %s", chat_id)
-        relay.status = chat_log.ABORTED
+        relay.status = ABORTED
         # 停止端点在掐这个任务之前已经叫停了上游，摘要行照实记。
         relay.stop_sent = True
         mark_aborted(chat_id)
@@ -1101,7 +1099,7 @@ def _record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> boo
     返回写库成没成，摘要行用。
     """
     chat_log.begin_round(session_id, turn_id, question)
-    return chat_log.finish_round(session_id, turn_id, "", chat_log.ABORTED)
+    return chat_log.finish_round(session_id, turn_id, "", ABORTED)
 
 
 def _settle_round(
@@ -1115,7 +1113,7 @@ def _settle_round(
     放在单独的任务里：这一轮的任务可能正被取消（用户按了停止），
     在它里面 await 写库会写不成。
     """
-    status = chat_log.FAILED if relay.failed else relay.status
+    status = FAILED if relay.failed else relay.status
     task = asyncio.create_task(
         _write_round_end(chat_id, turn_id, relay, status, fastgpt)
     )
@@ -1131,7 +1129,7 @@ async def _write_round_end(
     fastgpt: FastGPT,
 ) -> None:
     text = relay.text
-    if status == chat_log.FAILED:
+    if status == FAILED:
         # 失败以后上游可能已经把答案写完了（我们的 [DONE] 丢了）。
         # 叫停已经发出去了，等它落地，再按编号核对一次上游。
         await _wait_for_stop(chat_id)
@@ -1140,7 +1138,7 @@ async def _write_round_end(
             # 上游那份从我们收到的那段接着往下写：这一轮其实写完了，
             # 断的是我们的 [DONE]。用上游那份，状态改成写完了。
             text = answer
-            status = chat_log.COMPLETED
+            status = COMPLETED
     written = await asyncio.to_thread(
         chat_log.finish_round, chat_id, UUID(turn_id), text, status
     )
@@ -1175,7 +1173,7 @@ def _log_turn_summary(
 ) -> None:
     """每轮一行的结构化摘要：键值对形式，方便 grep。
 
-    outcome 用 chat_log 的状态词（completed/failed/aborted）；first_byte_ms
+    outcome 用 turn_status 的状态词（completed/failed/aborted）；first_byte_ms
     是从开始到首个内容帧的毫秒数，一个内容帧都没有就是 "-"；
     progress_events 是这一轮转发给页面的进度帧数。
     """
