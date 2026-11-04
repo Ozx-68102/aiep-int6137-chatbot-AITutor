@@ -16,7 +16,13 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    deferred,
+    mapped_column,
+    relationship,
+)
 
 _LOCALE_IN = "IN ('zh-CN', 'zh-TW', 'en')"
 _ROLE_IN = "IN ('chat', 'admin')"
@@ -39,7 +45,10 @@ class Account(Base):
         String(16), nullable=False, server_default=text("'chat'")
     )
     # 用户自己传的头像。存的是处理过的图（256 见方的 PNG），空着就用默认头像。
-    avatar: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # 延迟加载：几十 KB 的 bytea，绝大多数查询用不到它，别跟着行一起背；
+    # 真正读 account.avatar 时才多一条按主键的 SELECT（都在 db_session 里，
+    # 见 app.py 的 read_avatar / _avatar_url）。
+    avatar: Mapped[bytes | None] = deferred(mapped_column(LargeBinary))
     language_setting: Mapped["LanguageSetting | None"] = relationship(
         back_populates="account",
         uselist=False,
