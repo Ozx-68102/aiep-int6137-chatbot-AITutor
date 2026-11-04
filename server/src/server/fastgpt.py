@@ -62,8 +62,15 @@ class FastGPT:
             "responseChatItemId": turn_id,
             "messages": [{"role": "user", "content": message}],
         }
-        # 排查流式输出用，确认后再收窄。密钥在请求头里，不写进这行。
-        logger.info("FastGPT 请求 %s", _json(payload))
+        # INFO 只留元数据；完整请求体降到 DEBUG（debug 开关打开才写）。
+        # 密钥在请求头里，绝不进日志。
+        logger.info(
+            "FastGPT 请求 chat_id=%s turn_id=%s message_len=%d",
+            chat_id,
+            turn_id,
+            len(message),
+        )
+        logger.debug("FastGPT 请求全文 %s", _json(payload))
         try:
             async with self._client.stream(
                 "POST",
@@ -84,7 +91,8 @@ class FastGPT:
 
                 async for line in response.aiter_lines():
                     if line.strip() != "":
-                        logger.info("FastGPT 上游 %s", line)
+                        # 上游原文一行一条，量大而且含用户内容：只在 DEBUG 写。
+                        logger.debug("FastGPT 上游 %s", line)
                     piece = _piece(line)
                     if piece is None:
                         continue

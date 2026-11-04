@@ -47,5 +47,10 @@ def load_settings() -> Settings:
             names,
         )
 
+    if settings.debug == 1:
+        # debug 开关打开时把 server 的日志级别放到 DEBUG：全文一类的日志
+        # （对话请求体、FastGPT 上游原文）平时只走 logger.debug，不写出来。
+        logging.getLogger("server").setLevel(logging.DEBUG)
+
     _cached = settings
     return settings

@@ -897,8 +897,16 @@ async def chat(
     body: ChatRequest,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
-    # 排查流式输出用，确认后再收窄。这里只有对话正文，没有登录 cookie。
-    logger.info("对话请求 %s", body.model_dump_json(by_alias=True))
+    # INFO 只留元数据；完整请求体降到 DEBUG（debug 开关打开才写，
+    # 见 settings.py）。请求体里没有登录 cookie。
+    logger.info(
+        "对话请求 chat_id=%s turn_id=%s retry_of=%s message_len=%d",
+        body.chat_id,
+        body.turn_id,
+        body.retry_of,
+        len(body.message),
+    )
+    logger.debug("对话请求全文 %s", body.model_dump_json(by_alias=True))
     fastgpt = _fastgpt()
 
     await asyncio.to_thread(_authorize_session, body.chat_id, login_cookie)
@@ -966,13 +974,13 @@ async def _relay(
                 append_chunk(chat_id, event)
                 relay.text += event
                 outgoing = _chunk(event)
-                logger.info("发给页面 %s", outgoing.removesuffix("\n\n"))
+                logger.debug("发给页面 %s", outgoing.removesuffix("\n\n"))
                 await relay.queue.put(outgoing)
                 relay.sent = True
                 continue
 
             mark_finished(chat_id)
-            logger.info("发给页面 %s", "data: [DONE]")
+            logger.debug("发给页面 %s", "data: [DONE]")
             await relay.queue.put("data: [DONE]\n\n")
             relay.sent = True
             break
