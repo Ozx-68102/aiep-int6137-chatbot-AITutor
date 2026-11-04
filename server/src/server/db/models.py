@@ -98,6 +98,9 @@ class ChatSession(Base):
 
 class LoginToken(Base):
     __tablename__ = "login_token"
+    # 周期清扫和令牌校验都按 expires_at 过滤（迁移 0001 建的同一个索引）。
+    # 写进 metadata：create_all 引导出来的新库和跑迁移的老库结构才一致。
+    __table_args__ = (Index("ix_login_token_expires_at", "expires_at"),)
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     account_id: Mapped[UUID] = mapped_column(ForeignKey("account.id"))
