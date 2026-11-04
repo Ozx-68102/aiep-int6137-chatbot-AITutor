@@ -151,6 +151,11 @@ _records_cache: dict[UUID, tuple[float, list[ChatRecord]]] = {}
 _RECORDS_CACHE_SECONDS = 5.0
 _RECORDS_PAGE_SIZE = 100
 _SWEEP_INTERVAL_SECONDS = 600.0
+_HEARTBEAT_SECONDS = 15.0
+# SSE 的公共响应头：no-store 不让任何一层缓存这条流；X-Accel-Buffering: no
+# 叫 nginx 这类反向代理别攒响应正文——攒住的话帧要等缓冲满才发得出去，
+# 静默期里页面连心跳都收不到。
+_SSE_HEADERS = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
 # 中间件为本次请求验好的账号 id（连同 cookie 原文用于比对）。端点侧的
 # _account_from_cookie 直接拿它，省掉一轮令牌查库和续期：每个带 cookie
 # 的请求从两轮减到一轮。asyncio.to_thread 和端点线程池都会拷贝上下文，
@@ -949,7 +954,9 @@ async def chat(
         if round_in_flight(body.chat_id):
             raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
         logger.info("这一轮已经登记过 %s，不再重开", body.chat_id)
-        return StreamingResponse(_empty_sse(), media_type="text/event-stream")
+        return StreamingResponse(
+            _empty_sse(), media_type="text/event-stream", headers=_SSE_HEADERS
+        )
 
     # 同一场会话同时只跑一轮。上一轮还在写的时候再发一次，
     # FastGPT 那边会多出一轮，Redis 里的半截文字也会被清掉重来，两轮的片段交错着写。
@@ -976,7 +983,9 @@ async def chat(
             stop_sent=False,
             db_written=written,
         )
-        return StreamingResponse(_empty_sse(), media_type="text/event-stream")
+        return StreamingResponse(
+            _empty_sse(), media_type="text/event-stream", headers=_SSE_HEADERS
+        )
 
     # 之前叫停上游的那一下要落地：停止标记晚到的话，
     # 新开的这一轮会被自己人写的标记掐掉。
@@ -997,7 +1006,9 @@ async def chat(
     task.add_done_callback(lambda done: _forget(body.chat_id, done))
     # 先把响应头发出去，页面的等待气泡立刻就转起来。
     # 上游出问题时流会直接结束（没有 [DONE]），页面据此判断这一轮没写完。
-    return StreamingResponse(_sse(relay), media_type="text/event-stream")
+    return StreamingResponse(
+        _sse(relay), media_type="text/event-stream", headers=_SSE_HEADERS
+    )
 
 
 async def _relay(
@@ -1194,8 +1205,19 @@ def _forget(chat_id: UUID, task: asyncio.Task[None]) -> None:
 
 
 async def _sse(relay: _Relay) -> AsyncIterator[str]:
+    """把队列里的帧转给页面；15 秒没有动静就发一帧心跳。
+
+    心跳是 SSE 注释帧（": ping"）：前端解析器只认 data: 行，这一帧天然
+    被忽略；作用是让中间层和页面知道流还活着。哨兵 None 的结束语义和
+    取消语义都不变：wait_for 超时会把 queue.get 原样取消重挂，
+    asyncio.Queue 的唤醒不直接交接条目，超时不会吞掉已入队的帧。
+    """
     while True:
-        item = await relay.queue.get()
+        try:
+            item = await asyncio.wait_for(relay.queue.get(), _HEARTBEAT_SECONDS)
+        except TimeoutError:
+            yield ": ping\n\n"
+            continue
         if item is None:
             break
         yield item
