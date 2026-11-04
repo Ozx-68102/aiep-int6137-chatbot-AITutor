@@ -22,13 +22,23 @@ export async function streamReply(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   retryOf?: string,
+  onProgress?: (name: string, status: string) => void,
 ): Promise<ReplyOutcome> {
-  const outcome = await deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf);
+  const outcome = await deliverReply(
+    chatId,
+    message,
+    locale,
+    turnId,
+    onDelta,
+    signal,
+    retryOf,
+    onProgress,
+  );
   if (outcome !== 'not-started') {
     return outcome;
   }
   // 服务器说没有这一轮，说明请求没落地，重发一次不会生成两遍。
-  return deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf);
+  return deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf, onProgress);
 }
 
 async function deliverReply(
@@ -39,6 +49,7 @@ async function deliverReply(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   retryOf?: string,
+  onProgress?: (name: string, status: string) => void,
 ): Promise<ReplyOutcome> {
   let response: Response;
   try {
@@ -66,10 +77,14 @@ async function deliverReply(
 
   let delivered = false;
   try {
-    const completed = await readStream(response, (text) => {
-      delivered = true;
-      onDelta(text);
-    });
+    const completed = await readStream(
+      response,
+      (text) => {
+        delivered = true;
+        onDelta(text);
+      },
+      onProgress,
+    );
     return completed ? 'completed' : 'interrupted';
   } catch {
     if (signal?.aborted) {
@@ -102,7 +117,11 @@ async function outcomeAfterFailure(chatId: string): Promise<ReplyOutcome> {
   return 'interrupted';
 }
 
-async function readStream(response: Response, onDelta: (text: string) => void): Promise<boolean> {
+async function readStream(
+  response: Response,
+  onDelta: (text: string) => void,
+  onProgress?: (name: string, status: string) => void,
+): Promise<boolean> {
   const body = response.body;
   if (!body) {
     return false;
@@ -130,6 +149,10 @@ async function readStream(response: Response, onDelta: (text: string) => void): 
           if (piece.kind === 'text') {
             onDelta(piece.text);
           }
+          if (piece.kind === 'progress') {
+            // 进度帧不算 delivered，不参与结局判定。
+            onProgress?.(piece.name, piece.status);
+          }
         }
       }
       if (done) {
@@ -141,22 +164,41 @@ async function readStream(response: Response, onDelta: (text: string) => void): 
   }
 }
 
-type StreamPiece = {kind: 'text'; text: string} | {kind: 'done'};
+type StreamPiece =
+  | {kind: 'text'; text: string}
+  | {kind: 'progress'; name: string; status: string}
+  | {kind: 'done'};
 
 /**
- * 把一个事件拆成片段列表。按 SSE 规范，同一事件里多条 data 行先用 \n 连成
- * 一帧再解析；连起来解析不出来时退回逐行认：坏的行丢掉，其余的行（可能
- * 有 [DONE]）照常处理——一帧坏 JSON 只拖累它自己。`event: xxx` 这样的
- * 命名事件行整个忽略，只认 data（为将来后端加命名事件做准备）。
+ * 把一个事件拆成片段列表。先扫 `event:` 行取事件名：progress 命名事件把
+ * data 解析成节点名和状态词；其他非空事件名的 data 整个忽略（给将来别的
+ * 命名事件留位）；没有 event: 行时按无名事件认 data。
+ *
+ * 按 SSE 规范，同一事件里多条 data 行先用 \n 连成一帧再解析；连起来解析
+ * 不出来时退回逐行认：坏的行丢掉，其余的行（可能有 [DONE]）照常处理——
+ * 一帧坏 JSON 只拖累它自己。
  */
 function piecesFromEvent(event: string): StreamPiece[] {
   const dataLines: string[] = [];
+  let eventName = '';
   for (const rawLine of event.split(/\r?\n/)) {
     const line = rawLine.trim();
+    if (line.startsWith('event:')) {
+      // SSE 规范里后出现的 event: 行覆盖事件名缓冲区：认最后一条。
+      eventName = line.slice('event:'.length).trim();
+      continue;
+    }
     if (!line.startsWith('data:')) {
       continue;
     }
     dataLines.push(line.slice('data:'.length).trim());
+  }
+  if (eventName !== '') {
+    if (eventName !== 'progress') {
+      return [];
+    }
+    const piece = progressFromData(dataLines.join('\n'));
+    return piece === null ? [] : [piece];
   }
   if (dataLines.length === 0) {
     return [];
@@ -177,6 +219,26 @@ function piecesFromEvent(event: string): StreamPiece[] {
     }
   }
   return pieces;
+}
+
+/**
+ * 认一帧 progress 的 data：JSON 里的 name 和 status 都必须是字符串，
+ * 否则（包括解析失败）整个忽略这一帧。
+ */
+function progressFromData(data: string): StreamPiece | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (
+      isRecord(payload) &&
+      typeof payload.name === 'string' &&
+      typeof payload.status === 'string'
+    ) {
+      return {kind: 'progress', name: payload.name, status: payload.status};
+    }
+  } catch {
+    // 这一帧的 JSON 是坏的，整个忽略。
+  }
+  return null;
 }
 
 /** 认一帧 data：[DONE] 是收尾，JSON 是一段增量；解析失败就丢掉这一帧。 */
