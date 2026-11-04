@@ -98,6 +98,13 @@ logger = logging.getLogger("server.app")
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.fastgpt = open_fastgpt(load_settings())
+    # 启动对账：表里卡在 streaming 的行一次标成 failed。单进程前提
+    # （docs/CHAT_STREAM_KNOWN_ISSUES.md 第 12 条）：进程重启时不可能有
+    # 「还在写」的轮次，那些行必是死轮。读时兜底（_merge_current_turn）
+    # 同样会降级展示，这里把库一次清干净。
+    stuck = await asyncio.to_thread(chat_log.fail_stuck_rounds)
+    if stuck:
+        logger.info("启动对账：%d 行卡住的 streaming 已标为 failed", stuck)
     # 过期令牌的清扫从请求路径挪到这里：启动先跑一次，之后每
     # _SWEEP_INTERVAL_SECONDS 一次。单进程假设，不需要分布式锁
     # （见 docs/CHAT_STREAM_KNOWN_ISSUES.md 第 12 条）。
@@ -819,18 +826,26 @@ def _merge_current_turn(
             or item.turn_id not in turns_with_answer
         )
 
-    messages = [
-        HistoryMessageResponse(
-            id=item.id,
-            role=item.role,
-            text=item.text,
-            turn_id=item.turn_id,
-            waiting=item.status == STREAMING and status_row(item),
-            failed=item.status == FAILED and status_row(item),
-            aborted=item.status == ABORTED and status_row(item),
+    messages: list[HistoryMessageResponse] = []
+    for item in stored:
+        # 读时兜底：表里 streaming 的行，Redis 的 partial 为空（turn_id 是
+        # None）或对不上这一行，说明这一轮其实已经不在写了（进程死在半路、
+        # 键过期）——展示层降级为 failed，不写库；启动对账
+        # （chat_log.fail_stuck_rounds）会把它们一次标掉。编号对得上的行
+        # 不降级：Redis 里那份状态更新，由下面的合并逻辑照实处理。
+        stuck = item.status == STREAMING and partial.turn_id != item.turn_id
+        row = status_row(item)
+        messages.append(
+            HistoryMessageResponse(
+                id=item.id,
+                role=item.role,
+                text=item.text,
+                turn_id=item.turn_id,
+                waiting=item.status == STREAMING and not stuck and row,
+                failed=(item.status == FAILED or stuck) and row,
+                aborted=item.status == ABORTED and row,
+            )
         )
-        for item in stored
-    ]
     if partial.turn_id is None:
         return messages
 

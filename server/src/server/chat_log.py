@@ -17,13 +17,13 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from server.db import ChatMessage, db_session
 from server.fastgpt import ChatRecord
-from server.turn_status import ABORTED, COMPLETED, STREAMING
+from server.turn_status import ABORTED, COMPLETED, FAILED, STREAMING
 
 logger = logging.getLogger("server.chat_log")
 
@@ -115,6 +115,27 @@ def delete_session_messages(session_id: UUID) -> None:
         session.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
 
     _write("delete_session_messages", session_id, action)
+
+
+def fail_stuck_rounds() -> int:
+    """启动对账：把表里所有 status=streaming 的行一次标成 failed。
+
+    单进程前提（docs/CHAT_STREAM_KNOWN_ISSUES.md 第 12 条）：进程重启时
+    不可能有「还在写」的轮次——那些行必是死轮（写它的进程已经随旧进程
+    死了）。读时兜底（app._merge_current_turn）同样会把它们降级展示，
+    这里把库一次清干净。返回受影响的行数；写库失败只记警告。
+    """
+    try:
+        with db_session() as session:
+            result = session.execute(
+                update(ChatMessage)
+                .where(ChatMessage.status == STREAMING)
+                .values(status=FAILED)
+            )
+            return int(result.rowcount or 0)
+    except SQLAlchemyError:
+        logger.warning("启动对账失败，卡住的 streaming 行保持原样", exc_info=True)
+        return 0
 
 
 def read_messages(session_id: UUID) -> list[StoredMessage]:
