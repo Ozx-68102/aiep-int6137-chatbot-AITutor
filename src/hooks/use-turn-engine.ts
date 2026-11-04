@@ -161,13 +161,28 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }));
   }
 
-  function applyPartialText(sessionId: string, turnId: string, partial: PartialReply) {
-    if (turnId === '') {
+  function applyPartialText(
+    sessionId: string,
+    turnId: string,
+    partial: PartialReply,
+    fallbackKey: string = '',
+  ) {
+    if (turnId === '' && fallbackKey === '') {
       return;
     }
     depsRef.current.updateSession(sessionId, (session) => {
-      const index = session.messages.findIndex((message) => message.turnId === turnId);
+      let index = session.messages.findIndex((message) => message.turnId === turnId);
+      if (index === -1 && fallbackKey !== '') {
+        // 按轮次编号找不到气泡：拿消息 id 兜底，只认还在等待中的那条。
+        index = session.messages.findIndex(
+          (message) => message.id === fallbackKey && message.waiting === true,
+        );
+      }
       if (index === -1) {
+        if (turnId === '') {
+          // 没有轮次编号、兜底也没找到：不补气泡，等下一拍。
+          return session;
+        }
         // 这一轮还没进到页面里（比如刚刷新完），先补一个气泡。
         const message: Message = {
           id: turnId,
@@ -338,12 +353,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     pollers.current.delete(sessionId);
   }
 
-  function startPolling(sessionId: string, turnId: string) {
+  function startPolling(sessionId: string, turnId: string, fallbackKey: string = '') {
     stopPolling(sessionId);
     const stop = startPartialPolling(
       sessionId,
       (partial) => {
-        applyPartialText(sessionId, turnId, partial);
+        applyPartialText(sessionId, turnId, partial, fallbackKey);
         if (partial.status === 'streaming') {
           return;
         }
@@ -373,7 +388,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       return;
     }
     setPendingIds((current) => new Set(current).add(sessionId));
-    startPolling(sessionId, waiting.turnId ?? '');
+    const turnId = waiting.turnId ?? '';
+    // 等待的气泡上没挂轮次编号（比如是刷新线程带回来的）：拿消息 id 当兜底定位键。
+    startPolling(sessionId, turnId, turnId === '' ? waiting.id : '');
   }
 
   async function recoverReply(sessionId: string, turnId: string) {
@@ -548,7 +565,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 这一轮的回答标成 aborted（气泡下方的脚注显示「对话已停止」）。
    * 页面不自己宣布停了。
    */
-  async function finishStop(sessionId: string, turnId: string) {
+  async function finishStop(sessionId: string, turnId: string, fallbackKey: string = '') {
     try {
       await abortReply(sessionId, turnId);
     } catch {
@@ -570,18 +587,18 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }
     if (partial.status === 'streaming') {
       // 服务器那边还在写：接着等，别骗用户说停了。
-      startPolling(sessionId, turnId);
+      startPolling(sessionId, turnId, fallbackKey);
       setSessionWarning({sessionId, text: textRef.current.replyStopFailed});
       return;
     }
     if (partial.status === 'failed') {
-      applyPartialText(sessionId, turnId, partial);
+      applyPartialText(sessionId, turnId, partial, fallbackKey);
       markTurnStatus(sessionId, turnId, 'failed');
       return;
     }
     if (partial.status === 'finished') {
       // 回答其实已经写完了：把答案补上，不显示「对话已停止」。
-      applyPartialText(sessionId, turnId, partial);
+      applyPartialText(sessionId, turnId, partial, fallbackKey);
       return;
     }
     // aborted，或者这一轮根本没开始：把这一轮的回答标成 aborted，
@@ -589,10 +606,20 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     markTurnStatus(sessionId, turnId, 'aborted');
   }
 
+  /** 等待中的气泡没有轮次编号时，拿它的消息 id 当轮询的兜底定位键；否则给空串。 */
+  function fallbackKeyOf(sessionId: string): string {
+    const messages = depsRef.current.sessions.find((item) => item.id === sessionId)?.messages ?? [];
+    const waiting = messages.find((message) => message.waiting === true);
+    if (waiting === undefined || (waiting.turnId ?? '') !== '') {
+      return '';
+    }
+    return waiting.id;
+  }
+
   async function stopSending(sessionId: string) {
     const entry = aborters.current.get(sessionId);
     const turnId = entry?.turnId ?? '';
-    const operation = finishStop(sessionId, turnId);
+    const operation = finishStop(sessionId, turnId, fallbackKeyOf(sessionId));
     stoppers.current.set(sessionId, operation);
     // 本地先断开：页面不等这一轮了。服务器那边由 finishStop 去说。
     entry?.controller.abort();
