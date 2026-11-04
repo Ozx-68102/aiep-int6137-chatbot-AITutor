@@ -32,25 +32,7 @@
 
 ### N1. 流加结局事件 `event: done`，`/partial` 收窄成「还在写吗」
 
-- **位置**：`app.py:912-970`（`_relay`）、`app.py:1043-1049`（`_sse`）、`app.py:627-643`（`read_session_partial`）、`types/api.py`。
-- **现状**：流里只有内容帧和 `data: [DONE]` 两种（INTERRUPTED_REPLY「对页面的约定只有三条」）。这一轮是写完、失败还是被停，流里一个字都没有，客户端只能靠「流怎么断的」反推，再去 `/partial` 问结局。CHAT_STREAM_KNOWN_ISSUES 把它列为根因，衍生出同文档第 1、3、4、8 条问题（同一状态四份、`/partial` 一人干两份活、前端 16 种状态组合、失败后要去上游对账）。
-- **影响**：前端状态机复杂且脆（三处各解一遍 `partial.status`）；后端为兜底写了 `_write_round_end` 的上游对账逻辑。
-- **方案**：`_relay` 收尾时（`finally` 里 `put_nowait(None)` 之前）多推一帧带结局的事件；`/partial` 之后只回答「还在写吗」，结局以流和库为准。注意结局词表先统一（见 O11）。
-  ```python
-  # types/api.py 新增
-  class TurnDoneEvent(BaseModel):
-      turn_id: str
-      status: Literal["completed", "aborted", "failed"]
-      bytes_sent: int
-
-  # app.py _relay 的 finally，在 relay.queue.put_nowait(None) 之前：
-  done = TurnDoneEvent(turn_id=turn_id, status=_final_status(relay), bytes_sent=len(relay.text))
-  relay.queue.put_nowait(f"event: done\ndata: {done.model_dump_json()}\n\n")
-  ```
-  有一个时序细节要拍板：`_write_round_end` 的「failed 后与上游对账改成 completed」发生在流结束之后，`done` 事件可能先说 failed、库里后改成 completed。两个选法：(a) 接受，页面下次读 `/messages` 时以库为准；(b) 把对账挪到发 `done` 帧之前（代价是失败时页面多等最多 7 秒的 `_wait_for_stop`）。建议 (a)，并在文档里写明「done 帧是即时判断，库是最终事实」。
-- **第三方库**：无。
-- **风险**：改流式核心链路和前后端契约（INTERRUPTED_REPLY 写明「流里不增加任何新格式」是当时的决定，现在推翻它要维护者拍板）；必须与前端改造同批上线，老前端会忽略未知 event（`EventSource`/手写解析都要确认不炸）。CHAT_STREAM 文档也叮嘱：这条要单独做、单独验收。
-- **工作量**：M。
+> **已实现（2026-11-05）**：流里加结局帧 event: done（TurnDoneEvent：turn_id/status/reason/bytes_sent），done 帧是即时判断、数据库是最终事实；/partial 收窄成只回答「还在写吗」（streaming 回 200，其余一律 404）；前端解读 partial.status 的点收敛到零。功能描述见 docs/CHAT_STREAM_PROTOCOL.md。调研原文以 LayerFS 历史为准。
 
 ### N2. 消息分页接口（新增）
 
@@ -162,13 +144,7 @@
 
 ### N6. 转发上游进度事件（`detail: true` 的 flowNodeStatus）
 
-- **位置**：`fastgpt.py:49-97`（`events`，payload 现在 `detail: False`）、`fastgpt.py:227-249`（`_piece`/`_content` 只认 `choices[0].delta.content`，别的帧全丢）。
-- **现状**：`docs/FASTGPT_API.md`「v1 与 v2 对话接口」实测确认：`detail: true` 时 v2 会多发 `flowNodeStatus`（节点名）、`flowNodeResponse`、`workflowDuration` 等结构化事件，**我们的部署已经开着运行状态**，文档原话「以后做『图片/视频生成要等几分钟』的进度显示用得上——后端挑着转给页面就行，不用 WebSocket」。上游现在整块返回（2-5 秒静默），将来媒体生成工作流静默会更长。
-- **影响**：长时间无反馈时页面只有三个点；孩子等几分钟不知道系统在干嘛，也容易当成卡死去刷新/重发。
-- **方案**：payload 改 `detail: True`；`_piece` 增加对 `flowNodeStatus` 帧的识别，转成自定义 SSE 事件（如 `event: progress`，data 只带节点名/耗时白名单字段，**原样转发上游 JSON 会把工作流内部结构泄给浏览器**，要挑字段）；前端不认识就忽略。这个事件流顺便就是 O8 的心跳来源（生成期间持续有帧）。`_relay` 里进度帧只进 SSE 队列，**不进** `append_chunk`/`relay.text`（那是答案正文）。
-- **第三方库**：无。
-- **风险**：`detail: true` 后上游帧变多，解析要多认几种形状（照 FASTGPT_API 的规矩：以 v4.14.5 源码 + 实测为准，别照文档站）；日志量会涨（O7 先做）。字段白名单要和前端约定。
-- **工作量**：M。
+> **已实现（2026-11-05）**：请求翻成 detail:true，中继层只挑 flowNodeStatus 组成 event: progress 帧转发（name/status 原样、不做映射文案）；flowNodeResponse 与 updateVariables 任何级别不整行落日志、绝不转发。功能描述见 docs/CHAT_STREAM_PROTOCOL.md。调研原文以 LayerFS 历史为准。
 
 ### N7. 健康探针拆分：liveness 与带 upstream 的 readiness
 
@@ -212,16 +188,7 @@
 
 ### N9. 编辑重发的服务端评估：现有 retryOf 路径已可复用，缺口在约定（新增）
 
-- **位置**：`docs/MESSAGE_ACTIONS.md`（调研时只写记录未实现；2026-11-04 第一至三期已实现）、`app.py:897-898`（`retry_of` 入口）、`app.py:801-851`（`_clear_failed_turn`/`_failed_turn_content_ids`）。
-- **现状**：MESSAGE_ACTIONS 定的方向是「编辑 = 改内容后按重试的路重发」，服务端要做的两件事（删上下游旧记录、新 turn_id 开新轮）现有 `retryOf` 机制全都做了。细读 `_clear_failed_turn`：删我们表的 `delete_round` 与问题文本无关；删上游按「回答记录的 dataId == turn_id」精确匹配，也与文本无关；只有 fallback 分支（回答没写下来时按 question 文本匹配最后一条提问记录）会因内容被改而失配——失配的后果按代码注释就是「宁可历史里多一遍，不删别人那轮」，安全。
-- **影响**：如果按「新接口」去做会白做一遍；真正缺的是几个待定项的服务端表态。
-- **方案**：接口层不需要新端点——前端发 `POST /api/chat`，`message` = 改后的内容，`retryOf` = 被编辑轮的 turn_id 即可。服务端要补的约定：
-  1. 现在 `_clear_failed_turn` 对任何状态的旧轮都会删（不限 failed）——编辑一个 completed 轮在机制上已可行，确认这是预期；
-  2. MESSAGE_ACTIONS 说编辑重发顺带清掉「被按停止那一轮上游悬空的提问」：aborted 轮的回答记录上游可能没有，走的正是上面那个文本 fallback，编辑后文本不同会失配。若在意，可给 fallback 加一个「上游最后一条是 user 记录且其后无 assistant、且该 chat 的 Redis/表状态是 aborted」的按状态匹配分支，而不是按文本（2026-11-04 已解决：采用从我们自己的 `message` 表读提问原文来比对，即 MESSAGE_ACTIONS.md 的方案①，见 `chat_log.read_question`）；
-  3. 把「编辑重发复用 retryOf」写进 MESSAGE_ACTIONS.md 的待定清单，免得将来重复设计（已做：见 MESSAGE_ACTIONS.md「行为规范：重试与编辑重发是同一条路」）。
-- **第三方库**：无。
-- **风险**：低（主要是文档和一个可选 fallback 分支）。
-- **工作量**：S。
+> **已实现（2026-11-05）**：编辑重发复用 POST /api/chat + retryOf，不新增端点；悬空提问改拿我们自己 message 表里读出的提问原文比对（MESSAGE_ACTIONS.md 方案①，chat_log.read_question），接口没加字段。功能描述见 docs/MESSAGE_ACTIONS.md。调研原文以 LayerFS 历史为准。
 
 ### N10. 会话创建的幂等（新增）
 
@@ -278,42 +245,11 @@
 
 ### O1. 带 cookie 的请求每轮打 4 个连接、6 条语句：清扫与续期的开销（展开 CHAT_STREAM 第 6 条）
 
-- **位置**：`app.py:158-190`（`_RefreshLoginCookie` 中间件）、`app.py:1281-1292`（`_login_token`，每次调用先 `_sweep_expired_tokens()`）、`app.py:1299-1306`（`_sweep_expired_tokens`，自己再开一个 `db_session`）、`app.py:1335-1338`（`_cookie_is_valid`）。
-- **现状**：一个带 cookie 的请求实际发生的是——中间件：`_cookie_is_valid` 开会话 A → `_login_token` 先 `_sweep_expired_tokens()` 开会话 B 做一条 `DELETE`（`login_token` 无 `expires_at` 索引，Seq Scan，CHAT_STREAM 已实测）→ 会话 A 里 `SELECT` 令牌 + `UPDATE` 续期 + commit；端点内 `_account_from_cookie` 把这三步**原样再来一遍**（会话 C、D）。合计约 4 个连接、6 条语句、4 次提交，同一个令牌行一个请求里被 `UPDATE` 两遍。而且中间件是 `async` 的，`_cookie_is_valid` 里的同步 psycopg 调用直接堵事件循环——FINDINGS 2026-10-31 修异步接口同步查库时「中间件这条漏了」（CHAT_STREAM 第 6 条原话）。另外 `login_token` 只增不减，清扫每请求扫全表，行数涨了以后每请求的代价跟着涨。
-- **影响**：单请求中位代价不大（CHAT_STREAM 实测 <1ms），但它是**每个请求**的固定税，且随令牌表行数线性变坏；事件循环被同步查库堵住时，正在流式输出的轮次会卡顿（FINDINGS 实测首次连接最大 78ms）。
-- **方案**（四步，可分批）：
-  1. `_login_token` 里的 `_sweep_expired_tokens()` 删掉，清扫挪到 lifespan 里的定时任务（如每 10 分钟一次；单进程假设下不需要分布式锁）：
-     ```python
-     # app.py _lifespan 内：
-     async def _token_sweeper():
-         while True:
-             await asyncio.sleep(600)
-             await asyncio.to_thread(_sweep_expired_tokens)
-     task = asyncio.create_task(_token_sweeper())
-     # finally 里 task.cancel()
-     ```
-  2. 中间件查一次、端点复用：中间件把查到的令牌（或 account_id）放进 `scope["state"]`，端点侧的取账号函数先看 `request.state` 再查库。每请求从两轮查询减到一轮。
-  3. 续期 + 校验合成一条语句：`UPDATE login_token SET expires_at = :deadline WHERE token_hash = :h AND expires_at > now() RETURNING account_id`——命中即有效且已续期，一次往返替代 SELECT+UPDATE。
-  4. `login_token.expires_at` 加索引（`db/init.py` 照 `_ensure_login_token_expiry` 的写法补一条 `CREATE INDEX IF NOT EXISTS`）——这条属于 db 维护面，交接给 backend-infra/维护者。
-- **第三方库**：无。
-- **风险**：动的是登录链路（AGENTS 边界里的核心链路），第 2、3 步要维护者许可；第 1 步语义变化是「过期令牌最多再活 10 分钟才被物理删除」——期间拿它查询也会因 `expires_at > now()` 条件被拒，无安全影响。
-- **工作量**：M。
+> **已实现（2026-11-05）**：清扫从请求路径挪进 lifespan 定时任务（启动一次 + 每 600 秒）；校验加续期合成单条 UPDATE...RETURNING（synchronize_session=False），中间件查询结果经 contextvar 请求态复用（端点仍做一次主键取行拿活 ORM 对象），中间件查库包 asyncio.to_thread；expires_at 索引经 alembic 迁移 0001 建立。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 ### O2. `Account.avatar` 大字段跟着每一次认证请求跑（新增）
 
-- **位置**：`db/models.py:42`（`avatar: Mapped[bytes | None] = mapped_column(LargeBinary)`）、`app.py:1197-1203`（`_require_role` 访问 `token.account`）、`app.py:300-313`（`admin_list_accounts` 全表 select）。
-- **现状**：avatar 存的是处理后的 256×256 PNG（`avatar.py`，几十到几百 KB），直接放在 `account` 表的列上。认证路径上 `_login_token` 返回 ORM 对象后，`_require_role(token.account, ...)`、`_account_from_cookie` 都会触发 `account` 行的懒加载——SQLAlchemy 默认把**所有列**都取回来，包括 avatar 字节。也就是说每个带 cookie 的请求都白白把一张 PNG 从 PostgreSQL 搬到进程里再扔掉；`admin_list_accounts` 更是把所有账号的头像一次全拉。
-- **影响**：每请求多几十~几百 KB 的数据库传输和反序列化；账号多了以后控制台列表接口会明显变重。属于纯浪费，无任何功能收益。
-- **方案**：列级延迟加载，一行改动：
-  ```python
-  # db/models.py
-  from sqlalchemy.orm import deferred
-  avatar: Mapped[bytes | None] = deferred(mapped_column(LargeBinary))
-  ```
-  `read_avatar`/`upload_avatar`/`_avatar_url` 真正访问 `account.avatar` 时 SQLAlchemy 自动补一条 SELECT（只在这些端点多一次小往返）。若想连这一次也省，`read_avatar` 里可 `session.refresh(account, ["avatar"])` 显式加载。长期看头像拆独立表（`avatar(account_id PK, data bytea)`）更干净，但那要动 init.py/迁移，收益不大，deferred 够用。
-- **第三方库**：无（`deferred` 是 SQLAlchemy 自带）。
-- **风险**：很低；注意任何在会话关闭后访问 `account.avatar` 的代码会抛 DetachedInstanceError——现有代码里 `read_avatar` 是在 `with db_session()` 里先把 `data = account.avatar` 取出来再用的（`app.py:479-490`），已经是对的写法。
-- **工作量**：S。
+> **已实现（2026-11-05）**：Account.avatar 改成列级延迟加载（SQLAlchemy deferred，server/src/server/db/models.py），认证与列表请求不再背着头像字节；真正读头像的端点多一次按主键的 SELECT。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「每请求的成本」一节。调研原文以 LayerFS 历史为准。
 
 ### O3. Redis 同步客户端在事件循环里：故障时放大成全服务卡顿（新增，与 CHAT_STREAM 第 12 条相邻但不同）
 
@@ -408,49 +344,11 @@
 
 ### O7. 聊天链路把用户问题和上游原文按帧写进日志（两处代码自己都标了「确认后再收窄」）
 
-- **位置**：`app.py:860`（整个请求体 `model_dump_json` 入日志，含 message 全文）、`app.py:928/934`（每个发往页面的帧一行）、`fastgpt.py:66`（上游请求体全文）、`fastgpt.py:87`（上游每一行原文）。
-- **现状**：一轮问答的正文至少被完整写进 `logs/server.log` 四遍（请求体、上游请求、上游逐行、发给页面逐帧）。AGENTS 明说该日志「写着用户提问和 FastGPT 的上游原文」；5MB 轮转意味着高频使用时归档文件快速堆积。两处注释都写着「排查流式输出用，确认后再收窄」——流式机制现在已实测稳定（INTERRUPTED_REPLY、CHAT_STREAM 的实测记录），收窄的时机到了。
-- **影响**：隐私面（未成年学生的提问明文多处落盘）；磁盘与轮转压力；每帧一行 `logger.info` 在事件循环里也是纯开销；真出事时反而难查——一轮的轨迹散在几百行里互相穿插（CHAT_STREAM 第 7 条）。
-- **方案**：INFO 只记元数据，全文降到 debug 开关（`settings.debug == 1` 才记）：
-  ```python
-  # app.py chat 入口：
-  logger.info("chat chat=%s turn=%s retry_of=%s len=%d",
-              body.chat_id, body.turn_id, body.retry_of, len(body.message))
-  if load_settings().debug == 1:
-      logger.debug("chat body %s", body.model_dump_json(by_alias=True))
-  # _relay 每帧不再逐行记，只累计字节数；fastgpt.py 同理（events 里 66/87 两行降级）。
-  ```
-  配套 CHAT_STREAM 第 7 条的建议：一轮落定时记**一行**结构化摘要（turn_id、chat_id、account_id、结局、上游首字节耗时、总耗时、字节数、stop 是否发出、库是否写上），让 `grep "<turn_id>" logs/server.log` 一条命令看全貌。日志文件本身的轮转/保留策略归 backend-infra。
-- **第三方库**：无。
-- **风险**：低；唯一代价是排障时若没开 debug 拿不到原文——建议改完后跑一轮完整实测（照 INTERRUPTED_REPLY 的场景表）再合入。
-- **工作量**：S。
+> **已实现（2026-11-05）**：INFO 只留元数据；全文日志（对话请求体、FastGPT 请求、上游每行、发给页面每帧）全部降到 debug（.env 的 DEBUG=1 打开）；flowNodeResponse/updateVariables 任何级别不整行落日志；每轮落定打一行 turn_summary。功能描述见 docs/TURN_LOGGING_AND_DIAGNOSTICS.md。调研原文以 LayerFS 历史为准。
 
 ### O8. SSE 响应缺 no-store / X-Accel-Buffering 头，且上游静默期没有心跳
 
-- **位置**：`app.py:909`（`StreamingResponse(_sse(relay), media_type="text/event-stream")`，无 headers）、`app.py:1043-1049`（`_sse` 纯转发，静默期零字节）。
-- **现状**：nginx 侧已经 `proxy_buffering off`（NGINX_SPA_DEPLOYMENT_GUIDE ④），但应用层没有 `X-Accel-Buffering: no` 双保险——谁改了 nginx 配置或前面再加一层代理（学校网关很常见），流就会被憋成整块。也没有 `Cache-Control: no-store`（SSE 响应理论上不该被任何缓存存下）。另外上游是整块返回（FASTGPT_API 实测：2-5 秒静默后整段到达），将来媒体工作流静默可达几分钟，期间客户端收不到任何字节，中间代理可能按空闲超时掐连接。
-- **影响**：部署环境稍有变化流式就退化；长静默场景（N6 的进度事件没做之前）连接可能被中间层掐断，表现为「莫名 failed」。
-- **方案**：
-  ```python
-  _SSE_HEADERS = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
-  return StreamingResponse(_sse(relay), media_type="text/event-stream", headers=_SSE_HEADERS)
-
-  # _sse 加 15 秒心跳（SSE 注释帧，任何解析器都会忽略）：
-  async def _sse(relay):
-      while True:
-          try:
-              item = await asyncio.wait_for(relay.queue.get(), timeout=15.0)
-          except TimeoutError:
-              yield ": ping\n\n"
-              continue
-          if item is None:
-              break
-          yield item
-  ```
-  心跳只在「响应头已发出、上游还没吐字」的窗口出现，正常轮次（0.3-5.2 秒）几乎不会触发。N5 的 `/api/events` 同样套这两个头（草图里已带）。
-- **第三方库**：无。
-- **风险**：极低；确认前端手写 SSE 解析会跳过 `:` 开头的注释帧（EventSource 天然跳过；`src/api/chat.ts` 若是手写解析要看一眼）。
-- **工作量**：S。
+> **已实现（2026-11-05）**：SSE 响应统一带 Cache-Control: no-store 和 X-Accel-Buffering: no（_SSE_HEADERS）；流上 15 秒没有动静发一帧 ": ping" 注释心跳。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「心跳与响应头」一节。调研原文以 LayerFS 历史为准。
 
 ### O9. chat_log 每轮的 SQL 往返可以减半；`_next_seq` 有并发撞号面
 
@@ -498,20 +396,7 @@
 
 ### O11. 两套状态词表合一（CHAT_STREAM 第 2 条的落地方案）
 
-- **位置**：`reply_store.py:17-20`（`STREAMING/FINISHED/FAILED/ABORTED`，Redis 用 `finished`）vs `chat_log.py:29-32`（`STREAMING/COMPLETED/FAILED/ABORTED`，数据库用 `completed`）；`app.py:46-61` 把两边并排 import。
-- **现状**：同义不同词（finished/completed），靠读代码的人自己确认它们永不分叉；`app.py` 里 `from server.reply_store import FAILED` 和 `chat_log.FAILED` 并存，`_merge_current_turn`（`app.py:744-767`）在两套词之间做映射。
-- **影响**：加结局事件（N1）时词表要出现在第三个地方（SSE 契约），不合一就会有三套映射。
-- **方案**：一个模块拥有这四个词，比如 `types` 或新文件 `turn_status.py`：
-  ```python
-  # server/turn_status.py
-  STREAMING, COMPLETED, FAILED, ABORTED = "streaming", "completed", "failed", "aborted"
-  # Redis 线上值维持 "finished" 不改（避免升级瞬间新旧进程词表错位），
-  # reply_store 内部做一次映射：_WIRE = {COMPLETED: "finished"}
-  ```
-  `chat_log`、`reply_store`、N1 的 `TurnDoneEvent` 全部引用它。Redis 存量键值不用迁移（TTL 本来就短）。
-- **第三方库**：无。
-- **风险**：极低；纯内部重构，wire 格式不变。
-- **工作量**：S。
+> **已实现（2026-11-05）**：server/src/server/turn_status.py 独家拥有 streaming/completed/failed/aborted 四个状态词；Redis 线上值保持 "finished"，reply_store 在自己的边界上映射。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「状态词表」一节。调研原文以 LayerFS 历史为准。
 
 ---
 
@@ -519,40 +404,13 @@
 
 ### P1. 登录接口没有限流（ACCOUNT_MANAGEMENT 的 TODO 至今未接）
 
-- **位置**：`app.py:272-280`（`login`）、`app.py:282-297`（`admin_login`）、`app.py:1178-1195`（`_verified_account`）；对照 `app.py:424-432`（`change_password` 已接 `is_locked`/`register_failure`）。
-- **现状**：`ratelimit.py` 整套设施都在，但只有改密路径用了。`/api/login` 和 `/api/admin/login` 失败次数无上限——在线猜密码零成本。库里还有文档明文记录的初始口令账号（`admin`/`admin`、`test01`/`test01`，`db/init.py:9-16`），公网部署后这是最先被撞的门。ACCOUNT_MANAGEMENT「基础安全」第一条就是这个 TODO（「登录路径还没接」）。
-- **影响**：账号可被在线爆破；argon2 验证是 CPU 活，无限制的登录请求同时是廉价的 DoS 面（每请求占一个线程池线程做哈希）。
-- **方案**：照 `change_password` 的样子接进 `_verified_account`（一处改动盖住两个登录端点）。注意维度：账号维度用**归一化后**的用户名（ACCOUNT_MANAGEMENT 记录了 `admin`/`Admin`/`admin ` 在库里是三个账号的坑，限流键别跟着裂开），IP 维度照改密路径：
-  ```python
-  # app.py login/admin_login 入口（进 db_session 之前）：
-  ident = body.username.strip().lower()
-  if is_locked("login", ident) or is_locked("login:ip", client_ip):
-      raise HTTPException(429, _RATE_LIMITED)
-  # _verified_account 失败分支：register_failure 两个维度；成功：clear_failures("login", ident)
-  ```
-  键空间在 `h2botapp-chat:ratelimit:` 下，ACL 约束天然满足（ratelimit.py 注释）。锁定时长/次数沿用现有 15 分钟/5 次。
-- **第三方库**：无。
-- **风险**：低；Redis 挂时按现有语义放行（有警告日志）。注意 `login` 是 sync def，`request.client.host` 要把 `Request` 加进签名。
-- **工作量**：S。
+> **已实现（2026-11-05）**：/api/login 和 /api/admin/login 接上现成 ratelimit：账号维度用归一化用户名（strip().lower()），IP 维度用 request.client.host、与改密路径共用 IP 桶（维护者知情）；只数 401（含「查无此人」，防用户名枚举）；锁定 15 分钟/5 次沿用现状；Redis 挂时放行。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 ### P2. 请求体无长度上限：message、password 都能无限长（新增）
 
 > **2026-11-04 维护者拍板**：`message` 的长度上限定为 **8000 字**。密码相关字段的上限照本节建议（128，与现有密码策略常量一致）。本节其余内容（nginx 请求体上限兜底、前端输入提示）不变，落地时一起做。
 
-- **位置**：`types/api.py:129`（`message: str = Field(min_length=1)`，无上限）、`types/api.py:10`（`LoginRequest.password` 无上限）、`types/api.py:16-18`（`PasswordChange` 三个字段无任何约束）；Starlette/uvicorn 对 JSON body 大小无默认上限。
-- **现状**：一条 10MB 的 `message` 会被完整解析、写进日志（O7 的现状让它写四遍）、存进 Redis turn 键和 message 表，再原样转发给上游（token 直接烧穿）。超长 `password` 会进 argon2（argon2-cffi 对长度宽松，CPU 代价随长度涨）并可能触发 422 之外的怪路径。`check_password_policy` 的 128 上限只在改密时查，登录不查。
-- **影响**：资源滥用（上游 token、磁盘、日志、内存）；单个恶意/失控客户端能显著拖累单进程服务。
-- **方案**：模型层收口 + 边缘层兜底：
-  ```python
-  # types/api.py
-  message: str = Field(min_length=1, max_length=8000)   # 数字与维护者/产品对齐后定
-  password: str = Field(min_length=1, max_length=128)   # 与 passwords._MAX_LENGTH 一致
-  old_password: str = Field(max_length=128)             # PasswordChange 三个字段同
-  ```
-  422 会走 `_validation_error` 拼成中文句子，前端契约不破。nginx 侧 `client_max_body_size`（头像路径单独放宽到 6m，见 P10）挡住更大的裸 body。`max_length` 校验发生在完整解析 body 之后，所以 nginx 那道仍然必要。
-- **第三方库**：无。
-- **风险**：max_length 定小了会拒掉合法长提问（比如粘贴一整篇作文）——数字要维护者拍板；前端最好同步做输入上限提示（UI_WARNINGS 那类文案）。
-- **工作量**：S。
+> **部分实现（2026-11-05）**：后端模型上限落地（message max_length=8000、密码类 128，422 仍回一句中文），前端提问框和编辑框 maxLength 8000 对齐；nginx client_max_body_size 兜底留部署日。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「输入」一节。调研原文以 LayerFS 历史为准。
 
 ### P3. `ChatRequest.locale` 是死字段（新增）
 
@@ -596,21 +454,7 @@
 
 ### P5. `message` 表里卡死的 streaming 行没有对账路径（新增）
 
-- **位置**：`chat_log.py:57-89`（`begin_round` 先写两行 `status=streaming`）、`app.py:729-767`（`_merge_current_turn`：表里 `waiting=True` 的行只有当 Redis partial 的 turn 对得上时才会被覆盖）、`app.py:997-1015`（`_write_round_end` 是唯一的落定写入）。
-- **现状**：`begin_round` 的设计意图是「进程中途死了，表里留着这一轮的提问」（chat_log.py 注释）。但进程真死了之后：`finish_round` 永远不会来，Redis 键 TTL 过期，`_merge_current_turn` 里 `partial.turn_id is None` 直接 return——表里那行 `streaming` 原样端给页面，`waiting=True`，**三个点永远转**。没有任何启动对账、读时对账或超时对账。
-- **影响**：一次部署重启/崩溃就会让受影响会话的最后一条回答永久处于「正在写」，用户只能干等或重试整个会话；这也是「刷新后接上」故事的未完成半场。
-- **方案**：两层，可分别上：
-  1. **读时兜底**（改动最小）：`read_session_messages` 里，`streaming` 行若既不是 Redis 当前轮（`partial.turn_id != row.turn_id` 或 partial 为空），就把展示状态降级为 `failed`（不写库，纯展示层），页面因此出现「消息生成失败 + 重试」而不是永远的等待气泡。
-  2. **启动对账**：lifespan 里加一步——单进程假设下，进程启动时表里所有 `status=streaming` 的行必然是死轮，一条 UPDATE 全改 `failed`：
-     ```python
-     session.execute(update(ChatMessage).where(ChatMessage.status == chat_log.STREAMING)
-                     .values(status=chat_log.FAILED))
-     ```
-     注意放在 lifespan 而非 import 期，且只在服务真正启动时跑一次。
-  两层都做的话，(1) 管「进程活着但 `_settle_tasks` 写库失败」的残余情形（`chat_log._write` 吞 SQLAlchemyError，`chat_log.py:232-243`），(2) 管崩溃重启。
-- **第三方库**：无。
-- **风险**：(2) 在多进程部署下会误杀别的进程正在写的轮次——但多进程本来就部署不了（CHAT_STREAM 第 12 条），在代码注释里写明这个前提。
-- **工作量**：S（读时）/ S（启动），合计 M 以内。
+> **已实现（2026-11-05）**：两层对账都落地——读时 _merge_current_turn 把「Redis 编号对不上的 streaming 行」展示层降级为 failed（不写库）；启动时 lifespan 里 chat_log.fail_stuck_rounds 一条 UPDATE 标掉全部死轮（单进程前提）。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「卡死行对账」一节。调研原文以 LayerFS 历史为准。
 
 ### P6. 数据库不可用时 `/messages` 返回 200 + 空历史（新增）
 

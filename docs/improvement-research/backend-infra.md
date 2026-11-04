@@ -26,34 +26,7 @@
 
 ### 1. 登录接口没有防爆破，ratelimit 只接在改密端点上
 
-- **位置**：`/server/src/server/app.py` 的 `login()`（`/api/login`）、`admin_login()`（`/api/admin/login`）；`/server/src/server/ratelimit.py`
-- **现状**：`ratelimit.py` 的模块注释写着「登录、改密码的失败计数」，但 grep 全仓库确认 `is_locked` / `register_failure` / `clear_failures` 只被 `change_password` 调用（app.py 第 424、431、432 行附近）。`/api/login` 和 `/api/admin/login` 可以无限次尝试，注释与实现已经走偏。
-- **影响**：对着 `admin/admin`、`test01/test01`（见第 5 条）和学生 6 位弱密码可以不限速爆破。而且每次尝试都让服务器跑一遍 argon2 verify（64MiB 内存、3 轮迭代），并发打过来本身就是拒绝服务向量——爆破者不猜中密码也能把 CPU 打满。
-- **方案**：把现成的 `ratelimit` 接到两个登录端点上，复用 `_key()`（键自动落在 ACL 放行的 `h2botapp-chat:` 前缀下）。草图（以 `/api/login` 为例，`/api/admin/login` 同理）：
-
-  ```python
-  # login() 需要多收一个 request: Request 参数来取 client.host
-  client_ip = request.client.host if request.client else "unknown"
-  with db_session() as session:
-      row = session.scalar(select(Account).where(Account.username == body.username))
-  # 账号不存在也要有键可锁，不然可以用「不存在用户名」无限试
-  ident = str(row.id) if isinstance(row, Account) else f"unknown:{body.username}"
-  if is_locked("login", ident) or is_locked("login:ip", client_ip):
-      raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, _RATE_LIMITED)
-  try:
-      with db_session() as session:
-          result, token = _login_account(session, body.username, body.password)
-  except HTTPException as exc:
-      if exc.status_code == status.HTTP_401_UNAUTHORIZED:
-          register_failure("login", ident)
-          register_failure("login:ip", client_ip)
-      raise
-  clear_failures("login", ident)
-  ```
-
-- **第三方库**：无。现有 Redis 计数够用；slowapi 这类库引入的只是依赖面，不带来新能力。
-- **风险**：Redis 挂掉时限流照既有哲学「放行」，登录短暂不设防——这是仓库已有的取舍，保持一致即可。IP 维度阈值见第 3 条，别照抄 5 次。
-- **工作量**：S
+> **已实现（2026-11-05）**：两个登录端点接上 ratelimit：先查锁定再进密码验证（argon2 是 CPU 活）；账号维度用归一化用户名（不是本节草图的账号 id），IP 维度与改密路径共用一个桶（维护者知情，学校 NAT 场景留意，见第 3 条）；只数 401 防用户名枚举；Redis 挂时放行。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 ### 2. login cookie 没有 Secure 标志，名字也没有 `__Host-` 前缀
 
@@ -81,13 +54,7 @@
 
 > **2026-11-04 维护者拍板**：方案 (a)「30 天绝对会话上限」**不采纳**，维持纯滑动续期——与主流产品的登录态一致：不退出登录、不换浏览器设备，就可以长期用。方案 (b) 清扫定时化、(c) `expires_at` 索引与上限无关，照做。配套前提记录在案：公网上线时第 2 条的 HTTPS + Secure cookie 是必要条件；对失窃 cookie 的补救靠现有吊销路径（改密码、控制台重置、停用账号都会让令牌失效）。
 
-- **位置**：`app.py` 的 `_RefreshLoginCookie` 中间件、`_login_token()`、`_sweep_expired_tokens()`；`db/models.py` 的 `LoginToken`
-- **现状**：每个带 cookie 的请求都把 `expires_at` 续到 now+7 天（中间件里 `_cookie_is_valid` 续一次，端点里 `_login_token` 又续一次）；`_login_token` 和登录端点开头都调 `_sweep_expired_tokens()`，对 `login_token` 全表做 `DELETE ... WHERE expires_at <= now`，而 `models.py` 里 `expires_at` 没有索引。
-- **影响**：a) 被窃的 cookie 只要持续使用就永不过期，没有「最长 30 天必须重新登录」这种绝对上限；b) 每个认证请求都带一次全表扫描 DELETE，是纯写放大，令牌行数涨起来后所有接口跟着变慢；c) 中间件+端点重复查询让 DB QPS 翻倍（详见第 15 条）。
-- **方案**：a) `LoginToken` 加绝对寿命：续期时不超过 `created_at + 30 天`（`_login_deadline()` 改成 `min(now+7d, created_at+30d)`，不用加列）；b) `_sweep_expired_tokens` 从请求路径挪到 `_lifespan` 里的周期任务（`asyncio.create_task` 每 10 分钟跑一次，进程启动时先跑一次），请求路径不再扫表；c) 给 `expires_at` 加索引——按 `init.py` 现有「补列」风格加一个 `_ensure_login_token_expiry_index`，将来归 alembic 管（第 13 条）。
-- **第三方库**：无
-- **风险**：加了绝对上限后，天天用的学生每 30 天被要求重新登录一次——学校场景可接受，且和「重置通道存在」的既有前提一致。
-- **工作量**：M
+> **部分实现（2026-11-05）**：(b) 清扫挪进 lifespan 定时任务（启动一次 + 每 600 秒）、(c) expires_at 索引经 alembic 迁移 0001 建立，都已实现；(a) 绝对上限按上方拍板不采纳——滑动 7 天、无绝对上限；cookie Secure/__Host- 留部署日（见第 2 条）。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 ### 5. 初始口令 admin/admin、test01/test01 写死在 init.py，且豁免密码策略
 
@@ -177,13 +144,7 @@
 
 > **2026-11-05**：alembic 已安装（1.20.1，进 uv.lock）。引入计划：建迁移目录、基线 = stamp 现有表结构、第一个迁移 = `login_token.expires_at` 索引；建表引导仍走 create_all，不做全量改造。
 
-- **位置**：`/server/src/server/db/init.py`（`create_all` + `_ensure_pinned_column` 等 5 个手写 inspect+ALTER 函数）；`db/models.py`
-- **现状**：新表靠 `create_all`，改列靠每列一个手写函数；什么时候跑靠人记（`server/AGENTS.md`：「改了数据库结构之后跑」）。没有版本号、没有回滚、没有「库现在处于什么状态」的记录；改约束（比如远期清单里明写的「家长 role 要扩 `account_role_check` 枚举」）在这套机制里没有路径——`_ensure_role_column` 的注释自己演示了加约束要小心全表扫描，这种知识现在只存在于注释里。
-- **影响**：schema 每演进一次就多一个一次性函数，环境之间（开发机、部署机）没有任何手段核对一致性；「先迁移后起服务」的部署顺序没有工具承载，靠文档口头约定。远期清单上排着的家长绑定表、保留期限字段都会继续往 init.py 上堆。
-- **方案**：引入 alembic：`uv add alembic`，`server/` 下 `alembic init`，第一个 revision 用 `--autogenerate` 对着现有库生成后人工核对成「与当前 schema 完全一致的 baseline」，此后所有变更走 `alembic revision --autogenerate` + 人工 review + `alembic upgrade head`。`init.py` 瘦身成只管初始账号（`_ensure_initial_account`、`_ensure_console_admin`），补列函数全部退役。`server/AGENTS.md` 的「常用指令」加 `uv run alembic upgrade head`。
-- **第三方库**：alembic（点名。SQLAlchemy 官方迁移工具，事实标准；自己写版本表加迁移 runner 等于重造它，且「依赖优先于手搓」是两份 AGENTS.md 的明文规矩）
-- **风险**：baseline 必须和存量库逐列一致，生成后先 `pg_dump --schema-only` 对照；首次在生产跑之前先做备份（第 20 条）。这是「动数据结构」级别的大改动，按规矩先向维护者完整说明再动手。
-- **工作量**：M
+> **已实现（2026-11-05）**：alembic 落地：server/alembic.ini + migrations/（env.py 复用应用自己的 get_engine()，密钥不进配置），引导仍走 create_all，首个迁移 0001 = login_token.expires_at 索引；此后表结构变更一律写迁移文件。功能描述见 server/AGENTS.md「迁移」一节和 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 ### 14. 连接池全默认、没有 pre_ping：数据库重启后第一批请求报错，高峰期线程抢连接
 
@@ -333,13 +294,7 @@
 
 ### 23. 日志无结构、无请求关联 id，第三方日志和业务日志混写一个文件
 
-- **位置**：`log.py`（`_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"`；`configure_logging` 把文件 handler 挂到 root，root 级别放开到 INFO）
-- **现状**：纯文本单行格式。聊天相关日志大多带 `chat_id`，但 access 日志（uvicorn.access 也进文件）和业务日志之间没有关联手段；root 放开后 httpx2 等第三方 INFO 日志全部混入 `server.log`。查「某一个请求从进来到上游回来发生了什么」只能按时间戳肉眼对。
-- **影响**：并发一多（教室里几十个学生同时提问），交错的时间线基本不可读；第 7 条降噪之后，留下的日志更值得读得懂。
-- **方案**：分两档。a) 不加库：`contextvars` 存 request id（ASGI 中间件生成或复用 `chat_id`/`turn_id`），配一个 `logging.Filter` 把它注入 record，`_FORMAT` 加 `%(request_id)s`——总共二十行左右，纯标准库；b) 要 JSON 结构化就点名 structlog：processor 链输出 JSON、天然支持 contextvars 绑定，`log.py` 的 formatter 层整体替换，业务代码里的 `logger.info("...", args)` 调用面基本不动。以本项目「单机、日志进文件、人肉排查」的体量，a 档性价比更高；b 档等真有日志聚合需求（接 Loki/ELK）再上。
-- **第三方库**：structlog（点名，仅 b 档需要；a 档无）
-- **风险**：b 档改日志格式，`AGENTS.md`/`server/AGENTS.md` 里关于日志内容的描述要同步；a 档无风险。
-- **工作量**：a=S，b=M
+> **部分实现（2026-11-05）**：a 档已实现——contextvars 存轮次编号（set_turn_context），logging.Filter 注进每行，格式 "%(asctime)s %(levelname)s %(name)s [turn %(turn_id)s] %(message)s"，请求上下文之外输出 -；b 档（structlog JSON 结构化）没做，仍是 backlog。功能描述见 docs/TURN_LOGGING_AND_DIAGNOSTICS.md。调研原文以 LayerFS 历史为准。
 
 ### 24. 未捕获异常只落一行日志，没有错误上报与聚合
 

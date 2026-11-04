@@ -137,20 +137,7 @@ unicorn 与 react-perf 规则面宽、风格类噪音多，本项目规模下收
 
 ### 8. `pnpm check` 不含类型检查，也没有独立 typecheck 脚本
 
-- **位置**：/package.json scripts。
-- **现状**：`check = oxlint && oxfmt --check`；类型检查只藏在 `build` 里（`pnpm exec tsc --noEmit && vite build`）。AGENTS.md 提到可以单独跑 `pnpm exec tsc --noEmit`，但没有 `typecheck` 脚本入口，`check` 也不含它。oxlint 的 typeAware 只覆盖部分类型相关 lint 规则，**不替代** tsc 全量检查。
-- **影响**：日常跑 `pnpm check` 全绿仍可能有类型错误；想只做类型检查就得产出不必要的 dist（或手敲长命令）。
-- **方案**：
-
-```json
-"typecheck": "tsc --noEmit",
-"check": "oxlint && oxfmt --check && tsc --noEmit"
-```
-
-TS 7 原生 tsc 对 59 个文件是秒级，并入 check 无感。同步更新 AGENTS.md「常用指令」与 TECH.md 对应行。
-- **第三方库/工具**：无。
-- **风险**：无。
-- **工作量**：S。
+> **已实现（2026-11-05）**：pnpm check 现在等于 oxlint + oxfmt --check + pnpm exec tsc --noEmit 一起跑（package.json）；独立的 typecheck 脚本没有另加，pnpm exec tsc --noEmit 就是等价入口。功能描述见 docs/TECH.md「前端」一节。调研原文以 LayerFS 历史为准。
 
 ### 9. 前后端检查没有统一入口
 
@@ -247,28 +234,7 @@ jobs:
 
 ### 12. ruff 规则集缺 ASYNC 与安全类
 
-- **位置**：/server/pyproject.toml `[tool.ruff.lint]`，select = [E, F, I, UP, B, TID, RET]。
-- **现状**：7 组规则质量不低（bugbear、banned-api 都配了，TID251 还禁了 `__future__.annotations`）。但缺两组对这个项目特别对症的：**ASYNC**（flake8-async）——FINDINGS 2026-10-31 实测踩过「`async def` 接口里写同步 `with db_session()` 卡死事件循环，停止按钮失灵」，当时靠人工排查定位，ASYNC100/ASYNC110 类规则防的正是这类回归，而后端现在仍有 4 个异步接口；**S**（flake8-bandit）——项目有登录、密码哈希、cookie、限流，安全类规则（硬编码密码、弱随机数等）有直接对应物。
-- **影响**：事件循环阻塞类回归只能靠人眼；安全低级错误无自动检查。
-- **方案**：
-
-```toml
-select = [
-  "E", "F", "I", "UP", "B", "TID", "RET",
-  "ASYNC",  # blocking calls inside async def
-  "S",      # bandit security rules
-  "SIM",    # simplify
-  "RUF",    # ruff-native rules
-]
-
-[tool.ruff.lint.per-file-ignores]
-"src/server/db/init.py" = ["S106"]  # seeded default passwords are intentional
-```
-
-启用后先 `uv run ruff check .` 看命中面：S 类通常需要一轮 per-file 微调（种子数据、assert 用法），SIM/RUF 误报少。
-- **第三方库/工具**：无新增（均为 ruff 内建规则组）。
-- **风险**：ASYNC 对「已在线程里的同步调用」有边界误报，逐例确认；一次性调优成本半天内。
-- **工作量**：S。
+> **部分实现（2026-11-05）**：ASYNC（flake8-async）已加进 ruff 的 select（server/pyproject.toml 的 [tool.ruff.lint]）；安全类 S（bandit）以及 SIM、RUF 没加，仍是 backlog。功能描述见 server/pyproject.toml。调研原文以 LayerFS 历史为准。
 
 ### 13. ruff 被列进生产依赖
 

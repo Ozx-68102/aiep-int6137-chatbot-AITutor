@@ -27,6 +27,7 @@
 1. **校验 + 续期合成单条 SQL**（`_renew_login_token`）：`UPDATE login_token SET expires_at = 新期限 WHERE token_hash = ... AND expires_at > now() RETURNING account_id`——命中即有效且已续期，一次往返替代原来的 SELECT + UPDATE 两趟。`synchronize_session=False`：会话里不挂着 LoginToken 对象，省掉 auto 策略先做的那次 SELECT。令牌不存在或已过期都返回 None，401 的语义留在调用方。
 2. **同步查库放线程里**：中间件是 async 的，psycopg 是同步的，这一步走 `asyncio.to_thread`，不堵事件循环（FINDINGS 2026-10-31「异步接口里的同步数据库调用会卡住事件循环」那条，中间件这半边当时漏了，现在补上了）。
 3. **查询结果经请求态复用**：中间件把验好的账号 id（连同 cookie 原文用于比对）放进 contextvar（`_REQUEST_ACCOUNT`），每个请求入口先重置再写，绝不串上一个请求。端点侧的 `_account_from_cookie` 先看这份缓存（`_cached_account`），命中就只做一次按主键的取行拿活 ORM 对象——每个带 cookie 的请求从两轮查库减到一轮。`asyncio.to_thread` 和端点线程池都会拷贝上下文，同步、异步端点都读得到。
+- **头像大字段不跟着跑**：`Account.avatar`（几十 KB 的 bytea）是列级延迟加载（`deferred`，[server/src/server/db/models.py](../server/src/server/db/models.py)），认证和列表请求不背着它；真正读头像的端点才多一次按主键的 SELECT。
 
 本机实测的历史数据（2026-11-02，改造前）：每请求查令牌 + 续期中位 0.53 毫秒、清扫中位 0.31 毫秒——代价本来不大，改造防的是令牌表行数涨上去之后的线性变坏和事件循环卡顿。
 
