@@ -42,6 +42,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   const [sessionWarning, setSessionWarning] = useState<{sessionId: string; text: string} | null>(
     null,
   );
+  // 会话 id → 上游工作流最新节点名：等待气泡里显示；第一个内容增量到达、
+  // 这一轮结束（所有结局）时清掉。
+  const [progressBySession, setProgressBySession] = useState<Record<string, string>>({});
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
   const sendingRef = useRef<Set<string>>(new Set());
@@ -359,6 +362,23 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     return null;
   }
 
+  /** 记下这场会话最新的进度节点名（等待气泡里显示）。 */
+  function setSessionProgress(sessionId: string, name: string) {
+    setProgressBySession((current) => ({...current, [sessionId]: name}));
+  }
+
+  /** 清掉这场会话的进度文本：本来就没有时返回同一份引用，不触发重渲染。 */
+  function clearProgress(sessionId: string) {
+    setProgressBySession((current) => {
+      if (current[sessionId] === undefined) {
+        return current;
+      }
+      const next = {...current};
+      delete next[sessionId];
+      return next;
+    });
+  }
+
   function clearPending(sessionId: string) {
     setPendingIds((current) => {
       const next = new Set(current);
@@ -499,11 +519,19 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         depsRef.current.locale,
         turnId,
         (chunk) => {
+          // 第一个内容增量到达：进度文本完成使命（清空是幂等的，
+          // 后续增量拿到同一份引用，不再触发重渲染）。
+          clearProgress(sessionId);
           applyStreamText(sessionId, assistantId, chunk);
         },
         controller.signal,
         retryOf,
+        (name) => {
+          setSessionProgress(sessionId, name);
+        },
       );
+      // 流结束（五种结局都一样）：进度文本不再有意义。
+      clearProgress(sessionId);
       if (outcome === 'busy') {
         // 这场会话已经有一轮在写，这一次没发出去。把问题放回输入框，等答完再发。
         removeTurn(sessionId, turnId);
@@ -562,6 +590,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       aborters.current.delete(sessionId);
       stoppers.current.delete(sessionId);
       sendingRef.current.delete(sessionId);
+      clearProgress(sessionId);
       if (!pollers.current.has(sessionId)) {
         clearPending(sessionId);
       }
@@ -670,6 +699,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   /** 退出登录/被踢回登录页：把在飞的加载、轮询和等待标记一次清干净。 */
   function resetForLogin() {
     setPendingIds(new Set());
+    setProgressBySession({});
     setHistoryLoadingId(null);
     loadedThreads.current.clear();
     threadFlight.current.clear();
@@ -683,6 +713,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   return {
     pendingIds,
     setPendingIds,
+    progressBySession,
     sessionWarning,
     setSessionWarning,
     historyLoadingId,
