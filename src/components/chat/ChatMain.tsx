@@ -5,6 +5,7 @@ import {sessionTitle} from '../../session/empty.ts';
 import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
+import {BubbleBoundary} from './BubbleBoundary.tsx';
 import {bubbleClass} from './message-class.ts';
 import {MarkdownText} from './MarkdownText.tsx';
 import {MessageActions} from './MessageActions.tsx';
@@ -199,13 +200,15 @@ export function ChatMain({
                   const classes = bubbleClass(message.role, entering);
                   return (
                     <div key={message.id} className={`${classes.wrap} group`}>
-                      <div
-                        lang={message.locale ? htmlLang[message.locale] : undefined}
-                        className={classes.bubble}
-                        onAnimationEnd={() => onAnimationEnd(message.id)}
-                      >
-                        <MarkdownText text={textShown} />
-                      </div>
+                      <BubbleBoundary fallbackText={textShown}>
+                        <div
+                          lang={message.locale ? htmlLang[message.locale] : undefined}
+                          className={classes.bubble}
+                          onAnimationEnd={() => onAnimationEnd(message.id)}
+                        >
+                          <MarkdownText text={textShown} />
+                        </div>
+                      </BubbleBoundary>
                       <MessageActions
                         message={message}
                         failedText={text.replyInterrupted}
@@ -283,13 +286,15 @@ export function ChatMain({
                   !pending && message.id === lastUserMessageId && message.turnId !== undefined;
                 return (
                   <div key={message.id} className={`${classes.wrap} group`}>
-                    <p
-                      lang={message.locale ? htmlLang[message.locale] : undefined}
-                      className={classes.bubble}
-                      onAnimationEnd={() => onAnimationEnd(message.id)}
-                    >
-                      {textShown}
-                    </p>
+                    <BubbleBoundary fallbackText={textShown}>
+                      <p
+                        lang={message.locale ? htmlLang[message.locale] : undefined}
+                        className={classes.bubble}
+                        onAnimationEnd={() => onAnimationEnd(message.id)}
+                      >
+                        {textShown}
+                      </p>
+                    </BubbleBoundary>
                     <MessageActions
                       message={message}
                       failedText={text.replyInterrupted}

@@ -20,6 +20,7 @@ import {ChangePasswordPage} from './components/settings/ChangePasswordPage.tsx';
 import {ConfirmLogout} from './components/settings/ConfirmLogout.tsx';
 import {SettingsModal} from './components/settings/SettingsModal.tsx';
 import {chatFrameClass} from './components/shell/frame-class.ts';
+import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast} from './components/toast/Toast.tsx';
 import {translations} from './i18n.ts';
@@ -39,12 +40,14 @@ import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.t
  */
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/admin" element={<AdminConsole />} />
-        <Route path="/*" element={<ChatApp />} />
-      </Routes>
-    </BrowserRouter>
+    <PageBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/admin" element={<AdminConsole />} />
+          <Route path="/*" element={<ChatApp />} />
+        </Routes>
+      </BrowserRouter>
+    </PageBoundary>
   );
 }
 

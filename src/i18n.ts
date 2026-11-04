@@ -71,6 +71,8 @@ export const translations = {
     resetPassword: '重置密码',
     resetConfirm: '重置后这个账号所有设备都会被踢下线，要用新密码重新登录。',
     passwordShownOnce: '密码只显示这一次，先抄下来。',
+    pageError: '页面出了点问题',
+    refreshPage: '刷新页面',
   },
   'zh-TW': {
     sessions: '對話',
@@ -136,6 +138,8 @@ export const translations = {
     resetPassword: '重設密碼',
     resetConfirm: '重設後這個帳號所有裝置都會被登出，要用新密碼重新登入。',
     passwordShownOnce: '密碼只顯示這一次，請先抄下來。',
+    pageError: '頁面出了點問題',
+    refreshPage: '重新整理頁面',
   },
   en: {
     sessions: 'Chats',
@@ -203,5 +207,7 @@ export const translations = {
     resetConfirm:
       'Every device signed in to this account will be signed out and will need the new password to log in again.',
     passwordShownOnce: 'This password is shown only once — write it down now.',
+    pageError: 'Something went wrong',
+    refreshPage: 'Reload page',
   },
 } satisfies Record<Locale, Record<string, string>>;
