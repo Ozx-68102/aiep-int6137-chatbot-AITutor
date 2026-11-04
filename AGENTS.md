@@ -17,7 +17,7 @@
 - 新人上手：[docs/开发手册/](docs/开发手册/)
 - 实测到的反直觉行为（浏览器、库、平台层）：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
 - FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)。聊天流、停止、重试和 `message` 表：[docs/INTERRUPTED_REPLY.md](docs/INTERRUPTED_REPLY.md)
-- 界面上的提示（警示框、消息里的错误、表单里的红字）放在哪里：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
+- 界面上的提示（警示框、气泡脚注、表单错误行、Toast）放在哪里、什么颜色：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
 - UI 组件体系：daisyUI 5（类名速查 daisyui.com/components）；主题变量和插件接线在 `src/index.css`
 - 控制台/家长端的定位决定和香港私隐法规依据：[docs/PARENT_PORTAL_PRIVACY.md](docs/PARENT_PORTAL_PRIVACY.md)
 - 后端特有的规矩和命令：[server/AGENTS.md](server/AGENTS.md)
@@ -32,6 +32,7 @@
 - 用户名和语言另外记在 localStorage 的 `h2bot-profile` 里（`src/session/profile-cache.ts`）：接口服务连不上的时候靠它撑住「我是谁、我用哪种语言」，退出登录要清掉。别当成冗余删了
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
 - 界面一律用 daisyUI 5 的组件类（btn、input、card、alert、chat、table、menu、avatar、loading 等），不再手写「描边 + 圆角 + hover 变色」这类 utility 组合。颜色优先用语义类（btn-primary、text-error、bg-base-200），它们在 `aiep` 主题下与 stone/emerald 色板同值。类名的权威参考是 `node_modules/daisyui/components/*.css`（按钮在 button.css，不在 btn.css），别凭记忆猜。聊天气泡是 `.chat` 包装 + `.chat-bubble` 双层结构（`src/components/chat/message-class.ts`），气泡下方的按钮要包 `.chat-footer`，否则会被 grid 定位挤歪
+- 提示面（警示框、行内表单错误、Toast、气泡脚注）背景一律 `bg-base-100` 白底、文字一律 `base-content` 黑字，语义色只出现在图标上（红 `text-error`、琥珀 `text-warning`、绿 `text-success`）；不要用 `alert-error` / `alert-warning` / `alert-success` 的整块语义色背景（2026-11-04 维护者拍板，规则正文在 [docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)）
 - `src/components/shell/Modal.tsx` 面板上的 `opacity-100 scale-100` 两个类是在反制 `.modal-box` 的默认隐藏态：daisyUI 靠 `.modal-open` 父级解锁可见，而本项目用的是自建 portal 外壳、没有那个父级。删掉这两个类，所有弹窗会直接隐形
 - 会话行和语言菜单的浮层保持 createPortal 结构，不要换成 daisyUI 的 dropdown：dropdown 依赖行内定位，会被行上动画的 transform 层叠上下文困住（原理见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-10-31 那条）
 - CSS 注释里不要出现 `col-*/offset-*` 这种带 `*/` 的写法：注释会提前终止，后面的 `@plugin` 块被静默丢弃——构建照常成功，只有一条 `Unexpected token` 警告，产物却少了整个插件（2026-11-03 踩过）
