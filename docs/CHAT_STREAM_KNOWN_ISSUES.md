@@ -63,6 +63,8 @@
 
 ## 1. 同一个状态有四份，互相不通
 
+> 2026-11-05 已修（done-event-contract 批），待浏览器手点验证。
+
 | 在哪                              | 词表                                                     | 谁写                                                                           | 谁读                       |
 |-----------------------------------|----------------------------------------------------------|--------------------------------------------------------------------------------|----------------------------|
 | Redis `h2botapp-chat:{id}:status` | `streaming` / `finished` / `failed` / `aborted`          | [server/src/server/reply_store.py:17](../server/src/server/reply_store.py#L17) | `/partial` 接口 → 页面轮询 |
@@ -76,11 +78,15 @@
 
 ## 2. 两套状态词表，同一个文件里并排 import
 
+> 2026-11-05 已修（done-event-contract 批），待浏览器手点验证。
+
 Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/server/app.py](../server/src/server/app.py) 里 `from server.reply_store import FAILED` 和 `chat_log.FAILED` 并排出现——读代码的人得自己去确认它们永远不会分叉。
 
 **怎么修**：一个模块拥有这四个词，两边都用它。
 
 ## 3. `/partial` 一人干两份活
+
+> 2026-11-05 已修（done-event-contract 批），待浏览器手点验证。
 
 `GET /api/sessions/{id}/partial`（[server/src/server/app.py:401](../server/src/server/app.py#L401)）现在既负责「刷新后接上正在写的那一轮」（续命），又负责「报告这一轮的结局」。
 
@@ -89,6 +95,8 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 **怎么修**：它只回答一个问题——**这一轮还在写吗**。还在写就给半截文字和轮次编号；不在写就回 404，页面去读库。结局由流说。
 
 ## 4. 客户端三处各解一遍 `partial.status`
+
+> 2026-11-05 已修（done-event-contract 批），待浏览器手点验证。
 
 - [src/session/poll.ts:21](../src/session/poll.ts#L21)（轮询回调）
 - [src/App.tsx:1080](../src/App.tsx#L1080) `recoverReply`（6 个分支）
@@ -137,6 +145,8 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 ## 8. 失败之后要去上游对账
 
+> 2026-11-05 已修（done-event-contract 批），待浏览器手点验证。
+
 `_write_round_end`（[server/src/server/app.py:771](../server/src/server/app.py#L771)）：一轮失败时等叫停上游落地，再按轮次编号去上游把那一轮的最终答案找回来，对得上就改用上游那份、状态改成写完了。
 
 这个对账本身没错——上游那一份确实更权威。但它之所以存在，是因为「这一轮最后是什么」没有一个明确的负责人。
@@ -178,9 +188,9 @@ Redis 用 `finished`，数据库用 `completed`，意思一样。[server/src/ser
 
 ## 收敛顺序
 
-1. **给流加结局事件**：`event: done`，内容是这一轮的结局和原因。这是根因那一条，修完第 1、3、4、8 条能退休一大半。
-2. **两套词表合一**：一个模块拥有那四个词。
-3. **`/partial` 收窄**：只回答「还在写吗」。
+1. **给流加结局事件**：`event: done`，内容是这一轮的结局和原因。这是根因那一条，修完第 1、3、4、8 条能退休一大半。（2026-11-05 已修，done-event-contract 批，待浏览器手点验证。）
+2. **两套词表合一**：一个模块拥有那四个词。（2026-11-05 已修，done-event-contract 批：`server/src/server/turn_status.py`；Redis 线上值保持 `finished`，reply_store 在边界上映射。）
+3. **`/partial` 收窄**：只回答「还在写吗」。（2026-11-05 已修，done-event-contract 批：streaming 回 200，其余一切情况回 404，待浏览器手点验证。）
 4. **中间件里的查库去掉**：清扫改成定时任务。
 5. **每轮一行结构化日志**：带 turn_id，能 grep。
 6. **静默期进度显示**：detail:true + 只转发节点状态（第 13 条）。改动小、独立；前置是第 5 条的日志收窄先做完。
