@@ -1,4 +1,4 @@
-import {X} from 'lucide-react';
+import {CircleAlert, TriangleAlert, X} from 'lucide-react';
 
 export type WarningTone = 'error' | 'warning';
 
@@ -15,6 +15,8 @@ export type WarningItem = {
  * 多条纵向堆叠。会话级的问题都走这一个：服务降级、这场对话还有一条正在
  * 回答、停止没停住、操作失败/连不上。轮次级的状态（失败/被停）不在这里，
  * 在气泡下方的脚注里（docs/MESSAGE_ACTIONS.md）。
+ *
+ * 白底黑字，语气只由左侧图标的颜色表达（全局规则见 docs/UI_WARNINGS.md）。
  */
 export function WarningBox({
   tone,
@@ -28,10 +30,12 @@ export function WarningBox({
   onDismiss?: () => void;
 }) {
   return (
-    <div
-      className={tone === 'error' ? 'alert alert-error mb-3' : 'alert alert-warning mb-3'}
-      role={tone === 'error' ? 'alert' : 'status'}
-    >
+    <div className="alert mb-3 bg-base-100" role={tone === 'error' ? 'alert' : 'status'}>
+      {tone === 'error' ? (
+        <CircleAlert className="size-5 shrink-0 text-error" aria-hidden="true" />
+      ) : (
+        <TriangleAlert className="size-5 shrink-0 text-warning" aria-hidden="true" />
+      )}
       <span className="min-w-0 flex-1 wrap-break-word">{text}</span>
       {onDismiss === undefined ? null : (
         <button
