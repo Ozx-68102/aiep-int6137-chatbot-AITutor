@@ -2,11 +2,18 @@ import {CircleAlert, TriangleAlert, X} from 'lucide-react';
 
 export type WarningTone = 'error' | 'warning';
 
+export type WarningAction = {
+  label: string;
+  onClick: () => void;
+};
+
 export type WarningItem = {
   id: string;
   tone: WarningTone;
   text: string;
   onDismiss?: () => void;
+  /** 常驻横幅可以带一个动作按钮（比如会话过期的「重新登录」）：中性描边，不用语义色。 */
+  action?: WarningAction;
 };
 
 /**
@@ -23,11 +30,13 @@ export function WarningBox({
   text,
   dismissLabel,
   onDismiss,
+  action,
 }: {
   tone: WarningTone;
   text: string;
   dismissLabel: string;
   onDismiss?: () => void;
+  action?: WarningAction;
 }) {
   return (
     <div className="alert mb-3 bg-base-100" role={tone === 'error' ? 'alert' : 'status'}>
@@ -37,6 +46,15 @@ export function WarningBox({
         <TriangleAlert className="size-5 shrink-0 text-warning" aria-hidden="true" />
       )}
       <span className="min-w-0 flex-1 wrap-break-word">{text}</span>
+      {action === undefined ? null : (
+        <button
+          type="button"
+          className="btn btn-sm btn-outline btn-neutral ml-auto shrink-0"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      )}
       {onDismiss === undefined ? null : (
         <button
           type="button"

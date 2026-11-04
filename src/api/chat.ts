@@ -1,5 +1,5 @@
 import type {Locale} from '../type/locale.ts';
-import {ApiError, isRecord, readDetail} from './http.ts';
+import {ApiError, isRecord, readFailure} from './http.ts';
 import {probePartial} from './partial.ts';
 
 export type ReplyOutcome =
@@ -75,7 +75,9 @@ async function deliverReply(
     return 'busy';
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await readDetail(response));
+    // 会话类 401 把 reason 一起带上：一路透传到 sendQuestion 的统一出口。
+    const failure = await readFailure(response);
+    throw new ApiError(response.status, failure.detail, failure.reason);
   }
 
   let delivered = false;

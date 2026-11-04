@@ -365,6 +365,7 @@ export function ChatMain({
               text={warning.text}
               dismissLabel={text.close}
               onDismiss={warning.onDismiss}
+              action={warning.action}
             />
           ))}
         </div>

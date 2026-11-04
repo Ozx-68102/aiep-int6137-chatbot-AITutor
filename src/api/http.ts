@@ -1,12 +1,22 @@
+/**
+ * 会话类 401 的原因词表（docs/ACCOUNT_MANAGEMENT.md「会话状态通道」的最小
+ * HTTP 版）：expired = 令牌不认识/已过期/被吊销；disabled = 账号被停用。
+ * 后端现在只会发出 expired（停用列还没建），词表在两端先接好。
+ */
+export type AuthFailureReason = 'expired' | 'disabled';
+
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string | null;
+  /** 只有 401 才可能有：会话失效的原因。其余状态、老后端的 401 都是 null。 */
+  readonly reason: AuthFailureReason | null;
 
-  constructor(status: number, detail: string | null) {
+  constructor(status: number, detail: string | null, reason: AuthFailureReason | null = null) {
     super(detail ?? '');
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.reason = reason;
   }
 }
 
@@ -71,7 +81,8 @@ export async function requestEmpty(
         return;
       }
       if (!response.ok) {
-        throw new ApiError(response.status, await readDetail(response));
+        const failure = await readFailure(response);
+        throw new ApiError(response.status, failure.detail, failure.reason);
       }
     },
     {retry: autoRetry(init)},
@@ -86,7 +97,8 @@ export async function requestJson(
     async () => {
       const response = await request(path, init);
       if (!response.ok) {
-        throw new ApiError(response.status, await readDetail(response));
+        const failure = await readFailure(response);
+        throw new ApiError(response.status, failure.detail, failure.reason);
       }
 
       try {
@@ -125,14 +137,28 @@ async function request(
   }
 }
 
-export async function readDetail(response: Response): Promise<string | null> {
+/** 非 2xx 响应体里的完整失败信息：中文的 detail 句子 + 401 的 reason 词。 */
+export type ApiFailure = {
+  detail: string | null;
+  reason: AuthFailureReason | null;
+};
+
+export async function readFailure(response: Response): Promise<ApiFailure> {
   try {
     const body: unknown = await response.json();
     if (!isRecord(body) || typeof body.detail !== 'string') {
-      return null;
+      return {detail: null, reason: null};
     }
-    return body.detail;
+    return {detail: body.detail, reason: readReason(response.status, body)};
   } catch {
+    return {detail: null, reason: null};
+  }
+}
+
+/** reason 只认 401，且只收词表里的 expired/disabled 两个值；其余一律当没有。 */
+function readReason(status: number, body: Record<string, unknown>): AuthFailureReason | null {
+  if (status !== 401) {
     return null;
   }
+  return body.reason === 'expired' || body.reason === 'disabled' ? body.reason : null;
 }
