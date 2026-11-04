@@ -1,3 +1,4 @@
+import {CircleCheck} from 'lucide-react';
 import {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 
@@ -9,6 +10,9 @@ const showMs = 3000;
  * 得有个地方告诉用户「成了」。失败不走这里 —— 失败留在输入框上方的框里。
  *
  * 出现和消失都有动画：消失时先播完淡出再卸载。
+ *
+ * 样式刻意不用 alert-success：维护者要求任何时候都是白底黑字，
+ * 成功语义只由左侧的绿色对勾和文案本身表达。
  */
 export function Toast({
   message,
@@ -69,18 +73,19 @@ export function Toast({
 
   return createPortal(
     <div className="pointer-events-none fixed top-6 left-1/2 z-[100] -translate-x-1/2 px-4">
-      <p
+      <div
         key={shown.id}
         className={
           closing
-            ? 'alert alert-success m-0 text-center shadow-lg animate-out fade-out zoom-out-95 duration-150'
-            : 'alert alert-success m-0 text-center shadow-lg animate-in fade-in zoom-in-95 duration-150'
+            ? 'alert m-0 bg-base-100 text-center shadow-lg animate-out fade-out zoom-out-95 duration-150'
+            : 'alert m-0 bg-base-100 text-center shadow-lg animate-in fade-in zoom-in-95 duration-150'
         }
         role="status"
         lang={lang}
       >
-        {shown.text}
-      </p>
+        <CircleCheck className="size-5 shrink-0 text-success" aria-hidden="true" />
+        <span>{shown.text}</span>
+      </div>
     </div>,
     document.body,
   );
