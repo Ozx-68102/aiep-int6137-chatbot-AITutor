@@ -203,8 +203,7 @@ export const translations = {
     strengthStrong: 'Strong',
     passwordChanged: 'Password changed. Please log in again with your new password.',
     sessionExpired: 'Your session has expired. Please log in again.',
-    accountDisabled:
-      'This account has been disabled. Please contact your administrator.',
+    accountDisabled: 'This account has been disabled. Please contact your administrator.',
     logInAgain: 'Log in again',
     connectionError: 'Unable to connect to the server',
     connectionRetry: 'Unable to connect to the server. Please try again later.',
