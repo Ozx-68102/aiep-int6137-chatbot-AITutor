@@ -33,6 +33,7 @@ npm install -g pnpm
 - 组件库：daisyUI 5.7.50（Tailwind 插件，`src/index.css` 里用 `@plugin` 接线）。内置主题已关掉，只用自定义 `aiep` 主题：语义变量（base-*、primary、error 等）与 stone/emerald 色板同值。组件类按需生成，源码里没出现的类不会进产物
 - 栅格：tailwind-bootstrap-grid 7.0.0（Tailwind 插件）。提供 Bootstrap 风格的 row、col-1..col-12、offset-N、g-0..g-5；响应式用 Tailwind 原生 variant 写法（`md:col-6`），没有 `col-md-6` 这种 BS 风格类；`.container` 生成已关闭，页面宽度仍走 `max-w-*`
 - 动画：tw-animate-css 1.4.0
+- 代码高亮：react-syntax-highlighter 16.1.2（2026-11-05 装上，尚未接线；接线时按需注册语言 + 动态 import，见 improvement-research frontend-chat N4 注记；类型声明还没配齐）
 - 语言：TypeScript 7.0.2
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
 - 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint 加 oxfmt --check 一起跑
@@ -47,6 +48,7 @@ npm install -g pnpm
 - 语言：Python 3.13。包管理：uv 0.12.13
 - Web：FastAPI 0.162.0，进程用 uvicorn 0.54.0 拉起，只听本机 3001。访问 FastGPT 只用 httpx2 2.16.0 的异步客户端。地址用 furl 2.1.4 拼接
 - 数据库：PostgreSQL 18.6（Homebrew）。驱动 psycopg 3.3.6，ORM SQLAlchemy 2.1.6
+- 迁移：alembic 1.20.1（2026-11-05 装上；迁移目录还没建，计划基线 = stamp 现有表结构、首个迁移 = login_token.expires_at 索引）
 - 配置：Pydantic 2.14.1，pydantic-settings 2.16.1
 - 密码：argon2-cffi 25.1.0（Argon2id）
 - 半截回答：Redis 服务器 8.10.2（Homebrew）。Python 库 redis 8.1.0

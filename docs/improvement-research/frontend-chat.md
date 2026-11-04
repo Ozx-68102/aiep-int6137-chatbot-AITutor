@@ -138,6 +138,8 @@
 
 ### N4. 代码块复制按钮（可选：语法高亮）
 
+> **2026-11-05**：高亮库已定并已安装 **react-syntax-highlighter 16.1.2**（本节二选一里选它）。注意：该包不带类型声明，`@types/react-syntax-highlighter` 也还没装——接入前需要维护者补装类型包；装好之前若先接入，要用临时本地声明文件过渡。复制按钮不依赖高亮库，可先做。
+
 - **位置**：`/src/components/chat/MarkdownText.tsx` L9-36（`components` 表只定制了 `a`/`img`/`table`，没有 `pre`/`code`）；`/src/components/chat/markdown.css` L107-124（`pre` 只有底色样式）。
 - **现状**：助手回答里的代码块没有任何交互：不能复制，没有高亮（深色底 + 单色文字）。
 - **影响**：AI 辅导回答经常带示例代码/公式推导代码，学生要手选深底文字复制，移动端几乎不可用。

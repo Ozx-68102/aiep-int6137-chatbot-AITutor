@@ -57,6 +57,8 @@
 
 ### 2. login cookie 没有 Secure 标志，名字也没有 `__Host-` 前缀
 
+> **2026-11-05 维护者拍板**：正式部署会是 HTTPS，但现在还没有任何部署（开发期是 HTTP 的 localhost）。本条整体（Secure、`__Host-` 前缀，连同 TLS 与 nginx 加固）挪到部署日专项一批做，做成配置开关（开发关、生产开）；开发期不动。
+
 - **位置**：`app.py` 的 `_set_cookie()` / `_clear_cookie()`；`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md` 默认 `listen 80`
 - **现状**：`response.set_cookie(key=name, value=token, max_age=7天, httponly=True, samesite="lax", path="/")`——grep 确认全文没有 `secure=True`。部署指南的默认配置是纯 HTTP。
 - **影响**：HTTP 部署下，有效期 7 天的登录令牌明文过网，同一网络（学校 Wi-Fi 正是这种环境）可被嗅探重放。就算以后上了 HTTPS，没有 Secure 标志的 cookie 仍会跟着 HTTP 请求发出去（用户手输地址、页面里一个 http:// 链接就触发）。`__Host-` 前缀能让浏览器强制 secure + path=/ + 不带 domain，防 cookie tossing。
@@ -172,6 +174,8 @@
 - **工作量**：S
 
 ### 13. 没有迁移工具：schema 演进靠 init.py 手写补列，只进不退、无版本记录
+
+> **2026-11-05**：alembic 已安装（1.20.1，进 uv.lock）。引入计划：建迁移目录、基线 = stamp 现有表结构、第一个迁移 = `login_token.expires_at` 索引；建表引导仍走 create_all，不做全量改造。
 
 - **位置**：`/server/src/server/db/init.py`（`create_all` + `_ensure_pinned_column` 等 5 个手写 inspect+ALTER 函数）；`db/models.py`
 - **现状**：新表靠 `create_all`，改列靠每列一个手写函数；什么时候跑靠人记（`server/AGENTS.md`：「改了数据库结构之后跑」）。没有版本号、没有回滚、没有「库现在处于什么状态」的记录；改约束（比如远期清单里明写的「家长 role 要扩 `account_role_check` 枚举」）在这套机制里没有路径——`_ensure_role_column` 的注释自己演示了加约束要小心全表扫描，这种知识现在只存在于注释里。

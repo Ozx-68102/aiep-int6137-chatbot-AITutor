@@ -30,8 +30,10 @@
 
 全部 154 条里，真正建议引入的新依赖只有两个，且都由维护者决定：
 
-- **alembic**（后端数据库迁移，backend-infra 第 6 条）：现状是 create_all + 手写补列，只进不退无版本。
+- **alembic**（后端数据库迁移，backend-infra 第 13 条）：现状是 create_all + 手写补列，只进不退无版本。
 - **react-syntax-highlighter 或 lowlight**（前端代码高亮，frontend-chat N4，二选一，需动态 import 控制体积）。
+
+> **2026-11-05 两个都已由维护者安装**：alembic 1.20.1（server/uv.lock）；高亮选了 react-syntax-highlighter 16.1.2（pnpm-lock.yaml）。勘误：alembic 对应 backend-infra 第 13 条（此前误写第 6 条）。注意 react-syntax-highlighter 不带类型声明，接入前还需 `@types/react-syntax-highlighter`（见 frontend-chat N4 注）。
 
 其余点名的库要么不需要（slowapi、husky、lint-staged、pnpm catalog），要么绑定前提条件（structlog、sentry-sdk、prometheus-client、@ariakit/react、pg_trgm 扩展、cachetools），要么已在依赖里只是用法要改（redis.asyncio）。
 
