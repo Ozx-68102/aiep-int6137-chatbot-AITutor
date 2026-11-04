@@ -36,9 +36,7 @@ export function LoginScreen({
 
   return (
     <main
-      className={
-        embedded ? 'contents' : 'flex h-full items-center justify-center bg-base-200 px-4'
-      }
+      className={embedded ? 'contents' : 'flex h-full items-center justify-center bg-base-200 px-4'}
     >
       <form
         className={
