@@ -52,9 +52,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   const threadFlight = useRef(new Set<string>());
   const depsRef = useRef(deps);
   const textRef = useRef(translations[deps.locale]);
+  // pending 会话集合的镜像：断线补查的监听器注册一次，要能读到最新的一份。
+  const pendingIdsRef = useRef(pendingIds);
   useEffect(() => {
     depsRef.current = deps;
     textRef.current = translations[deps.locale];
+    pendingIdsRef.current = pendingIds;
   });
 
   useEffect(() => {
@@ -129,6 +132,31 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         stop();
       }
       active.clear();
+    };
+  }, []);
+
+  // 网络回来 / 页面回到可见：还在等回答的会话可能在断线期间有了进展，
+  // 挨个补查一次线程（refreshThread 里带着续传逻辑）。
+  useEffect(() => {
+    function catchUp() {
+      for (const sessionId of pendingIdsRef.current) {
+        if (sendingRef.current.has(sessionId)) {
+          // 这场会话正由本页流式回答：让流自己收尾，别在这儿换掉消息列表。
+          continue;
+        }
+        void refreshThread(sessionId);
+      }
+    }
+    function onVisibilityChange() {
+      if (!document.hidden) {
+        catchUp();
+      }
+    }
+    window.addEventListener('online', catchUp);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('online', catchUp);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 
