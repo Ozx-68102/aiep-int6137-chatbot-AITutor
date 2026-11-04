@@ -225,6 +225,7 @@ export function ChatMain({
                           autoFocus
                           className="textarea w-full min-h-10 max-h-40 resize-none overflow-y-auto text-base"
                           rows={2}
+                          maxLength={8000}
                           value={editing.text}
                           aria-label={text.edit}
                           onChange={(event) =>
@@ -343,6 +344,7 @@ export function ChatMain({
             ref={textareaRef}
             className="textarea min-h-10 max-h-40 min-w-0 flex-1 resize-none overflow-y-auto text-base"
             rows={1}
+            maxLength={8000}
             value={draft}
             placeholder={text.placeholder}
             aria-label={text.placeholder}
