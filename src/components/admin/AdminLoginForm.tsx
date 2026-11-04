@@ -1,3 +1,4 @@
+import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
@@ -63,11 +64,12 @@ export function AdminLoginForm({
           </label>
           {error ? (
             <p
-              className="m-0 text-error"
+              className="m-0 flex items-center gap-1.5"
               role="alert"
               lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
             >
-              {error}
+              <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
+              <span>{error}</span>
             </p>
           ) : null}
           <button type="submit" className="btn btn-primary btn-block" disabled={blocked}>

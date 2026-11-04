@@ -1,3 +1,4 @@
+import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
@@ -55,8 +56,9 @@ export function ConfirmDelete({
           {text.deleteConfirm}
         </p>
         {error ? (
-          <p className="m-0 text-error" role="alert">
-            {error}
+          <p className="m-0 flex items-center gap-1.5" role="alert">
+            <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
+            <span>{error}</span>
           </p>
         ) : null}
         <div className="flex justify-end gap-2">

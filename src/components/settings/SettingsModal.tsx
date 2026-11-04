@@ -1,3 +1,4 @@
+import {CircleAlert} from 'lucide-react';
 import {translations} from '../../i18n.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
@@ -80,11 +81,12 @@ export function SettingsModal({
           <div className="py-4">
             {error ? (
               <p
-                className="mb-3 text-error"
+                className="mb-3 flex items-center gap-1.5"
                 role="alert"
                 lang={error === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
               >
-                {error}
+                <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
+                <span>{error}</span>
               </p>
             ) : null}
             <button type="button" className="btn btn-error w-fit" onClick={onLogout}>
