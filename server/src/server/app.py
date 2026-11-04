@@ -810,6 +810,10 @@ async def _clear_failed_turn(
     回答那一条的编号是我们给的（responseChatItemId），提问那一条要从记录里找。
     我们自己那一份也要一起删：不然页面上会看见两遍。
     """
+    # 删行之前先把这一轮的提问原文读出来：请求体里带的可能是新文字
+    # （编辑重发），只有表里的原文才能和上游的悬空提问记录对上。
+    stored_question = await asyncio.to_thread(chat_log.read_question, chat_id, turn_id)
+
     await asyncio.to_thread(chat_log.delete_round, chat_id, turn_id)
 
     try:
@@ -818,7 +822,10 @@ async def _clear_failed_turn(
         logger.warning("读不到上游记录，重发的这一轮删不掉旧的 %s", chat_id)
         return
 
-    content_ids = _failed_turn_content_ids(records, str(turn_id), question)
+    # 文本比对优先用表里的原文；表里查不到（老数据、写库失败过）再退回
+    # 请求体的文字。
+    match_text = question if stored_question is None else stored_question
+    content_ids = _failed_turn_content_ids(records, str(turn_id), match_text)
     for content_id in content_ids:
         if not await fastgpt.delete_item(chat_id, content_id):
             logger.warning("删不掉上游记录 %s", content_id)

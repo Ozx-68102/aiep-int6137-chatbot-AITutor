@@ -144,6 +144,27 @@ def read_messages(session_id: UUID) -> list[StoredMessage]:
         return []
 
 
+def read_question(session_id: UUID, turn_id: UUID) -> str | None:
+    """读出这一轮用户提问的文本。查不到或读库失败返回 None。
+
+    删轮之前用：重发时旧轮可能只在上游留下一条悬空提问记录，
+    请求体里带的可能是新文字（编辑重发），只有表里的原文才能和它对上。
+    要在 delete_round 删行之前调用，行删了就查不到了。
+    """
+    try:
+        with db_session() as session:
+            return session.scalar(
+                select(ChatMessage.text).where(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.turn_id == turn_id,
+                    ChatMessage.role == ROLE_USER,
+                )
+            )
+    except SQLAlchemyError:
+        logger.warning("会话记录读不出来 %s %s", session_id, turn_id, exc_info=True)
+        return None
+
+
 def backfill(session_id: UUID, rounds: list[StoredRound]) -> None:
     """把上游那一份抄一份过来。
 
