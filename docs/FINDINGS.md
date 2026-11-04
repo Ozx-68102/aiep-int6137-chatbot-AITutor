@@ -6,7 +6,7 @@
 
 - FastGPT 上游的接口与行为事实：[FASTGPT_API.md](FASTGPT_API.md)（本文件原有的十几条上游条目 2026-11-03 移到那里）
 - 聊天流、停止、重试、`message` 表：[INTERRUPTED_REPLY.md](INTERRUPTED_REPLY.md)
-- 消息操作区（脚注）：停止/失败提示、重试、编辑重发（待做）：[MESSAGE_ACTIONS.md](MESSAGE_ACTIONS.md)
+- 消息操作区（脚注）：停止/失败提示、重试、编辑重发（第一至三期已实现）：[MESSAGE_ACTIONS.md](MESSAGE_ACTIONS.md)
 - 环境变量和工具版本：[TECH.md](TECH.md)
 - 账号和密码：[ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)
 - 后端代码的规矩：[server/AGENTS.md](../server/AGENTS.md)

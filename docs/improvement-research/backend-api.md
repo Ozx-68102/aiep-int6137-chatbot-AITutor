@@ -212,13 +212,13 @@
 
 ### N9. 编辑重发的服务端评估：现有 retryOf 路径已可复用，缺口在约定（新增）
 
-- **位置**：`docs/MESSAGE_ACTIONS.md`（只写记录未实现）、`app.py:897-898`（`retry_of` 入口）、`app.py:801-851`（`_clear_failed_turn`/`_failed_turn_content_ids`）。
+- **位置**：`docs/MESSAGE_ACTIONS.md`（调研时只写记录未实现；2026-11-04 第一至三期已实现）、`app.py:897-898`（`retry_of` 入口）、`app.py:801-851`（`_clear_failed_turn`/`_failed_turn_content_ids`）。
 - **现状**：MESSAGE_ACTIONS 定的方向是「编辑 = 改内容后按重试的路重发」，服务端要做的两件事（删上下游旧记录、新 turn_id 开新轮）现有 `retryOf` 机制全都做了。细读 `_clear_failed_turn`：删我们表的 `delete_round` 与问题文本无关；删上游按「回答记录的 dataId == turn_id」精确匹配，也与文本无关；只有 fallback 分支（回答没写下来时按 question 文本匹配最后一条提问记录）会因内容被改而失配——失配的后果按代码注释就是「宁可历史里多一遍，不删别人那轮」，安全。
 - **影响**：如果按「新接口」去做会白做一遍；真正缺的是几个待定项的服务端表态。
 - **方案**：接口层不需要新端点——前端发 `POST /api/chat`，`message` = 改后的内容，`retryOf` = 被编辑轮的 turn_id 即可。服务端要补的约定：
   1. 现在 `_clear_failed_turn` 对任何状态的旧轮都会删（不限 failed）——编辑一个 completed 轮在机制上已可行，确认这是预期；
-  2. MESSAGE_ACTIONS 说编辑重发顺带清掉「被按停止那一轮上游悬空的提问」：aborted 轮的回答记录上游可能没有，走的正是上面那个文本 fallback，编辑后文本不同会失配。若在意，可给 fallback 加一个「上游最后一条是 user 记录且其后无 assistant、且该 chat 的 Redis/表状态是 aborted」的按状态匹配分支，而不是按文本；
-  3. 把「编辑重发复用 retryOf」写进 MESSAGE_ACTIONS.md 的待定清单，免得将来重复设计。
+  2. MESSAGE_ACTIONS 说编辑重发顺带清掉「被按停止那一轮上游悬空的提问」：aborted 轮的回答记录上游可能没有，走的正是上面那个文本 fallback，编辑后文本不同会失配。若在意，可给 fallback 加一个「上游最后一条是 user 记录且其后无 assistant、且该 chat 的 Redis/表状态是 aborted」的按状态匹配分支，而不是按文本（2026-11-04 已解决：采用从我们自己的 `message` 表读提问原文来比对，即 MESSAGE_ACTIONS.md 的方案①，见 `chat_log.read_question`）；
+  3. 把「编辑重发复用 retryOf」写进 MESSAGE_ACTIONS.md 的待定清单，免得将来重复设计（已做：见 MESSAGE_ACTIONS.md「行为规范：重试与编辑重发是同一条路」）。
 - **第三方库**：无。
 - **风险**：低（主要是文档和一个可选 fallback 分支）。
 - **工作量**：S。

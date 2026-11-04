@@ -70,6 +70,8 @@
 
 ### N2. 多行输入框：textarea 自动增高，Enter 发送 / Shift+Enter 换行
 
+> **已实现（2026-11-04）**：按本节方案落地（autoGrow 封顶、Enter 发送 / Shift+Enter 换行、isComposing 防输入法误发），见 `ChatMain.tsx`。本节保留作调研记录。
+
 - **位置**：`/src/components/chat/ChatMain.tsx` L161（`<input className="input min-w-0 flex-1">`）。grep 全仓库无 `textarea`。
 - **现状**：单行 input，只能靠原生 form 行为回车提交。打不了换行，长问题看不全（只能横向滚动一小窗）。`/docs/MESSAGE_ACTIONS.md`「待定的问题」里也已经预见到多行输入的发送键问题。
 - **影响**：AI 辅导场景里学生经常要贴多行的题目/代码，单行输入是硬伤；也是编辑重发功能（N5）的前置。
@@ -186,6 +188,8 @@
 - **工作量**：复制按钮 S；加高亮 M。
 
 ### N5. 消息编辑重发（对齐 MESSAGE_ACTIONS.md，前端部分）
+
+> **已实现（2026-11-04，MESSAGE_ACTIONS.md 第三期）**，其中一处决策与本节建议不同：编辑按钮只给**最后一轮**的用户提问（本节建议每个用户提问都给）；发送失败按 Gemini 式整轮回滚。本节的 `retryTurn(sessionId, turnId, editedText?)` 签名被采纳。现状以 [MESSAGE_ACTIONS.md](../MESSAGE_ACTIONS.md) 为准，本节保留作调研记录。
 
 - **位置**：`/src/components/chat/ChatMain.tsx` L129-131 已有 TODO 注释指向 `/docs/MESSAGE_ACTIONS.md`；重试通路在 `/src/hooks/use-turn-engine.ts` `retryTurn` L226。
 - **现状**：设计文档已写清产品形态（每轮下方小编辑按钮 → 展开修改框 → 右下角取消/发送，用户视角等同重试），并明确不做版本历史/分支；后端接口字段未定（`retryOf` 之外要带新提问文本）。前端没有任何实现。

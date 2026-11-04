@@ -123,4 +123,6 @@
 - 编辑只给最后一轮的用户提问；Enter 发送 / Shift+Enter 换行 / Esc 取消；发送失败按 Gemini 式回滚（文字进输入框、气泡复原、回答复原）。
 - 服务器悬空提问匹配修复取方案①（从我们自己的 `message` 表读旧提问原文比对）。
 
-相关调研：[frontend-chat.md](improvement-research/frontend-chat.md) N5（编辑重发前端方案——其 `retryTurn` 签名与「只给最后一轮、被停轮也给」的建议被采纳）、N6（复制）；[backend-api.md](improvement-research/backend-api.md) 215-221 行（编辑重发复用 `retryOf`、悬空提问匹配失配的分析——与方案①结论一致）。
+相关调研：[frontend-chat.md](improvement-research/frontend-chat.md) N5（编辑重发前端方案——其 `retryTurn` 签名与「只给用户提问、被停轮也给」的建议被采纳，「只给最后一轮」是维护者 2026-11-04 的决定）、N6（复制）；[backend-api.md](improvement-research/backend-api.md) 215-221 行（编辑重发复用 `retryOf`、悬空提问匹配失配的分析——与方案①结论一致）。
+
+improvement-research 各文档中原 EDIT_MESSAGE 的指名引用，2026-11-04 删除存根时统一替换成了 MESSAGE_ACTIONS（机械替换，不改语义）；调研原文以 LayerFS 历史为准。

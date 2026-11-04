@@ -409,7 +409,7 @@ store-dir=node_modules/.pnpm-store
 ### 23. docs/ 缺索引与状态标注，待办与现行事实混排
 
 - **位置**：/docs/ 目录（14 个文件 + 开发手册）。
-- **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY）、部署手册（NGINX 指南）、**待办**（MESSAGE_ACTIONS 整篇是「以后要做的事」、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
+- **现状**：文档入口分散在 README「本地运行」段与 AGENTS.md「去哪儿找什么」——后者实际已是索引，但站在 agent 指南里，人在 GitHub 上浏览 docs/ 目录时没有任何导览。文档性质混杂且无标注：现行事实（TECH、FASTGPT_API、UI_WARNINGS、ACCOUNT_MANAGEMENT）、机制记录（FINDINGS、INTERRUPTED_REPLY）、部署手册（NGINX 指南）、**待办**（MESSAGE_ACTIONS 整篇原是「以后要做的事」——2026-11-04 第一至三期已实现、CHAT_STREAM_KNOWN_ISSUES 是待修问题清单）、决策记录（PARENT_PORTAL_PRIVACY）。GitHub Issues（package.json 已配 bugs URL）完全未使用。
 - **影响**：待办埋在文档里没有跟踪机制，容易遗忘；新人分不清「这是现状还是计划」。
 - **方案**：①新增 docs/README.md 索引表：文件、一句话范围、性质（现行事实/机制记录/待办/手册/决策）、最后核实日期；AGENTS.md「去哪儿找什么」改为链接它，消灭双索引；②每篇文档头部加统一状态行：`> 状态：现行事实 ｜ 最后核实 2026-11-03`；③MESSAGE_ACTIONS 与 CHAT_STREAM_KNOWN_ISSUES 里的可执行条目由维护者决定是否登记 GitHub Issues，文档保留背景分析、头部标「已建 issue #N 跟踪」。
 - **第三方库/工具**：无（GitHub Issues 现成）。
@@ -431,7 +431,7 @@ store-dir=node_modules/.pnpm-store
 ### 25. 卫生基线实测干净，建议用规则锁定
 
 - **位置**：/src（约 59 个 .ts/.tsx 文件）、/server/src。
-- **现状**（范围限定 grep 实测，已排除 node_modules/.venv/.pnpm-store 第三方目录）：`console.log/debug/info/warn/error` 0 处；`: any` / `as any` / `<any>` 0 处；`@ts-expect-error` / `@ts-ignore` 0 处；FIXME 0 处；TODO 仅 2 处——src/components/chat/ChatMain.tsx:129（每轮加编辑按钮，MESSAGE_ACTIONS.md 整篇追踪）与 src/components/chat/MarkdownText.tsx:17（图片只渲染链接不加载，FINDINGS 2026-10-31 有决策记录）。**两个 TODO 都有文档归属，不是孤儿注释**。这个基线在同规模项目中属于非常干净的一档。
+- **现状**（范围限定 grep 实测，已排除 node_modules/.venv/.pnpm-store 第三方目录）：`console.log/debug/info/warn/error` 0 处；`: any` / `as any` / `<any>` 0 处；`@ts-expect-error` / `@ts-ignore` 0 处；FIXME 0 处；TODO 仅 2 处——src/components/chat/ChatMain.tsx:129（每轮加编辑按钮，MESSAGE_ACTIONS.md 整篇追踪；该 TODO 已随 2026-11-04 编辑功能实现移除）与 src/components/chat/MarkdownText.tsx:17（图片只渲染链接不加载，FINDINGS 2026-10-31 有决策记录）。**两个 TODO 都有文档归属，不是孤儿注释**。这个基线在同规模项目中属于非常干净的一档。
 - **影响**：无现存问题；风险仅在增量——没有守护规则时基线会被无声突破。
 - **方案**：即第 7 条的 `no-console` 与 `typescript/no-explicit-any` 两条规则（增量锁定）；另在 AGENTS.md 守则加一句「TODO 注释必须同时指向追踪文档或 issue」。存量已清点完毕，无需专项清理。
 - **第三方库/工具**：无。
