@@ -17,6 +17,16 @@
 ## 验收
 - 改完后端代码：`uv run ruff check .` 和 `uv run ruff format --check .`
 
+## 迁移
+
+表结构变更走 Alembic：配置在 `alembic.ini`，脚本在 `migrations/`（入口 `migrations/env.py`，版本文件在 `migrations/versions/`）。
+
+- 跑迁移：`cd server && uv run alembic upgrade head`
+- 规矩：此后表结构变更（加列、加索引、改约束）一律写成新的迁移文件，不再往 `db/init.py` 里加 `_ensure_*_column` 那种手写字段补丁；已有的补丁函数原样留着
+- 版本文件的 revision id 用四位递增编号（0001、0002……），文件名 `<rev>_<slug>.py`；新迁移的 down_revision 指向当前最新的那个
+- 引导仍走 `create_all`：`uv run python -m server.db.init` 继续负责新库建表和初始账号。两条路要给出一致的结构——模型里声明的索引（如 `ix_login_token_expires_at`）`create_all` 会建出来，迁移那边用 `CREATE INDEX IF NOT EXISTS` 这种幂等写法，谁先跑都不冲突
+- `migrations/env.py` 复用 `server.db.session.get_engine()` 拿数据库 URL：不在 `alembic.ini` 里另配，也不复制任何密钥逻辑
+
 ## FastGPT 的版本基线
 
 FastGPT 是内部部署的，当前基线是 **v4.14.5**（内部可能改过，别当原版用）。

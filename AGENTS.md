@@ -16,7 +16,11 @@
 - 工具版本、环境变量、本地启动、Git 钩子：[docs/TECH.md](docs/TECH.md)
 - 新人上手：[docs/开发手册/](docs/开发手册/)
 - 实测到的反直觉行为（浏览器、库、平台层）：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
-- FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)。聊天流、停止、重试和 `message` 表：[docs/INTERRUPTED_REPLY.md](docs/INTERRUPTED_REPLY.md)
+- FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)
+- 聊天流协议与轮次生命周期（四种帧、停止、重试、刷新续传、`message` 表）：[docs/CHAT_STREAM_PROTOCOL.md](docs/CHAT_STREAM_PROTOCOL.md)
+- 登录态、令牌与限流（cookie、令牌清扫、401 原因、防爆破）：[docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md](docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md)
+- 轮次日志与排查（turn_summary、debug 开关、turn_dump）：[docs/TURN_LOGGING_AND_DIAGNOSTICS.md](docs/TURN_LOGGING_AND_DIAGNOSTICS.md)
+- 聊天页面行为（滚动、等待气泡、轮询、错误边界、会话过期原地态）：[docs/CHAT_PAGE_BEHAVIOR.md](docs/CHAT_PAGE_BEHAVIOR.md)
 - 界面上的提示（警示框、气泡脚注、表单错误行、Toast）放在哪里、什么颜色：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
 - UI 组件体系：daisyUI 5（类名速查 daisyui.com/components）；主题变量和插件接线在 `src/index.css`
 - 控制台/家长端的定位决定和香港私隐法规依据：[docs/PARENT_PORTAL_PRIVACY.md](docs/PARENT_PORTAL_PRIVACY.md)
@@ -49,7 +53,7 @@
 
 ## 验收
 
-- 改完 `src/`：`pnpm check`（oxlint + oxfmt --check）和 `pnpm build`（build 里已经带类型检查，几秒就完，产物在 `dist/`）
+- 改完 `src/`：`pnpm check`（oxlint + oxfmt --check + tsc --noEmit）和 `pnpm build`（build 里已经带类型检查，几秒就完，产物在 `dist/`）
 - 只想做类型检查、不产出 `dist/` 时：`pnpm exec tsc --noEmit`
 - 改完 `server/` 里的代码：按 [server/AGENTS.md](server/AGENTS.md) 的验收一节做
 - 改完界面、跳转或页面状态：在浏览器里点一遍受影响的流程；没有浏览器工具就说明哪一步没验
@@ -81,7 +85,7 @@
 - `pnpm lint` — oxlint，含类型相关规则
 - `pnpm fmt` — 按 `.oxfmtrc.json` 改格式
 - `pnpm fmt:check` — 只查格式，不改文件
-- `pnpm check` — oxlint + oxfmt --check
+- `pnpm check` — oxlint + oxfmt --check + tsc --noEmit
 - `pnpm build` — 类型检查 + 打包到 `dist/`
 - `pnpm exec tsc --noEmit` — 只做类型检查，不产出 `dist/`
 - `pnpm preview` — 预览 `dist/`
