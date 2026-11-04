@@ -33,7 +33,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from server import avatar as avatar_image
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, LoginToken, db_session
-from server.fastgpt import ChatRecord, FastGPT, FastGPTError, open_fastgpt
+from server.fastgpt import (
+    ChatRecord,
+    FastGPT,
+    FastGPTError,
+    ProgressEvent,
+    open_fastgpt,
+)
 from server.log import set_turn_context
 from server.passwords import (
     check_password_policy,
@@ -182,6 +188,8 @@ class _Relay:
         self.stop_sent = False
         # 账号 id：对话端点鉴权之后填上，摘要行拿得到就带。
         self.account_id: str | None = None
+        # 这一轮转发过的进度帧数（flowNodeStatus）：摘要行末尾那个字段。
+        self.progress = 0
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -982,6 +990,7 @@ async def chat(
             bytes_sent=0,
             stop_sent=False,
             db_written=written,
+            progress_events=0,
         )
         return StreamingResponse(
             _empty_sse(), media_type="text/event-stream", headers=_SSE_HEADERS
@@ -1023,6 +1032,18 @@ async def _relay(
     await asyncio.to_thread(chat_log.begin_round, chat_id, UUID(turn_id), message)
     try:
         async for event in fastgpt.events(chat_id, message, turn_id):
+            if isinstance(event, ProgressEvent):
+                # 进度帧：只转发给页面，不算回答正文——不 append_chunk、
+                # 不进 relay.text/bytes_sent，也不动「发过内容没有」的
+                # 失败语义（relay.sent）。心跳和它不冲突：静默期里有
+                # 进度帧入队，_sse 那边的 wait_for 自然等不满 15 秒。
+                relay.progress += 1
+                outgoing = _progress_chunk(event)
+                logger.debug(
+                    "发给页面进度帧 %s", outgoing.removesuffix("\n\n")
+                )
+                await relay.queue.put(outgoing)
+                continue
             if isinstance(event, str):
                 if relay.first_content_at is None:
                     relay.first_content_at = time.monotonic()
@@ -1137,6 +1158,7 @@ async def _write_round_end(
         bytes_sent=len(relay.text),
         stop_sent=relay.stop_sent,
         db_written=written,
+        progress_events=relay.progress,
     )
 
 
@@ -1151,11 +1173,13 @@ def _log_turn_summary(
     bytes_sent: int,
     stop_sent: bool,
     db_written: bool,
+    progress_events: int,
 ) -> None:
     """每轮一行的结构化摘要：键值对形式，方便 grep。
 
     outcome 用 chat_log 的状态词（completed/failed/aborted）；first_byte_ms
-    是从开始到首个内容帧的毫秒数，一个内容帧都没有就是 "-"。
+    是从开始到首个内容帧的毫秒数，一个内容帧都没有就是 "-"；
+    progress_events 是这一轮转发给页面的进度帧数。
     """
     duration_ms = int((time.monotonic() - started_at) * 1000)
     first_byte_ms = (
@@ -1165,7 +1189,8 @@ def _log_turn_summary(
     )
     logger.info(
         "turn_summary turn_id=%s chat_id=%s account_id=%s outcome=%s "
-        "duration_ms=%d first_byte_ms=%s bytes_sent=%d stop_sent=%s db_written=%s",
+        "duration_ms=%d first_byte_ms=%s bytes_sent=%d stop_sent=%s "
+        "db_written=%s progress_events=%d",
         turn_id,
         chat_id,
         account_id or "-",
@@ -1175,6 +1200,7 @@ def _log_turn_summary(
         bytes_sent,
         "yes" if stop_sent else "no",
         "yes" if db_written else "no",
+        progress_events,
     )
 
 
@@ -1227,6 +1253,20 @@ async def _empty_sse() -> AsyncIterator[str]:
     """这一轮被停止了：流直接结束，没有 [DONE]。"""
     for piece in ():
         yield piece
+
+
+def _progress_chunk(event: ProgressEvent) -> str:
+    """跟前端钉死的进度帧：event: progress + {"name","status"}。
+
+    name/status 原样转发，不做映射（2026-11-05 维护者拍板：节点名原样
+    显示）。前端解析器只认 data: 行，event: 行是给命名事件消费方的。
+    """
+    payload = json.dumps(
+        {"name": event.name, "status": event.status},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"event: progress\ndata: {payload}\n\n"
 
 
 def _chunk(content: str) -> str:

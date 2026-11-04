@@ -25,6 +25,26 @@ STREAM_DONE = StreamDone()
 
 
 @dataclass(frozen=True)
+class ProgressEvent:
+    """detail:true 时的工作流节点状态（flowNodeStatus 事件）。
+
+    载荷只有 name 和 status 两个字符串字段，原样转发给页面当进度帧。
+    节点输出明细（flowNodeResponse）和工作流变量（updateVariables）
+    带学生数据，不当成这个类型解析，也一个字不外发（依据见
+    docs/CHAT_STREAM_KNOWN_ISSUES.md 第 13 条）。
+    """
+
+    name: str
+    status: str
+
+
+# 这两类事件的载荷带学生数据和对话历史预览：任何级别（包括 debug）
+# 都不整行落日志，只记事件名和字节数；也绝不 yield 给调用方。
+_SENSITIVE_EVENTS = frozenset({"flowNodeResponse", "updateVariables"})
+_FLOW_NODE_STATUS = "flowNodeStatus"
+
+
+@dataclass(frozen=True)
 class ChatRecord:
     id: str
     role: Literal["user", "assistant"]
@@ -51,12 +71,15 @@ class FastGPT:
         chat_id: UUID,
         message: str,
         turn_id: str,
-    ) -> AsyncIterator[str | StreamDone]:
+    ) -> AsyncIterator[str | StreamDone | ProgressEvent]:
         payload = {
             "appId": self._app_id,
             "chatId": str(chat_id),
             "stream": True,
-            "detail": False,
+            # detail:true 让上游把工作流节点事件也发过来：中继层只挑
+            # flowNodeStatus 转给页面当进度，其余命名事件不产出内容
+            # （见 docs/CHAT_STREAM_KNOWN_ISSUES.md 第 13 条）。
+            "detail": True,
             # 我们的编号交给 FastGPT 存着：这一轮的回答在历史里就带着这个编号，
             # 页面刷新以后能认出哪一条是当前这一轮，不用靠文字去猜。
             "responseChatItemId": turn_id,
@@ -86,14 +109,39 @@ class FastGPT:
                     error_body = (await response.aread()).decode(
                         "utf-8", errors="replace"
                     )
-                    logger.error("FastGPT 错误正文 %s", error_body)
+                    # 截断到 500 字符：错误正文可能整页 HTML，日志装不下。
+                    logger.error("FastGPT 错误正文 %s", error_body[:500])
                     raise FastGPTError
 
+                current_event = ""
                 async for line in response.aiter_lines():
-                    if line.strip() != "":
+                    stripped = line.strip()
+                    if stripped == "":
+                        # 一个事件帧结束：事件名不跨帧（SSE 的规矩）。
+                        current_event = ""
+                        continue
+                    if current_event in _SENSITIVE_EVENTS:
+                        # 载荷带学生数据和对话历史预览：整行不进日志，
+                        # 只记事件名和大小。
+                        logger.debug(
+                            "FastGPT 上游 %s %d 字节",
+                            current_event,
+                            len(line.encode("utf-8")),
+                        )
+                    else:
                         # 上游原文一行一条，量大而且含用户内容：只在 DEBUG 写。
                         logger.debug("FastGPT 上游 %s", line)
-                    piece = _piece(line)
+                    if stripped.startswith("event:"):
+                        current_event = stripped.removeprefix("event:").strip()
+                        continue
+                    if not stripped.startswith("data:"):
+                        continue
+                    if current_event == _FLOW_NODE_STATUS:
+                        progress = _progress_event(stripped)
+                        if progress is not None:
+                            yield progress
+                        continue
+                    piece = _piece(stripped)
                     if piece is None:
                         continue
                     yield piece
@@ -223,6 +271,35 @@ def open_fastgpt(settings: Settings) -> FastGPT | None:
 
 def _json(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _progress_event(line: str) -> ProgressEvent | None:
+    """flowNodeStatus 的 data 行 → ProgressEvent。解析不出来就跳过。
+
+    载荷只有 {name, status} 两个字符串字段（实测见 docs/FASTGPT_API.md
+    「流式行为」）。字段不是字符串就不猜，丢掉这一条；
+    日志里不落载荷内容。
+    """
+    data = line.strip()
+    if not data.startswith("data:"):
+        return None
+
+    data = data.removeprefix("data:").strip()
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        logger.error("FastGPT 返回了无法解析的进度数据行")
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    name = payload.get("name")
+    node_status = payload.get("status")
+    if not isinstance(name, str) or not isinstance(node_status, str):
+        return None
+
+    return ProgressEvent(name=name, status=node_status)
 
 
 def _piece(line: str) -> str | StreamDone | None:
