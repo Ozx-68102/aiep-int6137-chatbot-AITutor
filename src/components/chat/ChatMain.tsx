@@ -143,12 +143,18 @@ export function ChatMain({
           {active ? sessionTitle(active, text.newChat) : text.newChat}
         </h1>
       </header>
+      {/* 读屏播报收窄到这一处：只在本会话有等待中的回答时报「正在思考」，
+          空闲时为空。消息滚动容器不再整个 aria-live，改成 role="log"。 */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {pending ? text.thinking : ''}
+      </span>
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
           className="h-full overflow-auto p-4"
+          role="log"
+          aria-label={active ? sessionTitle(active, text.newChat) : text.newChat}
           onScroll={handleScroll}
-          aria-live="polite"
           aria-busy={pending}
         >
           {active && active.messages.length > 0
