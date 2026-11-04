@@ -1039,9 +1039,7 @@ async def _relay(
                 # 进度帧入队，_sse 那边的 wait_for 自然等不满 15 秒。
                 relay.progress += 1
                 outgoing = _progress_chunk(event)
-                logger.debug(
-                    "发给页面进度帧 %s", outgoing.removesuffix("\n\n")
-                )
+                logger.debug("发给页面进度帧 %s", outgoing.removesuffix("\n\n"))
                 await relay.queue.put(outgoing)
                 continue
             if isinstance(event, str):
