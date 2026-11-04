@@ -41,7 +41,7 @@ export function MessageActions({
   const failed = message.failed === true;
   const stopped = message.aborted === true;
   return (
-    <div className="chat-footer min-h-8" onAnimationEnd={onAnimationEnd}>
+    <div className="chat-footer mt-2 flex min-h-8 flex-col gap-1" onAnimationEnd={onAnimationEnd}>
       {failed || stopped ? (
         <div
           className={

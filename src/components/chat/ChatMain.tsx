@@ -209,7 +209,7 @@ export function ChatMain({
                           }
                         }}
                       />
-                      <div className="mt-1 flex justify-end gap-2">
+                      <div className="mt-2 flex justify-end gap-2">
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
