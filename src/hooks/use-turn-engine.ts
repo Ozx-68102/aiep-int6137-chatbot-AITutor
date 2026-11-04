@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {streamReply} from '../api/chat.ts';
 import {connectionFailure, explain} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
-import {readPartial} from '../api/partial.ts';
+import {probePartial} from '../api/partial.ts';
 import type {PartialReply} from '../api/partial.ts';
 import {abortReply} from '../api/session.ts';
 import {translations} from '../i18n.ts';
@@ -94,7 +94,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
             return {...session, messages: thread.messages, messagesKnown: true};
           }),
         );
-        if (thread.partial.status === 'streaming') {
+        if (thread.partial.kind === 'streaming') {
           resumePartial(sessionId, thread.messages);
         }
       })
@@ -215,13 +215,14 @@ export function useTurnEngine(deps: TurnEngineDeps) {
           return session;
         }
         // 这一轮还没进到页面里（比如刚刷新完），先补一个气泡。
+        // 走到这里的一定是「还在写」的 partial（接口 200 只回 streaming）。
         const message: Message = {
           id: turnId,
           role: 'assistant',
           text: partial.text,
           locale: depsRef.current.locale,
           turnId,
-          waiting: partial.status === 'streaming',
+          waiting: true,
         };
         return {...session, messages: [...session.messages, message]};
       }
@@ -229,8 +230,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       if (!partial.text.startsWith(message.text)) {
         return session;
       }
-      const waiting =
-        partial.status === 'streaming' && visibleText(message.role, partial.text) === '';
+      const waiting = visibleText(message.role, partial.text) === '';
       const messages = [...session.messages];
       messages[index] = {...message, text: partial.text, waiting};
       return {...session, messages};
@@ -406,25 +406,17 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     const stop = startPartialPolling(
       sessionId,
       (partial) => {
+        // 200 ⇒ 服务器说还在写（接口只回答「还在写吗」）：补半截文字即可。
         applyPartialText(sessionId, turnId, partial, fallbackKey);
-        if (partial.status === 'streaming') {
-          return;
-        }
-        stopPolling(sessionId);
-        clearPending(sessionId);
-        if (partial.status === 'failed') {
-          markTurnStatus(sessionId, turnId, 'failed');
-        }
-        if (partial.status === 'aborted') {
-          markTurnStatus(sessionId, turnId, 'aborted');
-        }
       },
       () => {
-        // 会话没了（404）或会话过期（401）：轮询到此为止，输入框解锁。
-        // 过期的事不用在这里说：下一个动作（发送、重命名……）自然会
-        // 带着去重新登录。
+        // 404（服务器明确说没在写，或会话没了）或 401（会话过期）：轮询
+        // 到此为止，去库里对账——结局标志（failed/aborted）在消息上，
+        // 脚注照标志渲染；输入框解锁。过期的事不用在这里说：下一个动作
+        // （发送、重命名……）自然会带着去重新登录。
         stopPolling(sessionId);
         clearPending(sessionId);
+        void refreshThread(sessionId);
       },
     );
     pollers.current.set(sessionId, stop);
@@ -441,64 +433,30 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     startPolling(sessionId, turnId, turnId === '' ? waiting.id : '');
   }
 
+  /**
+   * 流断掉且没收到结局帧：问服务器「还在写吗」这一个问题。
+   *
+   * 还在写（200）→ 补上半截文字，接着轮询；明确说没在写（404，包括
+   * 「Redis 里追的是别的轮次」）→ 以库为准对账：结局标志（failed/aborted）
+   * 已经在消息上，脚注照标志渲染；问不到服务器（网络错）→ 保留现场，
+   * 不删已收到的文字，归常驻的连接警示横幅，不替服务器下结论。
+   */
   async function recoverReply(sessionId: string, turnId: string) {
-    let partial: PartialReply;
-    try {
-      partial = await readPartial(sessionId);
-    } catch {
-      // 问不到服务器：不知道这一轮到底怎么样，只能报连不上（归横幅）。
-      removeTurnAnswer(sessionId, turnId);
-      depsRef.current.setNotice(textRef.current.connectionError);
+    const probe = await probePartial(sessionId);
+    if (probe.kind === 'unreachable') {
+      depsRef.current.onConnectionWarning();
       return;
     }
-    if (partial.turnId !== null && partial.turnId !== turnId) {
-      // Redis 里留着的是别的轮次，这一轮其实没写出来。归横幅。
-      removeTurnAnswer(sessionId, turnId);
-      depsRef.current.setNotice(textRef.current.connectionError);
-      return;
-    }
-    if (partial.status === 'streaming') {
-      applyPartialText(sessionId, turnId, partial);
+    if (
+      probe.kind === 'streaming' &&
+      (probe.partial.turnId === null || probe.partial.turnId === turnId)
+    ) {
+      applyPartialText(sessionId, turnId, probe.partial);
       startPolling(sessionId, turnId);
       return;
     }
-    if (partial.status === 'failed') {
-      applyPartialText(sessionId, turnId, partial);
-      markTurnStatus(sessionId, turnId, 'failed');
-      return;
-    }
-    if (partial.status === 'aborted') {
-      applyPartialText(sessionId, turnId, partial);
-      markTurnStatus(sessionId, turnId, 'aborted');
-      return;
-    }
-    if (partial.status === 'finished') {
-      if (partial.turnId === null && partial.text.trim() === lastAssistantText(sessionId)?.trim()) {
-        // Redis 里没有编号，只能靠文字分辨：留着的是上一轮的收尾，这一轮其实没开始。归横幅。
-        removeTurnAnswer(sessionId, turnId);
-        depsRef.current.setNotice(textRef.current.connectionError);
-        return;
-      }
-      applyPartialText(sessionId, turnId, partial);
-      return;
-    }
-    // 这一轮根本没写出来（上游还没接上就断了）：标成失败，照样能重发 ——
-    // 这一轮在上游没有留下什么，重发就是重新问一遍。零文字的回答气泡留着
-    // （只渲染脚注），提示落在用户提问下方。
-    markTurnStatus(sessionId, turnId, 'failed');
-  }
-
-  /** 这一场会话里最后一条助手回答，用来分辨 Redis 里那份是上一轮留下的还是这一轮的。 */
-  function lastAssistantText(sessionId: string): string | null {
-    const session = depsRef.current.sessions.find((item) => item.id === sessionId);
-    const messages = session?.messages ?? [];
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message.role === 'assistant') {
-        return message.text;
-      }
-    }
-    return null;
+    // idle（或 Redis 里追的是别的轮次）：这一轮已经不在写了，以库为准。
+    await refreshThread(sessionId);
   }
 
   async function sendQuestion(
@@ -606,7 +564,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         messages: thread.messages,
         messagesKnown: true,
       }));
-      if (thread.partial.status === 'streaming') {
+      if (thread.partial.kind === 'streaming') {
         resumePartial(sessionId, thread.messages);
       }
     } catch {
@@ -618,9 +576,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 用户按了停止之后的收尾。
    *
    * 先让服务器记下停止（服务器写停止标记，再取消正在跑的任务），
-   * 再问服务器这一轮到底怎么样：服务器说还在写就接着等，说停了就把
-   * 这一轮的回答标成 aborted（气泡下方的脚注显示「对话已停止」）。
-   * 页面不自己宣布停了。
+   * 再问服务器「这一轮还在写吗」这一个问题：还在写就接着等；明确说
+   * 没在写（404）就以库为准对账，停了/写完/失败的标志在消息上，
+   * 气泡下方的脚注照标志渲染。页面不自己宣布停了。
    */
   async function finishStop(sessionId: string, turnId: string, fallbackKey: string = '') {
     try {
@@ -629,38 +587,27 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       // 服务器那边收不到也不碍事：页面已经不等这一轮了。
     }
 
-    let partial: PartialReply | null = null;
-    try {
-      partial = await readPartial(sessionId);
-    } catch {
-      partial = null;
-    }
-
-    if (partial === null || (partial.turnId !== null && partial.turnId !== turnId)) {
-      // 问不到服务器，或者 Redis 里留着的是别的轮次：按停掉了处理，
-      // 把这一轮的回答标成 aborted（零文字也留着，只渲染脚注）。
-      markTurnStatus(sessionId, turnId, 'aborted');
-      return;
-    }
-    if (partial.status === 'streaming') {
+    const probe = await probePartial(sessionId);
+    if (
+      probe.kind === 'streaming' &&
+      (probe.partial.turnId === null || probe.partial.turnId === turnId)
+    ) {
       // 服务器那边还在写：接着等，别骗用户说停了。
       startPolling(sessionId, turnId, fallbackKey);
       setSessionWarning({sessionId, text: textRef.current.replyStopFailed});
       return;
     }
-    if (partial.status === 'failed') {
-      applyPartialText(sessionId, turnId, partial, fallbackKey);
-      markTurnStatus(sessionId, turnId, 'failed');
+    if (probe.kind === 'unreachable') {
+      // 问不到服务器：保留已收到的文字，就地把这一轮标成 aborted
+      // （用户确实按了停止，页面不替服务器下别的结论），连接问题归
+      // 常驻横幅。
+      markTurnStatus(sessionId, turnId, 'aborted');
+      depsRef.current.onConnectionWarning();
       return;
     }
-    if (partial.status === 'finished') {
-      // 回答其实已经写完了：把答案补上，不显示「对话已停止」。
-      applyPartialText(sessionId, turnId, partial, fallbackKey);
-      return;
-    }
-    // aborted，或者这一轮根本没开始：把这一轮的回答标成 aborted，
-    // 零文字也留着气泡（只渲染脚注），不再进横幅。
-    markTurnStatus(sessionId, turnId, 'aborted');
+    // 明确说没在写（404，包括「Redis 里追的是别的轮次」）：以库为准
+    // 对账，停了/写完/失败的标志在消息上，脚注照标志渲染。
+    await refreshThread(sessionId);
   }
 
   /** 等待中的气泡没有轮次编号时，拿它的消息 id 当轮询的兜底定位键；否则给空串。 */

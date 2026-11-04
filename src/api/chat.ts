@@ -1,11 +1,14 @@
 import type {Locale} from '../type/locale.ts';
 import {ApiError, isRecord, readDetail} from './http.ts';
-import {readPartial} from './partial.ts';
+import {probePartial} from './partial.ts';
 
 export type ReplyOutcome =
-  /** 收到了 [DONE]，这一轮写完了。 */
+  /** done 帧说 completed，或（老后端兼容期）收到了 [DONE]：这一轮写完了。 */
   | 'completed'
-  /** 连接断了，服务器那边可能还在写，页面要接着等。 */
+  /**
+   * 真断流（结局帧和 [DONE] 都没收到），或 done 帧说 failed。页面走恢复
+   * 流程问「还在写吗」并对账数据库：失败脚注和重试按钮由消息上的标志驱动。
+   */
   | 'interrupted'
   /** 请求没有落地，服务器那边根本没有这一轮，可以安全重发。 */
   | 'not-started'
@@ -77,7 +80,7 @@ async function deliverReply(
 
   let delivered = false;
   try {
-    const completed = await readStream(
+    const result = await readStream(
       response,
       (text) => {
         delivered = true;
@@ -85,7 +88,19 @@ async function deliverReply(
       },
       onProgress,
     );
-    return completed ? 'completed' : 'interrupted';
+    if (result.turnDone !== null) {
+      // 收到 done 帧：这一轮的结局随流明说，以它为准（authoritative）。
+      // done 帧是即时判断，服务器的库是最终事实：失败后服务器与上游对账
+      // 可能把存档改成 completed，页面不等待也不回改；刷新以后以库为准
+      // （/messages 消息上的标志）。
+      return outcomeFromTurnDone(result.turnDone);
+    }
+    if (result.streamEnd) {
+      // 没收到 done 帧但收到了 [DONE]（老后端兼容期）：照旧当写完了。
+      return 'completed';
+    }
+    // 流断掉且 done、[DONE] 都没收到：真断流，交给恢复流程去问服务器。
+    return 'interrupted';
   } catch {
     if (signal?.aborted) {
       return 'aborted';
@@ -98,38 +113,39 @@ async function deliverReply(
 }
 
 /**
- * 连接断了的时候问服务器：这一轮到底有没有在生成。
- * 服务器说有 → 它还在写，页面去接着等；说没有 → 请求没落地，可以重发；
- * 问不到 → 不知道，就不重发，免得生成两遍。
+ * 连接断了的时候问服务器：这一轮还在写吗。
+ * 明确说没在写（404）→ 请求没落地，或这一轮已经落定：带同一个 turn_id
+ * 重发一次是安全的——服务器按编号幂等（落定过的轮回空流），不会生成
+ * 两遍；还在写 / 问不到服务器 → 不知道或没写完，一律不重发，免得生成
+ * 两遍，结局交给恢复流程对账数据库。
  */
 async function outcomeAfterFailure(chatId: string): Promise<ReplyOutcome> {
-  try {
-    const partial = await readPartial(chatId);
-    if (partial.status === null) {
-      return 'not-started';
-    }
-    if (partial.status === 'aborted') {
-      return 'aborted';
-    }
-  } catch {
-    return 'interrupted';
-  }
-  return 'interrupted';
+  const probe = await probePartial(chatId);
+  return probe.kind === 'idle' ? 'not-started' : 'interrupted';
 }
+
+type StreamResult = {
+  /** 收到过 data: [DONE]（中继走完）。 */
+  streamEnd: boolean;
+  /** 收到过 event: done 帧的结局（authoritative）；没收到就是 null。 */
+  turnDone: TurnDone | null;
+};
 
 async function readStream(
   response: Response,
   onDelta: (text: string) => void,
   onProgress?: (name: string, status: string) => void,
-): Promise<boolean> {
+): Promise<StreamResult> {
   const body = response.body;
   if (!body) {
-    return false;
+    return {streamEnd: false, turnDone: null};
   }
 
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let streamEnd = false;
+  let turnDone: TurnDone | null = null;
   try {
     for (;;) {
       const {done, value} = await reader.read();
@@ -143,8 +159,13 @@ async function readStream(
       }
       for (const part of parts) {
         for (const piece of piecesFromEvent(part)) {
+          if (piece.kind === 'stream-end') {
+            streamEnd = true;
+          }
           if (piece.kind === 'done') {
-            return true;
+            // done 帧不参与 delivered/内容：它只说结局。一条流至多一帧，
+            // 万一多帧（防御）以最后一帧为准。
+            turnDone = piece.turn;
           }
           if (piece.kind === 'text') {
             onDelta(piece.text);
@@ -156,7 +177,7 @@ async function readStream(
         }
       }
       if (done) {
-        return false;
+        return {streamEnd, turnDone};
       }
     }
   } finally {
@@ -167,12 +188,43 @@ async function readStream(
 type StreamPiece =
   | {kind: 'text'; text: string}
   | {kind: 'progress'; name: string; status: string}
-  | {kind: 'done'};
+  /** data: [DONE]：中继走完。 */
+  | {kind: 'stream-end'}
+  /** event: done 命名事件：这一轮的结局随流明说。 */
+  | {kind: 'done'; turn: TurnDone};
+
+/**
+ * event: done 帧的 data：这一轮的结局随流明说（authoritative）。
+ * reason 词汇固定：stop（用户按停）、upstream（上游失败）、
+ * internal（服务器这边出错）；正常写完为 null。
+ */
+export type TurnDone = {
+  turnId: string;
+  status: 'completed' | 'aborted' | 'failed';
+  reason: string | null;
+  bytesSent: number;
+};
+
+/**
+ * done 帧 → 页面结局：completed 是写完了；aborted 是用户按了停止；
+ * failed 映射成 interrupted，保留页面的「可重试」语义——恢复流程随后
+ * 对账数据库，失败脚注和重试按钮由消息上的标志驱动。
+ */
+function outcomeFromTurnDone(turn: TurnDone): ReplyOutcome {
+  if (turn.status === 'completed') {
+    return 'completed';
+  }
+  if (turn.status === 'aborted') {
+    return 'aborted';
+  }
+  return 'interrupted';
+}
 
 /**
  * 把一个事件拆成片段列表。先扫 `event:` 行取事件名：progress 命名事件把
- * data 解析成节点名和状态词；其他非空事件名的 data 整个忽略（给将来别的
- * 命名事件留位）；没有 event: 行时按无名事件认 data。
+ * data 解析成节点名和状态词；done 命名事件把 data 解析成这一轮的结局
+ * （TurnDone）；其他非空事件名的 data 整个忽略（给将来别的命名事件留位）；
+ * 没有 event: 行时按无名事件认 data。
  *
  * 按 SSE 规范，同一事件里多条 data 行先用 \n 连成一帧再解析；连起来解析
  * 不出来时退回逐行认：坏的行丢掉，其余的行（可能有 [DONE]）照常处理——
@@ -194,11 +246,16 @@ function piecesFromEvent(event: string): StreamPiece[] {
     dataLines.push(line.slice('data:'.length).trim());
   }
   if (eventName !== '') {
-    if (eventName !== 'progress') {
-      return [];
+    if (eventName === 'progress') {
+      const piece = progressFromData(dataLines.join('\n'));
+      return piece === null ? [] : [piece];
     }
-    const piece = progressFromData(dataLines.join('\n'));
-    return piece === null ? [] : [piece];
+    if (eventName === 'done') {
+      const piece = turnDoneFromData(dataLines.join('\n'));
+      return piece === null ? [] : [piece];
+    }
+    // 未知的命名事件：data 整帧忽略。
+    return [];
   }
   if (dataLines.length === 0) {
     return [];
@@ -241,10 +298,42 @@ function progressFromData(data: string): StreamPiece | null {
   return null;
 }
 
+/**
+ * 认一帧 done 的 data：turn_id 必须是字符串，status 必须是三个结局词之一，
+ * bytes_sent 必须是数字，reason 必须是 null 或字符串（缺失按 null）；
+ * 任何一个字段不合就把这一帧整个忽略——坏帧宁可丢掉，也不能解出一个
+ * 错误的结局。
+ */
+function turnDoneFromData(data: string): StreamPiece | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (!isRecord(payload)) {
+      return null;
+    }
+    const turnId = payload.turn_id;
+    const status = payload.status;
+    const reason = payload.reason;
+    const bytesSent = payload.bytes_sent;
+    if (typeof turnId !== 'string' || typeof bytesSent !== 'number') {
+      return null;
+    }
+    if (status !== 'completed' && status !== 'aborted' && status !== 'failed') {
+      return null;
+    }
+    if (reason !== null && reason !== undefined && typeof reason !== 'string') {
+      return null;
+    }
+    return {kind: 'done', turn: {turnId, status, reason: reason ?? null, bytesSent}};
+  } catch {
+    // 这一帧的 JSON 是坏的，整个忽略。
+    return null;
+  }
+}
+
 /** 认一帧 data：[DONE] 是收尾，JSON 是一段增量；解析失败就丢掉这一帧。 */
 function pieceFromData(data: string): StreamPiece | null {
   if (data === '[DONE]') {
-    return {kind: 'done'};
+    return {kind: 'stream-end'};
   }
   try {
     const content = contentFromPayload(JSON.parse(data));

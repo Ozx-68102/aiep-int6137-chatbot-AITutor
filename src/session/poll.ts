@@ -5,11 +5,12 @@ import type {PartialReply} from '../api/partial.ts';
 const intervalMs = 500;
 
 /**
- * 轮询当前这一轮的半截回答。返回停止函数。
+ * 轮询当前这一轮还在不在写。返回停止函数。
  *
- * 三种终止：状态不再是 streaming（这一轮落定了）、404（会话没了）、
- * 401（会话过期）。前一种走 onPartial；后两种走 onEnd。
- * 401 必须当终止条件：轮着问只会每 500 毫秒空转一次，输入框一直锁着。
+ * 接口只回答「还在写吗」：200 就是还在写（onPartial，status 恒为
+ * streaming）；404（服务器明确说没在写，或会话没了）和 401（会话过期）
+ * 是终止条件，走 onEnd。401 必须当终止条件：轮着问只会每 500 毫秒
+ * 空转一次，输入框一直锁着。网络错继续下一拍：问不到服务器不等于没在写。
  *
  * 页面切到后台（document.hidden）时不发请求，光等；回到前台立刻补查一次，
  * 不等下一拍。500 毫秒的节奏和终止语义都不变。
@@ -62,10 +63,8 @@ export function startPartialPolling(
         }
         continue;
       }
+      // 200 ⇒ 还在写，接着轮；终止只从 404/401（onEnd）来。
       onPartial(partial);
-      if (partial.status !== 'streaming') {
-        return;
-      }
     }
   }
 

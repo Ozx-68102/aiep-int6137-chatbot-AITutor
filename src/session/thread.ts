@@ -1,11 +1,15 @@
 import {readMessages} from '../api/messages.ts';
-import {readPartialSafe} from '../api/partial.ts';
-import type {PartialReply} from '../api/partial.ts';
+import {probePartial} from '../api/partial.ts';
+import type {PartialProbe} from '../api/partial.ts';
 import type {Message} from '../type/chat.ts';
 
 export type Thread = {
   messages: Message[];
-  partial: PartialReply;
+  /**
+   * 服务器还在不在写当前这一轮。404（idle，明确说没在写）和网络错
+   * （unreachable，没问到服务器）是两种结果，调用方按 kind 分支。
+   */
+  partial: PartialProbe;
 };
 
 /**
@@ -19,9 +23,6 @@ export type Thread = {
  * 合成 role:'error' 的错误消息。
  */
 export async function loadThread(sessionId: string): Promise<Thread> {
-  const [messages, partial] = await Promise.all([
-    readMessages(sessionId),
-    readPartialSafe(sessionId),
-  ]);
+  const [messages, partial] = await Promise.all([readMessages(sessionId), probePartial(sessionId)]);
   return {messages, partial};
 }
