@@ -37,7 +37,7 @@ export function ChatMain({
   onShowSidebar: () => void;
   active: Session | undefined;
   warnings: WarningItem[];
-  enteringIds: string[];
+  enteringIds: Set<string>;
   onAnimationEnd: (id: string) => void;
   pending: boolean;
   draft: string;
@@ -159,7 +159,7 @@ export function ChatMain({
         >
           {active && active.messages.length > 0
             ? active.messages.map((message) => {
-                const entering = enteringIds.includes(message.id);
+                const entering = enteringIds.has(message.id);
                 const textShown = visibleText(message.role, message.text);
                 if (textShown === '') {
                   if (waitingForText(message)) {

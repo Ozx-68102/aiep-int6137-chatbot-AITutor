@@ -78,7 +78,7 @@ function ChatApp() {
   const [sendingNew, setSendingNew] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [enteringIds, setEnteringIds] = useState<string[]>([]);
+  const [enteringIds, setEnteringIds] = useState<Set<string>>(() => new Set());
   const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
   const draftRef = useRef(draft);
   // 异步回调和效果调用的函数统一从 ref 里拿 navigate：走 ref 就不会成为
@@ -324,9 +324,23 @@ function ChatApp() {
 
   function markEntering(id: string) {
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!reduceMotion) {
-      setEnteringIds((current) => [...current, id]);
+    if (reduceMotion) {
+      return;
     }
+    setEnteringIds((current) => new Set(current).add(id));
+    // 兜底清理：正常由 onAnimationEnd 移除；气泡在动画结束前就被删掉时
+    // （重发去掉旧回答、发送没成功整轮回滚），onAnimationEnd 不会再来，
+    // id 会一直漏在集合里。进场动画最长 300ms，500ms 后再清一次，幂等。
+    window.setTimeout(() => {
+      setEnteringIds((current) => {
+        if (!current.has(id)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }, 500);
   }
 
   async function submitLogin(usernameValue: string, password: string) {
@@ -663,7 +677,14 @@ function ChatApp() {
         warnings={warnings}
         enteringIds={enteringIds}
         onAnimationEnd={(id) => {
-          setEnteringIds((current) => current.filter((item) => item !== id));
+          setEnteringIds((current) => {
+            if (!current.has(id)) {
+              return current;
+            }
+            const next = new Set(current);
+            next.delete(id);
+            return next;
+          });
         }}
         pending={activePending}
         draft={draft}
