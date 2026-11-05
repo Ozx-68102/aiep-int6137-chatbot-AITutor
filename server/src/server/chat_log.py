@@ -14,10 +14,10 @@ FastGPT 那边也有一份，但那是它工作流的副产品：它清库就没
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -127,10 +127,13 @@ def fail_stuck_rounds() -> int:
     """
     try:
         with db_session() as session:
-            result = session.execute(
-                update(ChatMessage)
-                .where(ChatMessage.status == STREAMING)
-                .values(status=FAILED)
+            result = cast(
+                CursorResult,
+                session.execute(
+                    update(ChatMessage)
+                    .where(ChatMessage.status == STREAMING)
+                    .values(status=FAILED)
+                ),
             )
             return int(result.rowcount or 0)
     except SQLAlchemyError:
@@ -317,7 +320,7 @@ def _has_rows(session: Session, session_id: UUID) -> bool:
 
 
 def _next_seq(session: Session, session_id: UUID) -> int:
-    current = session.scalar(
+    current: int | None = session.scalar(
         select(func.max(ChatMessage.seq)).where(ChatMessage.session_id == session_id)
     )
     return 0 if current is None else int(current) + 1
