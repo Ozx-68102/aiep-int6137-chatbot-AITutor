@@ -24,7 +24,7 @@ import {chatFrameClass} from './components/shell/frame-class.ts';
 import {Modal} from './components/shell/Modal.tsx';
 import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
-import {Toast} from './components/toast/Toast.tsx';
+import {Toast, type ToastItem} from './components/toast/Toast.tsx';
 import {translations} from './i18n/index.ts';
 import {
   clearCachedProfile,
@@ -95,7 +95,7 @@ function ChatApp() {
   const [sessionInvalid, setSessionInvalid] = useState<'expired' | 'disabled' | null>(null);
   const [reloginOpen, setReloginOpen] = useState(false);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(() => new Set());
-  const [toast, setToast] = useState<{id: number; text: string; lang: string} | null>(null);
+  const [toast, setToast] = useState<ToastItem | null>(null);
   const draftRef = useRef(draft);
   const sessionInvalidRef = useRef(sessionInvalid);
   // 异步回调和效果调用的函数统一从 ref 里拿 navigate：走 ref 就不会成为
@@ -328,7 +328,8 @@ function ChatApp() {
   /** 成功之后的短提示：弹窗自己关了，得有个地方告诉用户「成了」。 */
   function showToast(message: string) {
     toastCount.current += 1;
-    setToast({id: toastCount.current, text: message, lang: htmlLang[locale]});
+    // id 只在这里生成（O7）：Toast 组件拿它重播动画、重计 3 秒，不再自造计数。
+    setToast({id: toastCount.current, text: message});
   }
 
   function enterLogin(detail: string | null) {
@@ -916,8 +917,8 @@ function ChatApp() {
         />
       </Modal>
       <Toast
-        message={toast?.text ?? null}
-        lang={toast?.lang ?? htmlLang[locale]}
+        toast={toast}
+        lang={htmlLang[locale]}
         onDismiss={() => {
           setToast(null);
         }}
