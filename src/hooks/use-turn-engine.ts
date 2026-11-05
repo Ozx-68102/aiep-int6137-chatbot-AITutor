@@ -6,7 +6,7 @@ import {probePartial} from '../api/partial.ts';
 import type {PartialReply} from '../api/partial.ts';
 import {abortReply} from '../api/session.ts';
 import {translations} from '../i18n/index.ts';
-import {startPartialPolling} from '../session/poll.ts';
+import {networkOkEvent, startPartialPolling} from '../session/poll.ts';
 import {visibleText} from '../session/text.ts';
 import {loadThread} from '../session/thread.ts';
 import {saveUnsent} from '../session/unsent.ts';
@@ -144,8 +144,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     };
   }, []);
 
-  // 网络回来 / 页面回到可见：还在等回答的会话可能在断线期间有了进展，
-  // 挨个补查一次线程（refreshThread 里带着续传逻辑）。
+  // 服务器确认够得着 / 页面回到可见：还在等回答的会话可能在断线期间有了
+  // 进展，挨个补查一次线程（refreshThread 里带着续传逻辑）。
+  // 断线补查不再直接听浏览器的 online：online 只说明网卡通了，服务器未必
+  // 够得着，那时补查多半白失败一趟，还会和 use-service-status 的主动探测
+  // 形成双份补查。改听探测确认成功后广播的 networkOkEvent（见
+  // src/session/poll.ts）：补查与横幅撤销发生在同一时刻。
   useEffect(() => {
     function catchUp() {
       for (const sessionId of pendingIdsRef.current) {
@@ -161,10 +165,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         catchUp();
       }
     }
-    window.addEventListener('online', catchUp);
+    window.addEventListener(networkOkEvent, catchUp);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      window.removeEventListener('online', catchUp);
+      window.removeEventListener(networkOkEvent, catchUp);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
