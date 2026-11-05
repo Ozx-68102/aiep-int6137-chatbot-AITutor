@@ -288,7 +288,7 @@ app.add_middleware(_RefreshLoginCookie)
 
 
 @app.exception_handler(RequestValidationError)
-async def _validation_error(request: Request, exc: RequestValidationError) -> Response:
+async def _validation_error(_request: Request, exc: RequestValidationError) -> Response:
     """422 也回一句中文。
 
     页面只认 {"detail": "字符串"}：Pydantic 默认的 422 正文是数组，
@@ -315,7 +315,7 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
 
 @app.exception_handler(_SessionUnauthorized)
 async def _session_unauthorized_response(
-    request: Request, exc: _SessionUnauthorized
+    _request: Request, exc: _SessionUnauthorized
 ) -> Response:
     """会话类 401 的响应体：{"detail": 中文句子, "reason": 词表词}。
 
