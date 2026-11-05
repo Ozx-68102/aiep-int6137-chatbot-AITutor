@@ -467,46 +467,38 @@ def admin_reset_password(
     return AdminPasswordResetResponse(username=body.username, password=password)
 
 
+def _logout_response(cookie_name: str, cookie_value: str | None) -> Response:
+    """退出的共用本体：吊销令牌；吊不掉按会话过期回 401，吊掉了回 204。"""
+    with db_session() as session:
+        if not _revoke_login_token(session, cookie_value):
+            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
+            if cookie_value:
+                # 令牌已死时的退出也是会话过期语义：带 reason；匿名请求维持现状。
+                content["reason"] = _REASON_EXPIRED
+            result = JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED, content=content
+            )
+            _clear_cookie(result, cookie_name)
+            return result
+
+    result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_cookie(result, cookie_name)
+    return result
+
+
 @app.post("/api/admin/logout", status_code=status.HTTP_204_NO_CONTENT)
 def admin_logout(
     admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
 ) -> Response:
     """控制台退出：镜像 /api/logout，只是 cookie 换成 admin_login。"""
-    with db_session() as session:
-        if not _revoke_login_token(session, admin_cookie):
-            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
-            if admin_cookie:
-                content["reason"] = _REASON_EXPIRED
-            result = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content=content
-            )
-            _clear_cookie(result, _ADMIN_COOKIE_NAME)
-            return result
-
-    result = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_cookie(result, _ADMIN_COOKIE_NAME)
-    return result
+    return _logout_response(_ADMIN_COOKIE_NAME, admin_cookie)
 
 
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
-    with db_session() as session:
-        if not _revoke_login_token(session, login_cookie):
-            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
-            if login_cookie:
-                # 令牌已死时的退出也是会话过期语义：带 reason；匿名请求维持现状。
-                content["reason"] = _REASON_EXPIRED
-            result = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content=content
-            )
-            _clear_cookie(result, _COOKIE_NAME)
-            return result
-
-    result = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_cookie(result, _COOKIE_NAME)
-    return result
+    return _logout_response(_COOKIE_NAME, login_cookie)
 
 
 @app.get("/api/profile")
