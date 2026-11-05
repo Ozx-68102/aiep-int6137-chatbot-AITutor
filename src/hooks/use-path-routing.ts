@@ -1,5 +1,6 @@
 import {useEffect, useRef} from 'react';
 import {matchPath, useLocation, useNavigate} from 'react-router';
+import {readDraft} from '../session/drafts.ts';
 import type {Session} from '../type/chat.ts';
 
 /** /chat/:id 里的会话 id；其它路径（包括不带 id 的 /chat）返回 null。 */
@@ -17,6 +18,8 @@ type PathRoutingDeps = {
   setView: (view: 'chat' | 'profile') => void;
   setComposingNew: (value: boolean) => void;
   setActiveId: (id: string | null) => void;
+  /** 认领路径后把对应会话自己的草稿放回输入框（草稿按会话存，刷新不丢）。 */
+  setDraft: (value: string) => void;
 };
 
 /**
@@ -127,6 +130,7 @@ export function usePathRouting(deps: PathRoutingDeps) {
     if (wanted === null) {
       current.setComposingNew(true);
       current.setActiveId(null);
+      current.setDraft(readDraft(null));
       return;
     }
     const found = list.find((session) => session.id === wanted);
@@ -134,10 +138,12 @@ export function usePathRouting(deps: PathRoutingDeps) {
       void navigateRef.current('/', {replace: true});
       current.setComposingNew(true);
       current.setActiveId(null);
+      current.setDraft(readDraft(null));
       return;
     }
     current.setComposingNew(false);
     current.setActiveId(found.id);
+    current.setDraft(readDraft(found.id));
   }
 
   /** 从设置里进改密页：压了一条历史，取消等于浏览器后退。 */

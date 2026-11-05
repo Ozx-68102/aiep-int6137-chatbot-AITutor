@@ -28,6 +28,7 @@ import {Toast} from './components/toast/Toast.tsx';
 import {translations} from './i18n/index.ts';
 import {clearCachedProfile, readCachedProfile, saveCachedProfile} from './session/profile-cache.ts';
 import type {CachedProfile} from './session/profile-cache.ts';
+import {clearAllDrafts, clearDraft, readDraft, saveDraft} from './session/drafts.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {titleFromQuestion} from './session/title.ts';
 import {BrowserRouter, Route, Routes, useLocation, useNavigate} from 'react-router';
@@ -107,6 +108,7 @@ function ChatApp() {
     setView,
     setComposingNew,
     setActiveId,
+    setDraft,
   });
   const routingRef = useRef(routing);
   const service = useServiceStatus({
@@ -129,7 +131,7 @@ function ChatApp() {
     updateSession,
     markEntering,
     setNotice,
-    setDraft,
+    setDraft: handleDraft,
     onAuthError: handleAuthError,
     onConnectionWarning: service.showConnectionWarning,
   });
@@ -287,6 +289,8 @@ function ChatApp() {
           // 接口服务连不上：登录状态还在（cookie 还在），聊天区照常开着，
           // 只在聊天区上方报一次连不上。用户名字和语言用本地记着的那份。
           setComposingNew(true);
+          // 离线启动也恢复新对话自己的草稿：刷新不丢。
+          setDraft(readDraft(null));
           serviceRef.current.markService('unreachable');
           setAuth('ready');
           return;
@@ -478,27 +482,34 @@ function ChatApp() {
       });
   }
 
-  function rememberDraft() {
-    const typed = draftRef.current.trim();
-    if (typed !== '') {
-      saveUnsent(typed);
-    }
+  /**
+   * 输入框变化：更新状态，同时存进当前会话自己的草稿（N3：sessionStorage
+   * 按键 h2bot-draft:{会话id} 各存各的，新对话用固定键）。每次按键即写而
+   * 不做防抖：sessionStorage 同步写开销可忽略，省掉「切会话/卸载时何时
+   * flush」的时序坑。引擎的 busy 回填（setDraft）也走这里，回填的文字
+   * 同样落进对应会话的草稿。
+   */
+  function handleDraft(value: string) {
+    setDraft(value);
+    saveDraft(activeId, value);
   }
 
   function showSession(id: string) {
-    rememberDraft();
     setComposingNew(false);
     setActiveId(id);
-    setDraft('');
+    // 草稿按会话各存各的：切会话不互相清，切回来原样恢复。
+    setDraft(readDraft(id));
     setNotice(null);
     setView('chat');
   }
 
   function showNewChat() {
-    rememberDraft();
     setComposingNew(true);
     setActiveId(null);
-    setDraft(readUnsent());
+    // unsent 恢复优先于草稿：被踢、busy 回填存下的句子不能丢；
+    // 没有存句才用新对话自己的草稿。
+    const unsent = readUnsent();
+    setDraft(unsent !== '' ? unsent : readDraft(null));
     setNotice(null);
     setView('chat');
   }
@@ -527,6 +538,9 @@ function ChatApp() {
       // 主动退出：enterLogin 刚存过草稿，这里清掉，别带去下一次登录。
       // （退出时 401 是被踢，走上面 catch 的路，不清。）
       clearUnsent();
+      // 各会话的草稿也在主动退出时清空：共用电脑不留半截字（对齐
+      // clearCachedProfile 的隐私处理）。被踢不清——重登录后草稿原样恢复。
+      clearAllDrafts();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(null);
@@ -581,6 +595,8 @@ function ChatApp() {
       ]);
       setActiveId(created.id);
       clearUnsent();
+      // 发送成功：清掉新对话自己的草稿（问题已经进线程了）。
+      clearDraft(null);
       setDraft('');
       markEntering(userMessage.id);
       engine.sendingRef.current.add(sessionId);
@@ -649,6 +665,8 @@ function ChatApp() {
     setNotice(null);
     engine.clearSessionWarning(sessionId);
     clearUnsent();
+    // 发送成功：清掉这场会话自己的草稿。
+    clearDraft(sessionId);
     setDraft('');
     updateSession(sessionId, (session) => ({
       ...session,
@@ -783,7 +801,7 @@ function ChatApp() {
         onWaitHint={() => {
           showToast(text.waitForReply);
         }}
-        onDraft={setDraft}
+        onDraft={handleDraft}
         onSubmit={submitMessage}
         onStop={() => {
           if (active) {
