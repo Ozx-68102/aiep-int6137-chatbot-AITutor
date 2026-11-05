@@ -50,3 +50,5 @@ const en: Messages = {
 };
 
 export const translations: Record<Locale, Messages> = {'zh-CN': zhCN, 'zh-TW': zhTW, en};
+
+export {format} from './format.ts';
