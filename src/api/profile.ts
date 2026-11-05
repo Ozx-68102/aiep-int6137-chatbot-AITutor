@@ -1,3 +1,4 @@
+import {cacheAvatarData} from '../session/profile-cache.ts';
 import {isLocale, type Locale} from '../type/locale.ts';
 import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
 
@@ -61,13 +62,20 @@ function parseProfile(value: unknown): Profile {
   ) {
     throw new ApiError(0, null);
   }
+  const avatarUrl =
+    typeof value.avatarUrl === 'string' && value.avatarUrl !== ''
+      ? value.avatarUrl
+      : defaultAvatarUrl;
+  // 拿到真头像地址就顺手把图片数据缓存一份到本地，离线启动时不闪默认图。
+  // 默认头像是前端静态资源，离线也拿得到，不用缓存。缓存失败无所谓：
+  // cacheAvatarData 内部静默降级，不挡住资料返回。
+  if (avatarUrl !== defaultAvatarUrl) {
+    void cacheAvatarData(avatarUrl);
+  }
   return {
     id: value.id,
     username: value.username,
     locale: value.locale,
-    avatarUrl:
-      typeof value.avatarUrl === 'string' && value.avatarUrl !== ''
-        ? value.avatarUrl
-        : defaultAvatarUrl,
+    avatarUrl,
   };
 }

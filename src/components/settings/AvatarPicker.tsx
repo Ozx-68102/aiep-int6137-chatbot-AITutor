@@ -1,6 +1,7 @@
 import {CircleAlert} from 'lucide-react';
 import {useRef, useState} from 'react';
 import {translations} from '../../i18n/index.ts';
+import {readCachedAvatarData} from '../../session/profile-cache.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {AvatarImage} from '../avatar/AvatarImage.tsx';
 
@@ -43,6 +44,10 @@ export function AvatarPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   // 预检拒绝文件时的当场提示；下一次重新选文件就清掉。
   const [pickError, setPickError] = useState<string | null>(null);
+  // 离线启动时资料接口还没回来，App 传下来的 avatarUrl 是 null：用本地
+  // 缓存的头像 dataURL 顶上，不闪默认图。挂载时读一次就够；在线以后
+  // 一律以 prop 为准。
+  const [cachedAvatar] = useState(() => readCachedAvatarData());
 
   function handlePick(file: File) {
     const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
@@ -64,7 +69,7 @@ export function AvatarPicker({
   return (
     <div className="flex items-start gap-4 border-b border-base-300 py-4">
       <AvatarImage
-        src={avatarUrl}
+        src={avatarUrl ?? cachedAvatar}
         alt={text.avatar}
         className="size-20 shrink-0 rounded-full border border-base-300 bg-base-200 object-cover"
       />
