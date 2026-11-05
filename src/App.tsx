@@ -26,7 +26,7 @@ import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast} from './components/toast/Toast.tsx';
 import {translations} from './i18n/index.ts';
-import {clearCachedProfile, readCachedProfile, saveCachedProfile} from './session/profile-cache.ts';
+import {clearCachedProfile, readCachedAvatarData, readCachedProfile, saveCachedProfile} from './session/profile-cache.ts';
 import type {CachedProfile} from './session/profile-cache.ts';
 import {clearAllDrafts, clearDraft, readDraft, saveDraft} from './session/drafts.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
@@ -78,7 +78,8 @@ function ChatApp() {
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(() => cachedProfile?.username ?? null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  // 离线启动：侧栏头像先用本地缓存顶上，不闪回默认图（P12 的侧栏半边）。
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(() => readCachedAvatarData());
   const [view, setView] = useState<'chat' | 'profile'>('chat');
   const [composingNew, setComposingNew] = useState(false);
   const [sendingNew, setSendingNew] = useState(false);

@@ -72,8 +72,17 @@ export function AdminLoginForm({
               <span>{error}</span>
             </p>
           ) : null}
-          <button type="submit" className="btn btn-primary btn-block" disabled={blocked}>
-            {text.logIn}
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={blocked}
+            aria-busy={busy}
+          >
+            {busy ? (
+              <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+            ) : (
+              text.logIn
+            )}
           </button>
         </div>
       </form>

@@ -1,5 +1,5 @@
 import {Ellipsis, Pin} from 'lucide-react';
-import {type MouseEvent, useEffect, useRef, useState} from 'react';
+import {type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {translations} from '../../i18n/index.ts';
 import {sessionTitle} from '../../session/empty.ts';
@@ -46,6 +46,14 @@ export function SessionRow({
   const [dialogError, setDialogError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  // 之前是否打开过：关闭时据此决定要不要把焦点还给触发按钮（LanguageMenu 同款语义）。
+  const wasOpenRef = useRef(false);
+
+  function menuItems(): HTMLButtonElement[] {
+    return Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+    );
+  }
 
   useEffect(() => {
     if (!menuOpen) {
@@ -92,6 +100,64 @@ export function SessionRow({
       window.removeEventListener('resize', place);
     };
   }, [menuOpen]);
+
+  // 打开即把焦点挪进菜单（第一项），关闭把焦点还给触发按钮——role="menu"
+  // 的语义向读屏用户承诺了这些行为。点重命名/删除时弹窗会先抢走焦点，
+  // 那时焦点既不在 body 也不在菜单里，下面的守卫保证不抢回来。
+  useEffect(() => {
+    if (menuOpen) {
+      wasOpenRef.current = true;
+      const items = menuItems();
+      const target = items.at(0);
+      if (target !== undefined) {
+        target.focus();
+      }
+      return;
+    }
+    if (!wasOpenRef.current) {
+      return;
+    }
+    wasOpenRef.current = false;
+    // 浮层转入 inert 时浏览器会把焦点丢回 body：只在那时（或焦点还留在
+    // 菜单里时）接管；点外部按钮关闭的场景，焦点已在点击目标上，不抢。
+    const active = document.activeElement;
+    if (
+      active === null ||
+      active === document.body ||
+      (active instanceof Node && menuRef.current?.contains(active))
+    ) {
+      buttonRef.current?.focus();
+    }
+  }, [menuOpen]);
+
+  // 方向键导航：上/下循环移动，Home/End 跳首尾。type-ahead 不做：一共
+  // 只有三项，方向键循环已经够用。
+  function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const items = menuItems();
+    if (items.length === 0) {
+      return;
+    }
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    let next: number;
+    switch (event.key) {
+      case 'ArrowDown':
+        next = index < 0 ? 0 : (index + 1) % items.length;
+        break;
+      case 'ArrowUp':
+        next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = items.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    items[next].focus();
+  }
 
   function openMenu(event: MouseEvent<HTMLButtonElement>) {
     setMenuPoint(menuPointFor(event.currentTarget));
@@ -142,6 +208,7 @@ export function SessionRow({
           role="menu"
           aria-hidden={!menuOpen}
           inert={!menuOpen}
+          onKeyDown={onMenuKeyDown}
         >
           <ul className="menu w-full p-1.5" role="none">
             <li role="none">
