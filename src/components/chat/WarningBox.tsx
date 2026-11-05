@@ -35,8 +35,8 @@ export function WarningBox({
   tone: WarningTone;
   text: string;
   dismissLabel: string;
-  onDismiss?: () => void;
-  action?: WarningAction;
+  onDismiss?: (() => void) | undefined;
+  action?: WarningAction | undefined;
 }) {
   return (
     <div className="alert mb-3 bg-base-100" role={tone === 'error' ? 'alert' : 'status'}>

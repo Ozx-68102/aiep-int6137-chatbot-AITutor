@@ -60,7 +60,7 @@ export function MessageActions({
   canEdit?: boolean;
   /** 「编辑」popover 的文字（i18n edit）。 */
   editLabel?: string;
-  onEdit?: () => void;
+  onEdit?: (() => void) | undefined;
   /** 复制按钮的文字（i18n copy / copied）。 */
   copyLabel: string;
   copiedLabel: string;

@@ -9,7 +9,7 @@ export function ThinkingBubble({
   entering: boolean;
   label: string;
   /** 上游工作流最新节点名，原样显示；不进读屏播报（下面的 aria-hidden）。 */
-  progress?: string;
+  progress?: string | undefined;
   onAnimationEnd: () => void;
 }) {
   const classes = bubbleClass('assistant', entering);

@@ -61,7 +61,8 @@ async function deliverReply(
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({message, chatId, locale, turnId, retryOf}),
-      signal,
+      // signal 可以缺省：fetch 对 null 和 undefined 一视同仁（都不带中止信号）
+      signal: signal ?? null,
     });
   } catch {
     if (signal?.aborted) {

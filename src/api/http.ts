@@ -78,7 +78,7 @@ function autoRetry(init?: {method?: string; retry?: boolean}): boolean {
 
 export async function requestEmpty(
   path: string,
-  init?: {method?: string; body?: string | FormData; retry?: boolean},
+  init?: {method?: string; body?: string | FormData | undefined; retry?: boolean},
 ): Promise<void> {
   await withConnectionRetry(
     async () => {
@@ -97,7 +97,7 @@ export async function requestEmpty(
 
 export async function requestJson(
   path: string,
-  init?: {method?: string; body?: string | FormData; retry?: boolean},
+  init?: {method?: string; body?: string | FormData | undefined; retry?: boolean},
 ): Promise<unknown> {
   return withConnectionRetry(
     async () => {
@@ -119,19 +119,21 @@ export async function requestJson(
 
 async function request(
   path: string,
-  init?: {method?: string; body?: string | FormData; retry?: boolean},
+  init?: {method?: string; body?: string | FormData | undefined; retry?: boolean},
 ): Promise<Response> {
   try {
     return await fetch(path, {
       method: init?.method ?? 'GET',
       credentials: 'include',
       // FormData 的 Content-Type 由浏览器自己带（里面要带 boundary），
-      // 这里再写死成 json 就坏了。
+      // 这里再写死成 json 就坏了。空对象占位与不传一样：浏览器照样自己带
+      // multipart 头；exactOptionalPropertyTypes 下这里不能写显式 undefined。
       headers:
         init?.body === undefined || init.body instanceof FormData
-          ? undefined
+          ? {}
           : {'Content-Type': 'application/json'},
-      body: init?.body,
+      // body 可以缺省：fetch 对 null 和 undefined 一视同仁（都不带请求体）
+      body: init?.body ?? null,
       // 超时到点就中止。中止抛的错在下面统一包成 ApiError(0, null)，
       // 落进 connectionFailure 的判定，表现成网络类失败。
       signal: AbortSignal.timeout(
