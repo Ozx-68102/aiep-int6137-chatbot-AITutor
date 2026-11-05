@@ -170,6 +170,8 @@
 
 ### 15. 每个认证请求至少 3 次 DB 往返：中间件与端点重复验证、清扫 DELETE 搭车
 
+> **已完成（2026-11-05）**：随早于本节的批次落地（与 backend-api O1 是同一件事），本次结构整理后逐处复验机制健在：校验＋续期合成单条 UPDATE…RETURNING（security/tokens.py）；中间件验证通过后把结果放进请求态 contextvar（middleware.py 写入 security/context.py 的 REQUEST_ACCOUNT），端点鉴权优先复用（security/accounts.py），只多一次按主键取活 ORM 对象；过期清扫整个搬出请求路径（lifespan 定时任务）。每个带 cookie 的请求从「至少 3 次往返」降到 2 次。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
+
 - **位置**：`app.py` 的 `_RefreshLoginCookie`（`_cookie_is_valid` → `_login_token` 查询+续期+commit）、各端点 `_account_from_cookie`（再走一遍 `_login_token`）、`_login_token` 开头的 `_sweep_expired_tokens()`（第三次，DELETE）
 - **现状**：同一个令牌在一次请求里被查两遍、续期两遍（中间件 set-cookie 前查一次，端点鉴权再查一次），外加一次全表 DELETE 清扫。
 - **影响**：DB QPS 是必要值的 3 倍，连接池占用同步放大；教室并发场景最先顶不住的就是这里。第 4 条解决清扫，这条解决重复验证。
@@ -239,6 +241,8 @@
 - **工作量**：M
 
 ### 18. 单 worker 约束没有成文：加 `--workers` 会静默打断「停止/重发」语义
+
+> **已完成（2026-11-05）**：短期成文方案落地——docs/CHAT_STREAM_PROTOCOL.md 有「单进程前提」专节（启动对账、定时清扫、停止语义都依赖它），lifespan 与对账代码的注释引用该节；server/AGENTS.md「边界」补了「只能单 worker 运行，不要加 --workers」一条（与本注记同批补上）。本节位置行提到的三处进程内状态现状：任务登记簿仍在进程内（streaming/registry.py，这正是约束成立的原因）、停止标记已在 Redis、记录缓存已消失（见 backend-api O6 注记）。长期多进程化照旧不在范围，要做单独立项。
 
 - **位置**：`server/__init__.py`（`uvicorn.run(app, ...)` 单进程）；`app.py` 的 `_running`、`_pending_stops`、`_records_cache`（全是进程内 dict/set）
 - **现状**：abort 的核心动作是「从 `_running` 里找到那个 asyncio.Task 并 cancel」；「等叫停落地再开新轮」靠 `_pending_stops`；防刷新打垮上游靠 `_records_cache`。这三样都只在单进程内成立。Redis 里有停止标记和半截文字，但任务本体不在 Redis 里。

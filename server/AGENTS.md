@@ -58,6 +58,7 @@ curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
 - 密钥只放仓库根目录 `.env`（已忽略），由 `server/src/server/settings.py` 读取。不写进代码，也不写进日志
 - 日志在仓库根目录的 `logs/server.log`，超过 5MB 会轮转归档。里面写着用户提问和 FastGPT 的上游原文，不要贴进提交说明、文档或 issue
 - 新的 Redis 键空间一律挂在 `h2botapp-chat:` 前缀底下：应用连的 Redis 用户 `h2bot_app` 的 ACL 只放行这一个前缀，别的前缀会 `NoPermissionError`，而且照「Redis 不通就放行」的降级写法这个错不会浮出来——功能直接静默失效。要另起前缀先请维护者放开 ACL。实测见 [docs/FINDINGS.md](../docs/FINDINGS.md) 2026-11-02 那条
+- **只能单 worker 运行，不要加 `--workers`**：停止一轮靠「在本进程里找到那个中继任务并取消」，启动对账和过期令牌清扫也按单进程假设跑——多 worker 时停止请求大概率落到另一个进程，找不到任务、照样回成功，用户按了停止但回答继续写，而且不报错。容量瓶颈先考虑查询瘦身和机器规格。前提的细节见 [docs/CHAT_STREAM_PROTOCOL.md](../docs/CHAT_STREAM_PROTOCOL.md)「单进程前提」一节
 - 配置模型和接口模型在 `server/src/server/types`
 
 ## 登录状态
