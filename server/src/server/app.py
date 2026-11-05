@@ -536,7 +536,8 @@ def change_password(
     （/api/login 同一个道理）。请求体里有密码，日志只记账号 id。
     管理员改自己的密码也走这里：聊天页和控制台共用这一个端点。
     """
-    client_ip = request.client.host if request.client else "unknown"
+    client = request.client
+    client_ip = client.host if client else "unknown"
 
     with db_session() as session:
         account = _password_account(session, login_cookie, admin_cookie)
