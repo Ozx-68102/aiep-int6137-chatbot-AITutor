@@ -320,7 +320,7 @@ def _has_rows(session: Session, session_id: UUID) -> bool:
 
 
 def _next_seq(session: Session, session_id: UUID) -> int:
-    current = session.scalar(
+    current: int | None = session.scalar(
         select(func.max(ChatMessage.seq)).where(ChatMessage.session_id == session_id)
     )
     return 0 if current is None else int(current) + 1
