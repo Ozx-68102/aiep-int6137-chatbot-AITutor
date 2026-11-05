@@ -137,8 +137,22 @@ export function useSessionActions(deps: SessionActionsDeps) {
     return true;
   }
 
+  /**
+   * 置顶/取消置顶走乐观更新：点下去界面立刻生效，请求在后台发，
+   * 成功后把本地值换成服务端的权威值；失败回滚界面，并用现有的
+   * toast 服务弹出错误（成功不提示）。
+   */
   async function pinOpenSession(id: string, pinned: boolean) {
-    const {locale, setSessions, setNotice, onEnterLogin, onConnectionWarning} = depsRef.current;
+    const {locale, setSessions, onShowToast, onEnterLogin, onConnectionWarning} = depsRef.current;
+    const text = translations[locale];
+    // 先本地生效：pinnedAt 用本地时间顶上，服务端回来再换成权威值。
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === id
+          ? {...session, pinned, pinnedAt: pinned ? new Date().toISOString() : null}
+          : session,
+      ),
+    );
     try {
       const item = await pinSession(id, pinned, pinned ? new Date().toISOString() : null);
       setSessions((current) =>
@@ -147,15 +161,25 @@ export function useSessionActions(deps: SessionActionsDeps) {
         ),
       );
     } catch (error) {
+      // 回滚：pinned 恢复成点击时的样子（!pinned）。原来的 pinnedAt 没有
+      // 快照，恢复成 null——罕见的回滚场景下只影响这条会话在置顶组里的
+      // 先后，可忽略（docs/improvement-research/frontend-app.md 的 O11）。
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === id ? {...session, pinned: !pinned, pinnedAt: null} : session,
+        ),
+      );
       if (error instanceof ApiError && error.status === 401) {
+        // 登录过期：登录界面会带着服务器给的说法接住，这里不再弹 toast。
         onEnterLogin(error.detail);
         return;
       }
       if (connectionFailure(error)) {
+        // 连接类失败照旧走全局服务警示，保持和其他动作一致。
         onConnectionWarning();
-        return;
       }
-      setNotice(explain(error, locale, translations[locale].connectionError));
+      // 失败反馈改走 toast：菜单点完就关了，输入区上方的警示框容易被漏看。
+      onShowToast(explain(error, locale, text.connectionError));
     }
   }
 
