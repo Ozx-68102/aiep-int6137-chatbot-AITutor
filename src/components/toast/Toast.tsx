@@ -31,33 +31,38 @@ export function Toast({
   lang: string;
   onDismiss: () => void;
 }) {
-  const [closing, setClosing] = useState(false);
+  // 正在淡出的那条 toast 的 id。closing 由「closingId === 当前 id」现算：
+  // 新提示（不同 id）进来时天然就是非淡出态，不用在效果里同步复位布尔，
+  // 避开 set-state-in-effect 的级联渲染。
+  const [closingId, setClosingId] = useState<number | null>(null);
   const dismissRef = useRef(onDismiss);
   const id = toast === null ? null : toast.id;
+  const closing = id !== null && closingId === id;
 
   useEffect(() => {
     dismissRef.current = onDismiss;
   });
 
-  // 新提示（id 变化）出现：收起可能进行到一半的淡出，重新计满 3 秒。
+  // 新提示（id 变化）出现：重新计满 3 秒，到点把它标成淡出中。
   useEffect(() => {
     if (id === null) {
       return;
     }
-    setClosing(false);
     const timer = window.setTimeout(() => {
-      setClosing(true);
+      setClosingId(id);
     }, showMs);
     return () => window.clearTimeout(timer);
   }, [id]);
 
   // 淡出：动画播完再让父级清掉 toast（toast 变 null，节点随之卸载）。
+  // 两个 setState 在同一个回调里，React 18 自动批处理成一次重渲染，
+  // 不会闪一帧淡入样式。
   useEffect(() => {
     if (!closing) {
       return;
     }
     const timer = window.setTimeout(() => {
-      setClosing(false);
+      setClosingId(null);
       dismissRef.current();
     }, exitMs);
     return () => window.clearTimeout(timer);

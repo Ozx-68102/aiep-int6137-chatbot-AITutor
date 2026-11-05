@@ -171,8 +171,10 @@ function ChatApp() {
   // 各个效果的响应式依赖。
   const navigateRef = useRef(navigate);
   // 多标签页的 storage 监听只注册一次，登出处理要读到最新的 enterLoginGuarded：
-  // 走 ref，别让它成为效果依赖——和 navigateRef 同一套路。
-  const enterLoginGuardedRef = useRef(enterLoginGuarded);
+  // 走 ref，别让它成为效果依赖。初值给 null、由下面的镜像效果填上：在这里
+  // 直接读后面才声明的函数会被 React Compiler 记成「初始化期间读取」。
+  // 镜像在挂载后的第一帧就完成，storage 事件不可能比它更早到。
+  const enterLoginGuardedRef = useRef<((detail: string | null) => void) | null>(null);
   const toastCount = useRef(0);
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
@@ -322,7 +324,7 @@ function ChatApp() {
           // 随之作废，立即进入登录界面路径，不等下一次 401。已经在会话失效
           // 原地态里时横幅挂着、输入锁着，就保持原地（enterLoginGuarded 的
           // 语义），不升级成整页清空。
-          enterLoginGuardedRef.current(null);
+          enterLoginGuardedRef.current?.(null);
         }
         return;
       }
