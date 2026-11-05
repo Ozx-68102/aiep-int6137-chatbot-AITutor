@@ -18,8 +18,9 @@
  * 编辑器也能补全；词条值的类型是普通 string 时提取不出名字，params
  * 退化成宽松的 Record<string, string | number>，照常可用。
  */
-type Placeholder<T extends string> =
-  T extends `${string}{${infer Name}}${infer Rest}` ? Name | Placeholder<Rest> : never;
+type Placeholder<T extends string> = T extends `${string}{${infer Name}}${infer Rest}`
+  ? Name | Placeholder<Rest>
+  : never;
 
 export function format<T extends string>(
   template: T,

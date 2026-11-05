@@ -154,11 +154,7 @@ export function ChangePasswordPage({
             />
           </label>
           {shownError ? (
-            <p
-              className="m-0 flex items-center gap-1.5"
-              role="alert"
-              lang={shownErrorLang}
-            >
+            <p className="m-0 flex items-center gap-1.5" role="alert" lang={shownErrorLang}>
               <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
               <span>{shownError}</span>
             </p>
