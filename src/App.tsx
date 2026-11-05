@@ -599,11 +599,15 @@ function ChatApp() {
       setSendingNew(false);
       if (sessionId !== '') {
         engine.sendingRef.current.delete(sessionId);
-        engine.setPendingIds((current) => {
-          const next = new Set(current);
-          next.delete(sessionId);
-          return next;
-        });
+        // 与引擎的 finally 对齐：断线恢复已经把轮询接过去时不清 pending，
+        // 不然输入框被解锁，下一发会撞 409。
+        if (!engine.hasLivePoller(sessionId)) {
+          engine.setPendingIds((current) => {
+            const next = new Set(current);
+            next.delete(sessionId);
+            return next;
+          });
+        }
       }
     }
   }

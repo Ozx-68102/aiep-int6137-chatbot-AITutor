@@ -130,6 +130,12 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 - **读时兜底**（`_merge_current_turn`）：表里 streaming 的行，Redis 的 partial 为空或编号对不上，说明这一轮其实已经不在写了——展示层降级为 failed（不写库），页面因此出现「消息生成失败 + 重试」而不是永远的等待气泡。编号对得上的行不降级：Redis 里那份状态更新，照实合并。
 - **启动对账**（lifespan 里的 `chat_log.fail_stuck_rounds`）：单进程前提下，进程重启时不可能有「还在写」的轮次，表里所有 streaming 行必是死轮，一条 UPDATE 全标成 failed。
 
+### 轮次键 TTL 与崩溃窗口
+
+- `:status` / `:turn` / `:text` 三个轮次键的 TTL 是 `REDIS_KEY_TTL_SECONDS`（env 注入，现网 600 秒）：内容块到达（`append_chunk`）和轮次落定（`mark_finished`）会刷新；**进度帧不碰 Redis**（进度不算正文）。停止标记 `:stop` 是另一个 60 秒的短 TTL。
+- 理论边界：一轮直到 TTL 都没有任何内容块（只有进度帧或纯静默超过 600 秒），键会提前过期——单轮 409 守卫和同轮次编号幂等失效，同编号重发会走 `begin_round` 的删旧行路径重生成。实测上游最长静默约 23 秒（FastGPT 整块输出），600 秒远大于任何实测值；记录为结构边界，不是现网 bug。
+- 崩溃窗口：启动对账只清数据库、不清 Redis——崩溃后最长 600 秒内 `/partial` 仍答 200（streaming），页面会对着一轮死轮继续轮询，TTL 到期后走 404 → 读时兜底自然收敛。backlog：启动对账时顺带清 Redis 轮次键（improvement-research backend-api P16）。
+
 ## 状态词表：一个模块拥有四个词
 
 [server/src/server/turn_status.py](../server/src/server/turn_status.py) 独家拥有 `streaming` / `completed` / `failed` / `aborted` 四个词：数据库 `message.status`、Redis 的 `:status` 键、`turn_summary` 日志行的 outcome 和 done_status、流里 done 帧的 status，说的都是这四个词，一律从这里读。早先 reply_store（写完用 `finished`）和 chat_log（写完用 `completed`）各有一套、app.py 里两套并排 import 的日子结束了。

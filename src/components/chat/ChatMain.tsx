@@ -208,7 +208,10 @@ export function ChatMain({
                   const classes = bubbleClass(message.role, entering);
                   return (
                     <div key={message.id} className={`${classes.wrap} group`}>
-                      <BubbleBoundary fallbackText={textShown}>
+                      <BubbleBoundary
+                        key={`${message.id}:${message.waiting === true ? 'waiting' : 'final'}`}
+                        fallbackText={textShown}
+                      >
                         <div
                           lang={message.locale ? htmlLang[message.locale] : undefined}
                           className={classes.bubble}

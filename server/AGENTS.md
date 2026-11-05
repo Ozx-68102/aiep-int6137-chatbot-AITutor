@@ -61,4 +61,4 @@ curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
 - 配置模型和接口模型在 `server/src/server/types`
 
 ## 登录状态
-登录凭据存在名为 `login` 的 cookie 里：cookie 里放的是令牌，数据库的 `login_token` 表存它的哈希。有效期 7 天，每个带 cookie 的请求都会重新续 7 天。没登录的请求返回 401，响应顺带把这个 cookie 删掉，所以漏带 cookie 的表现是「莫名其妙被登出」，不是一个好查的报错。
+登录凭据存在名为 `login` 的 cookie 里：cookie 里放的是令牌，数据库的 `login_token` 表存它的哈希。有效期 7 天，每个带 cookie 的请求都会重新续 7 天。没登录的请求返回 401（JSON；会话类 401 带 reason 词，见 [docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md](../docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md)）。401 不删 cookie——主动清 cookie 的只有退出、控制台退出和改密路径，所以漏带 cookie 的表现是撞会话过期原地态（页面横幅 + 重新登录），不是「莫名其妙被登出」。

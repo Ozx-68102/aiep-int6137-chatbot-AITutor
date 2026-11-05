@@ -68,6 +68,7 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 - **原地态保留什么**：会话列表、消息、草稿、profile 缓存全部原样不动；输入区禁用（`inputLocked` 把 `sessionInvalid` 算进去）；输入区分隔线上方挂**常驻警示条，不可关闭**——expired 用琥珀的「有状况」语气 + 「重新登录」按钮（`logInAgain` 键），disabled 用红色出错语气、不给按钮（终态，登录也没用）。白底黑字、语义色只在图标上（[UI_WARNINGS.md](UI_WARNINGS.md) 的颜色规则）。
 - **就地重登录**：Modal 里嵌 LoginScreen 同款卡片，不清聊天页的任何状态；登录失败弹窗不关、错误留在表单里；成功走 `openAccount` 原地恢复——`resetForLogin` 把上一个登录态的在飞请求、轮询和「线程已加载」标记一次清掉，`bumpThreadRetry` 让当前会话的历史重新拉（activeId 和 auth 都没变，线程加载效果只能靠 retry 计数重新触发），然后清 `sessionInvalid`、关弹窗。
 - **其余动作的 401 出口**（侧栏、设置、改密、服务状态恢复）走 `enterLoginGuarded`：已经在原地态里时不再升级成整页清空——横幅已经挂着了，清空反而把原地态保住的东西弄丢。
+- **断线补查的 401**（轮询撞 404 后、网络恢复、重试前的 `refreshThread`）走统一的 `onAuthError` 出口：会话已过期就进原地态，不再被静默吞掉。
 - 触发靠「下一次请求吃到 401」，不是服务器主动推：`/api/events` 推送通道未做（[ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」backlog）。
 
 ## SSE 解析器（前端）
@@ -88,3 +89,4 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 - **原地态里侧栏/设置操作的 401 静默失败**：`enterLoginGuarded` 保证不清页，但那些操作本身也没成功，用户看不到单独的解释（横幅是共用的那条）。
 - **`/password` 页提交吃到 401 无可见反馈**：会话过期原地态的提示在聊天页，独立路由的改密页收不到；提交失败只留在表单错误里，不说「会话已过期」。
 - **多标签页登录态不同步**：一个标签页退出/改密，另一个要等下一次请求吃 401 才知道。等推送通道。
+- **滚动跟随只看消息列表和编辑框文本**：纯高度变化（高亮懒加载迟到、KaTeX 排版完成、思考气泡进度文本）不会重新触发贴底判定，已贴底时跟随可能悄悄脱钩；「回到底部」按钮仍可用。

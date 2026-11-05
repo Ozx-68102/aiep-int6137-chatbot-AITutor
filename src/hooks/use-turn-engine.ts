@@ -572,8 +572,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       if (thread.partial.kind === 'streaming') {
         resumePartial(sessionId, thread.messages);
       }
-    } catch {
-      // 读不到就算了，页面照常用。
+    } catch (error) {
+      // 会话过期走统一的 401 出口（和历史加载同款）；其余读不到就算了，
+      // 页面照常用。
+      if (error instanceof ApiError && error.status === 401) {
+        depsRef.current.onAuthError(error);
+      }
     }
   }
 
@@ -662,6 +666,11 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     setSessionWarning(null);
   }
 
+  /** 这个会话的轮询器还活着吗：App 侧清理与引擎 finally 对齐锁语义用。 */
+  function hasLivePoller(sessionId: string): boolean {
+    return pollers.current.has(sessionId);
+  }
+
   return {
     pendingIds,
     setPendingIds,
@@ -676,6 +685,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     clearPending,
     clearSessionWarning,
     stopPolling,
+    hasLivePoller,
     markThreadLoaded,
     shouldReloadThread,
     bumpThreadRetry,

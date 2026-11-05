@@ -232,6 +232,14 @@ class _Relay:
         # internal（我们这边出错）；正常写完为 None。
         self.done_reason: Literal["stop", "upstream", "internal"] | None = None
 
+    def sent_bytes(self) -> int:
+        """这一轮发给页面的正文字节数（UTF-8）。进度帧不算正文。
+
+        done 帧和摘要行的 bytes_sent 用它：text 是 str，直接 len() 是
+        字符数，中文回答会把字节数低报约三倍。
+        """
+        return len(self.text.encode("utf-8"))
+
 
 app = FastAPI(lifespan=_lifespan)
 
@@ -317,6 +325,7 @@ async def _session_unauthorized_response(
     return JSONResponse(
         status_code=status.HTTP_401_UNAUTHORIZED,
         content={"detail": exc.detail, "reason": exc.reason},
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -691,8 +700,9 @@ async def delete_session(
     session_id: UUID,
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
-    fastgpt = _fastgpt()
     await asyncio.to_thread(_authorize_session, session_id, login_cookie)
+    # 配置检查放在鉴权之后（同 /api/chat 的理由）。
+    fastgpt = _fastgpt()
 
     try:
         await fastgpt.delete_history(session_id)
@@ -806,8 +816,9 @@ async def update_feedback(
     回答上。没有轮次编号、或者这场会话的表里没有这一轮，都是 404——
     映射不到上游的 dataId，发过去也是打空。上游没收到是 502。
     """
-    fastgpt = _fastgpt()
     await asyncio.to_thread(_authorize_session, session_id, login_cookie)
+    # 配置检查放在鉴权之后（同 /api/chat 的理由）。
+    fastgpt = _fastgpt()
     if body.turn_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _FEEDBACK_TURN_MISSING)
     has_turn = await asyncio.to_thread(chat_log.has_turn, session_id, body.turn_id)
@@ -1061,9 +1072,11 @@ async def chat(
         len(body.message),
     )
     logger.debug("对话请求全文 %s", body.model_dump_json(by_alias=True))
-    fastgpt = _fastgpt()
 
     account_id = await asyncio.to_thread(_authorize_session, body.chat_id, login_cookie)
+    # 配置检查放在鉴权之后：未登录的请求一律 401，不能靠吃没吃到 500
+    # 探出上游配置坏没坏。
+    fastgpt = _fastgpt()
 
     # 同一个请求又来了（重复点击、页面重发）：这一轮已经登记过了，
     # 不能再开一轮，不然上游会生成两遍。
@@ -1288,7 +1301,7 @@ async def _write_round_end(
         outcome=status,
         started_at=relay.started_at,
         first_content_at=relay.first_content_at,
-        bytes_sent=len(relay.text),
+        bytes_sent=relay.sent_bytes(),
         stop_sent=relay.stop_sent,
         db_written=written,
         progress_events=relay.progress,
@@ -1399,12 +1412,12 @@ async def _sse(relay: _Relay) -> AsyncIterator[str]:
                     relay.turn_id,
                     relay.done_status,
                     relay.done_reason,
-                    len(relay.text),
+                    relay.sent_bytes(),
                 )
             break
         if item == _DONE_FRAME and not done_sent and relay.done_status is not None:
             yield _done_chunk(
-                relay.turn_id, relay.done_status, relay.done_reason, len(relay.text)
+                relay.turn_id, relay.done_status, relay.done_reason, relay.sent_bytes()
             )
             done_sent = True
         yield item
