@@ -46,19 +46,25 @@ export async function withConnectionRetry<T>(
   options?: {retry?: boolean},
 ): Promise<T> {
   const attempts = options?.retry === true ? connectionAttempts : 1;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  let attempt = 0;
+  for (;;) {
     try {
       return await run();
     } catch (error) {
       const connectionish = !(error instanceof ApiError) || error.detail === null;
-      const shouldRetry = connectionish && attempt < attempts - 1;
-      if (!shouldRetry) {
+      attempt += 1;
+      // 非连接错直接抛；连接错重试到次数用尽，最后一个也原样抛出去。
+      // 用 for(;;) 是刻意的：循环体每条路径要么 return 要么 throw，不存在
+      // 第三种出口，函数因此不需要循环后的兜底 throw。旧版在这里有一句
+      // 合成 `new ApiError(0, null)`——运行时永远执行不到，只为满足编译
+      // 器的终端检查而存在，2026-11-05 外部代码审计判定为死代码后移除；
+      // 顺带的好处是耗尽时抛出去的是真实错误对象，不是合成的空壳。
+      if (!connectionish || attempt >= attempts) {
         throw error;
       }
       await wait(connectionRetryDelayMs);
     }
   }
-  throw new ApiError(0, null);
 }
 
 /**
