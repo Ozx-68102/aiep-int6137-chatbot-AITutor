@@ -21,6 +21,7 @@ dependencies = [
     "redis>=8.1.0",
     "ruff>=0.17.2",
     "sqlalchemy>=2.1.6",
+    "starlette>=1.10.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -50,10 +51,23 @@ select = [
     "TID", # flake8-tidy-imports (TID251)
     "RET",  # flake8-return
     "ASYNC", # flake8-async
+    "ARG",  # flake8-unused-arguments
+    "RUF",  # Ruff-specific rules
+    "SIM",  # flake8-simplify
+    "ERA",  # eradicate
+]
+
+ignore = [
+    "RUF001",   # ambiguous-unicode-character-string
+    "RUF002",   # ambiguous-unicode-character-docstring
+    "RUF003",   # ambiguous-unicode-character-comment
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Use native Python 3.13 typing; do not import annotations from __future__."
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
 
 [tool.ruff.format]
 quote-style = "double"
