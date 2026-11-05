@@ -24,6 +24,7 @@ from fastapi import (
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic_core import ErrorDetails
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -353,9 +354,9 @@ def _field_name(loc: tuple[int | str, ...]) -> str:
     return ".".join(names)
 
 
-def _validation_text(error: dict[str, object]) -> str:
+def _validation_text(error: ErrorDetails) -> str:
     # 校验器自己抛的 ValueError 消息就是中文，去掉前缀直接用。
-    message = str(error["msg"]).removeprefix("Value error, ")
+    message = error["msg"].removeprefix("Value error, ")
     kind = error.get("type")
     if kind == "missing":
         return "缺少这个字段"
