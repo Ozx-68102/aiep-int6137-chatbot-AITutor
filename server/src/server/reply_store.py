@@ -5,11 +5,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
-from redis import Redis
-from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
-from redis.retry import Retry
 
+from server.infra.redis_client import get_redis
 from server.settings import load_settings
 from server.turn_status import ABORTED, COMPLETED, FAILED, STREAMING
 
@@ -21,8 +19,6 @@ logger = logging.getLogger("server.reply_store")
 _REDIS_FINISHED = "finished"
 
 _STOP_TTL_SECONDS = 60
-
-_client: Redis | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +42,7 @@ def begin_reply(chat_id: UUID, turn_id: str, question: str) -> None:
     """登记一轮：编号、提问、状态。刷新页面以后靠它把这一轮认出来。"""
     with _tolerate("begin_reply", chat_id):
         ttl = load_settings().redis_key_ttl_seconds
-        pipe = _redis().pipeline(transaction=False)
+        pipe = get_redis().pipeline(transaction=False)
         pipe.set(_status_key(chat_id), STREAMING, ex=ttl)
         pipe.delete(_text_key(chat_id))
         pipe.set(_turn_key(chat_id), _turn_value(turn_id, question), ex=ttl)
@@ -56,7 +52,7 @@ def begin_reply(chat_id: UUID, turn_id: str, question: str) -> None:
 def discard_reply(chat_id: UUID) -> None:
     """这一轮根本没开始（上游还没接上），登记的信息也一并清掉。"""
     with _tolerate("discard_reply", chat_id):
-        _redis().delete(_status_key(chat_id), _text_key(chat_id), _turn_key(chat_id))
+        get_redis().delete(_status_key(chat_id), _text_key(chat_id), _turn_key(chat_id))
 
 
 def append_chunk(chat_id: UUID, text: str) -> None:
@@ -65,54 +61,49 @@ def append_chunk(chat_id: UUID, text: str) -> None:
 
     with _tolerate("append_chunk", chat_id):
         ttl = load_settings().redis_key_ttl_seconds
-        pipe = _redis().pipeline(transaction=False)
+        pipe = get_redis().pipeline(transaction=False)
         pipe.set(_status_key(chat_id), STREAMING, ex=ttl)
         pipe.append(_text_key(chat_id), text)
         pipe.expire(_text_key(chat_id), ttl)
         pipe.execute()
 
 
+def _mark(chat_id: UUID, value: str) -> None:
+    """把状态词写成 value，顺手给文字和轮次键续命。"""
+    ttl = load_settings().redis_key_ttl_seconds
+    pipe = get_redis().pipeline(transaction=False)
+    pipe.set(_status_key(chat_id), value, ex=ttl)
+    pipe.expire(_text_key(chat_id), ttl)
+    pipe.expire(_turn_key(chat_id), ttl)
+    pipe.execute()
+
+
 def mark_finished(chat_id: UUID) -> None:
     with _tolerate("mark_finished", chat_id):
-        ttl = load_settings().redis_key_ttl_seconds
-        pipe = _redis().pipeline(transaction=False)
-        pipe.set(_status_key(chat_id), _REDIS_FINISHED, ex=ttl)
-        pipe.expire(_text_key(chat_id), ttl)
-        pipe.expire(_turn_key(chat_id), ttl)
-        pipe.execute()
+        _mark(chat_id, _REDIS_FINISHED)
 
 
 def mark_failed(chat_id: UUID) -> None:
     with _tolerate("mark_failed", chat_id):
-        ttl = load_settings().redis_key_ttl_seconds
-        pipe = _redis().pipeline(transaction=False)
-        pipe.set(_status_key(chat_id), FAILED, ex=ttl)
-        pipe.expire(_text_key(chat_id), ttl)
-        pipe.expire(_turn_key(chat_id), ttl)
-        pipe.execute()
+        _mark(chat_id, FAILED)
 
 
 def mark_aborted(chat_id: UUID) -> None:
     """用户按了停止。已经写出来的文字留着，状态改成 aborted。"""
     with _tolerate("mark_aborted", chat_id):
-        ttl = load_settings().redis_key_ttl_seconds
-        pipe = _redis().pipeline(transaction=False)
-        pipe.set(_status_key(chat_id), ABORTED, ex=ttl)
-        pipe.expire(_text_key(chat_id), ttl)
-        pipe.expire(_turn_key(chat_id), ttl)
-        pipe.execute()
+        _mark(chat_id, ABORTED)
 
 
 def store_available() -> bool:
     try:
-        return bool(_redis().ping())
+        return bool(get_redis().ping())
     except RedisError:
         return False
 
 
 def read_partial(chat_id: UUID) -> PartialReply:
     """读不通就照旧报错：页面要靠这个分清「服务器没这一轮」和「问不到服务器」。"""
-    raw_status, raw_text, raw_turn = _redis().mget(
+    raw_status, raw_text, raw_turn = get_redis().mget(
         _status_key(chat_id), _text_key(chat_id), _turn_key(chat_id)
     )
     status = _as_text(raw_status)
@@ -149,7 +140,7 @@ def request_stop(chat_id: UUID, turn_id: str) -> None:
         return
 
     with _tolerate("request_stop", chat_id):
-        _redis().set(_stop_key(chat_id), turn_id, ex=_STOP_TTL_SECONDS)
+        get_redis().set(_stop_key(chat_id), turn_id, ex=_STOP_TTL_SECONDS)
 
 
 def stop_requested(chat_id: UUID, turn_id: str) -> bool:
@@ -158,7 +149,7 @@ def stop_requested(chat_id: UUID, turn_id: str) -> bool:
         return False
 
     try:
-        value = _redis().get(_stop_key(chat_id))
+        value = get_redis().get(_stop_key(chat_id))
     except RedisError:
         logger.warning(
             "Redis 读不到 %s 的停止标记，按没有停处理", chat_id, exc_info=True
@@ -207,27 +198,6 @@ def _as_text(value: object) -> str | None:
         return value.decode()
 
     return None
-
-
-def _redis() -> Redis:
-    global _client
-    if _client is not None:
-        return _client
-
-    settings = load_settings()
-    _client = Redis(
-        host=settings.redis_host,
-        port=settings.redis_port,
-        username=settings.redis_user,
-        password=settings.redis_password.get_secret_value(),
-        decode_responses=True,
-        # Redis 不通时要马上知道。默认的连接重试会让一次失败的写入等好几秒，
-        # 半截文字是可选的，不能让它把聊天卡住。
-        socket_connect_timeout=2.0,
-        socket_timeout=2.0,
-        retry=Retry(NoBackoff(), 0),
-    )
-    return _client  # type: ignore
 
 
 def _status_key(chat_id: UUID) -> str:
