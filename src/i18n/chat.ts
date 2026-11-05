@@ -32,6 +32,7 @@ const zhCN = {
   replyStopped: '对话已停止',
   replyStopFailed: '没能停掉，这一轮还在写',
   roundBusy: '这场对话还有一条正在回答，等它答完再发',
+  waitForReply: '请等待 AI 回答完毕',
 };
 
 export type ChatCopy = typeof zhCN;
@@ -67,6 +68,7 @@ const zhTW: ChatCopy = {
   replyStopped: '對話已停止',
   replyStopFailed: '沒能停掉，這一輪還在寫',
   roundBusy: '這場對話還有一條正在回答，等它答完再發',
+  waitForReply: '請等待 AI 回答完畢',
 };
 
 const en: ChatCopy = {
@@ -100,6 +102,7 @@ const en: ChatCopy = {
   replyStopped: 'The conversation was stopped',
   replyStopFailed: 'Could not stop it — this answer is still being written',
   roundBusy: 'This chat still has an answer coming. Send again when it is done.',
+  waitForReply: 'Please wait for the AI to finish answering',
 };
 
 export const chat: Record<Locale, ChatCopy> = {'zh-CN': zhCN, 'zh-TW': zhTW, en};

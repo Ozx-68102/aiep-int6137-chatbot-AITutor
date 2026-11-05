@@ -170,8 +170,12 @@ function ChatApp() {
   const activePending = active ? engine.pendingIds.has(active.id) : false;
   // 当前会话最新的进度节点名（没有进度时 undefined）：等待气泡里显示。
   const progressText = active ? engine.progressBySession[active.id] : undefined;
-  const inputLocked = sendingNew || activePending || sessionInvalid !== null;
   const historyLocked = engine.historyLoadingId === active?.id && active.messages.length === 0;
+  // 打字和发送分开解锁（N9）：流式回答期间不再锁键盘——想到追问可以先记下来；
+  // 发送照旧等这一轮结束（sendLocked，输入框有字时给禁用的发送按钮＋提示）。
+  // 首条消息建会话中（sendingNew）和会话失效原地态仍然锁输入。
+  const inputLocked = sendingNew || sessionInvalid !== null;
+  const sendLocked = inputLocked || activePending || historyLocked;
   // 会话级的提示都在输入区分隔线上方的警示框里（聊天滚动区与输入区之间的流内节点），只有一种样子。
   const warnings: WarningItem[] = [];
   if (sessionInvalid !== null) {
@@ -775,7 +779,10 @@ function ChatApp() {
         progressText={progressText}
         draft={draft}
         inputLocked={inputLocked}
-        sendLocked={inputLocked || historyLocked}
+        sendLocked={sendLocked}
+        onWaitHint={() => {
+          showToast(text.waitForReply);
+        }}
         onDraft={setDraft}
         onSubmit={submitMessage}
         onStop={() => {

@@ -31,6 +31,7 @@ export function ChatMain({
   draft,
   inputLocked,
   sendLocked,
+  onWaitHint,
   onDraft,
   onSubmit,
   onStop,
@@ -54,6 +55,8 @@ export function ChatMain({
   draft: string;
   inputLocked: boolean;
   sendLocked: boolean;
+  /** 「请等待 AI 回答完毕」轻提示：禁用发送按钮外壳的悬停浮层和触屏点按都走它。 */
+  onWaitHint: () => void;
   onDraft: (value: string) => void;
   onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
   onStop: () => void;
@@ -418,20 +421,53 @@ export function ChatMain({
               // （isComposing），不算发送——中文打字不会误发。
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
+                if (pending) {
+                  // pending 期间 Enter 不发送：弹和禁用发送按钮同一句轻提示。
+                  // 选「给提示」而不是静默：框里正打着字，静默会像键盘坏了。
+                  onWaitHint();
+                  return;
+                }
                 formRef.current?.requestSubmit();
               }
             }}
           />
           {pending ? (
-            <button
-              type="button"
-              className="btn btn-ghost btn-square btn-sm shrink-0"
-              aria-label={text.stop}
-              title={text.stop}
-              onClick={onStop}
-            >
-              <CircleStop aria-hidden="true" />
-            </button>
+            draft.trim() === '' ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-square btn-sm shrink-0"
+                aria-label={text.stop}
+                title={text.stop}
+                onClick={onStop}
+              >
+                <CircleStop aria-hidden="true" />
+              </button>
+            ) : (
+              // pending 且输入框有字：停止按钮换成禁用的发送按钮（拍板行为）；
+              // 清空输入（全选删除）停止按钮就回来。disabled 按钮不响应鼠标
+              // 事件——悬停浮层（daisyUI tooltip）和点按提示都挂在外壳 span 上，
+              // 按钮加 pointer-events-none 让 hover/点按可靠地落到外壳。
+              <span
+                className="tooltip tooltip-top shrink-0"
+                data-tip={text.waitForReply}
+                onClick={() => {
+                  // 触屏没有悬停，浮层出不来：点按外壳用轻提示给同一句话。
+                  // 有悬停能力的设备已经有 tooltip，不再重复弹。
+                  if (window.matchMedia('(hover: none)').matches) {
+                    onWaitHint();
+                  }
+                }}
+              >
+                <button
+                  type="submit"
+                  className="btn btn-square btn-sm pointer-events-none"
+                  aria-label={text.send}
+                  disabled
+                >
+                  <Send aria-hidden="true" />
+                </button>
+              </span>
+            )
           ) : (
             <button
               type="submit"
