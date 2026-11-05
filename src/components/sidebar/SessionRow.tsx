@@ -1,5 +1,11 @@
 import {Ellipsis, Pin} from 'lucide-react';
-import {type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, useEffect, useRef, useState} from 'react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {createPortal} from 'react-dom';
 import {translations} from '../../i18n/index.ts';
 import {sessionTitle} from '../../session/empty.ts';

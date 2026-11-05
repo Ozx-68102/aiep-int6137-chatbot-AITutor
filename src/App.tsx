@@ -26,7 +26,12 @@ import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast} from './components/toast/Toast.tsx';
 import {translations} from './i18n/index.ts';
-import {clearCachedProfile, readCachedAvatarData, readCachedProfile, saveCachedProfile} from './session/profile-cache.ts';
+import {
+  clearCachedProfile,
+  readCachedAvatarData,
+  readCachedProfile,
+  saveCachedProfile,
+} from './session/profile-cache.ts';
 import type {CachedProfile} from './session/profile-cache.ts';
 import {clearAllDrafts, clearDraft, readDraft, saveDraft} from './session/drafts.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
