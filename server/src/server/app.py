@@ -1551,8 +1551,8 @@ async def _stop_upstream(session_id: UUID) -> None:
         return
     try:
         stopped = await fastgpt.stop_chat(session_id)
-    except Exception:
-        logger.error("上游停止失败 %s", session_id, exc_info=True)
+    except Exception as exc:
+        logger.error("上游停止失败 %s：%s", session_id, exc, exc_info=True)
         return
     logger.info(
         "上游停止 %s：%s", session_id, "上游收到了" if stopped else "上游没回成功"
@@ -1844,8 +1844,8 @@ async def _sweep_expired_tokens_loop() -> None:
     while True:
         try:
             await asyncio.to_thread(_sweep_expired_tokens)
-        except Exception:
-            logger.warning("清扫过期令牌失败", exc_info=True)
+        except Exception as exc:
+            logger.warning("清扫过期令牌失败：%s", exc, exc_info=True)
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
