@@ -15,6 +15,7 @@ _client: FastGPT | None = None
 
 
 def set_client(client: FastGPT | None) -> None:
+    global _client
     _client = client
 
 
