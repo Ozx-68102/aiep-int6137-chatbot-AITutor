@@ -126,7 +126,7 @@
 
 ### O1. 流式 chunk 节流合批（rAF），消掉 O(n²) 的 Markdown 重解析
 
-> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。
+> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。**2026-11-05 补记**：DSL 分析确认上游无法逐字（审查管线使然，见 docs/FASTGPT_API.md「流式行为」），「上游支持逐字」这个条件永远不会满足；前端「打字机」放映已立项（待开工）——放映按块吐＋节流，若不够用再捡起本条。
 
 - **位置**：`/src/hooks/use-turn-engine.ts` L420-428（`streamReply` 的 onDelta 每 chunk 直接 `applyStreamText`）→ L149（每 chunk 一次 `updateSession`，全量 map messages）；`/src/components/chat/MarkdownText.tsx` L49（memo 只救「没变的消息」，流式那条每个 chunk 都全量重解析整段 Markdown + KaTeX）。
 - **现状**：一个 chunk 一次 setState、一次全树渲染、一次对**当前全部已收文本**的 remark→rehype→KaTeX 管线。回答长 5000 字、chunk 平均 20 字时，约 250 次渲染 × 平均半程长度 ≈ 60 万字规模的重复解析，中低端设备（学生用平板）会明显掉帧。
@@ -163,7 +163,7 @@
 
 ### O2. 消息条目级 memo + 流式文本与 sessions state 解耦
 
-> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。
+> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。**2026-11-05 补记**：DSL 分析确认上游无法逐字（审查管线使然，见 docs/FASTGPT_API.md「流式行为」），「上游支持逐字」这个条件永远不会满足；前端「打字机」放映已立项（待开工）——放映按块吐＋节流，若不够用再捡起本条。
 
 - **位置**：`/src/App.tsx` L82（`sessions` 是顶层 state）、L149 `updateSession`；`/src/components/chat/ChatMain.tsx` L68-146（每渲染 map 全部消息，气泡无 memo）；grep 确认全仓库只有 `MarkdownText` 一个 memo，Sidebar/SessionRow 都没有。
 - **现状**：`applyStreamText` 改的是顶层 `sessions`，于是**每个 chunk 重渲染整个 ChatApp**：Sidebar 的几十行会话、SettingsModal、Toast 全部陪跑；ChatMain 里每条历史消息的 wrap/bubble DOM 结构也重建（MarkdownText 因 text 未变会跳过重解析，但 React 调和本身照做）。
