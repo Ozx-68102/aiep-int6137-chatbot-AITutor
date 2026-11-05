@@ -557,23 +557,42 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (outcome === 'not-started') {
-        // 请求没落地，服务器上没有这一轮：空的气泡去掉，连不上归横幅报，
-        // 重发的旧轮放回原样。
-        removeTurnAnswer(sessionId, turnId);
+        // 请求没落地，服务器上没有这一轮。这一轮不能悬空——用户永远要有
+        // 下一次机会：连不上照旧归横幅报，轮次级重试入口按场景保住。
+        endPresent(assistantId);
+        if (onRollback !== undefined) {
+          // 重试/编辑重发没发出去：空的气泡去掉，旧轮放回原样——旧轮的
+          // 状态提示和重试按钮跟着回来。
+          removeTurnAnswer(sessionId, turnId);
+          onRollback();
+        } else {
+          // 首发没落地：空气泡留下并标成 failed——气泡带着 turnId，
+          // 脚注里就给得出重试按钮（P2）。
+          markTurnStatus(sessionId, turnId, 'failed');
+        }
         depsRef.current.setNotice(textRef.current.connectionError);
-        onRollback?.();
       }
     } catch (error) {
-      removeTurnAnswer(sessionId, turnId);
-      // 发送没成功：重发的旧轮放回原样（请求几乎可以肯定没落地；万一落了，
-      // 下一次读线程会用服务器的版本盖掉）。
-      onRollback?.();
+      endPresent(assistantId);
       if (error instanceof ApiError && error.status === 401) {
         // 发送时被踢：发送前草稿已经清了，这句提问存起来，
         // 登录后放回输入框。
+        removeTurnAnswer(sessionId, turnId);
+        onRollback?.();
         saveUnsent(question);
         depsRef.current.onAuthError(error);
         return;
+      }
+      if (onRollback !== undefined) {
+        // 重发没成功：旧轮放回原样（请求几乎可以肯定没落地；万一落了，
+        // 下一次读线程会用服务器的版本盖掉）。重试按钮跟着旧轮脚注回来，
+        // 撞上「连不上」这一轮也不悬空（P1）。
+        removeTurnAnswer(sessionId, turnId);
+        onRollback();
+      } else {
+        // 首发没成功：空气泡留下并标成 failed——气泡带着 turnId，
+        // 脚注里给得出重试按钮，这一轮不悬空。
+        markTurnStatus(sessionId, turnId, 'failed');
       }
       if (connectionFailure(error)) {
         depsRef.current.onConnectionWarning();
