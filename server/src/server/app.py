@@ -24,6 +24,7 @@ from fastapi import (
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic_core import ErrorDetails
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -296,7 +297,7 @@ app.add_middleware(_RefreshLoginCookie)
 
 
 @app.exception_handler(RequestValidationError)
-async def _validation_error(request: Request, exc: RequestValidationError) -> Response:
+async def _validation_error(_request: Request, exc: RequestValidationError) -> Response:
     """422 也回一句中文。
 
     页面只认 {"detail": "字符串"}：Pydantic 默认的 422 正文是数组，
@@ -323,7 +324,7 @@ async def _unhandled_error(request: Request, exc: Exception) -> Response:
 
 @app.exception_handler(_SessionUnauthorized)
 async def _session_unauthorized_response(
-    request: Request, exc: _SessionUnauthorized
+    _request: Request, exc: _SessionUnauthorized
 ) -> Response:
     """会话类 401 的响应体：{"detail": 中文句子, "reason": 词表词}。
 
@@ -361,9 +362,9 @@ def _field_name(loc: tuple[int | str, ...]) -> str:
     return ".".join(names)
 
 
-def _validation_text(error: dict[str, object]) -> str:
+def _validation_text(error: ErrorDetails) -> str:
     # 校验器自己抛的 ValueError 消息就是中文，去掉前缀直接用。
-    message = str(error["msg"]).removeprefix("Value error, ")
+    message = error["msg"].removeprefix("Value error, ")
     kind = error.get("type")
     if kind == "missing":
         return "缺少这个字段"
@@ -474,46 +475,38 @@ def admin_reset_password(
     return AdminPasswordResetResponse(username=body.username, password=password)
 
 
+def _logout_response(cookie_name: str, cookie_value: str | None) -> Response:
+    """退出的共用本体：吊销令牌；吊不掉按会话过期回 401，吊掉了回 204。"""
+    with db_session() as session:
+        if not _revoke_login_token(session, cookie_value):
+            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
+            if cookie_value:
+                # 令牌已死时的退出也是会话过期语义：带 reason；匿名请求维持现状。
+                content["reason"] = _REASON_EXPIRED
+            result = JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED, content=content
+            )
+            _clear_cookie(result, cookie_name)
+            return result
+
+    result = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_cookie(result, cookie_name)
+    return result
+
+
 @app.post("/api/admin/logout", status_code=status.HTTP_204_NO_CONTENT)
 def admin_logout(
     admin_cookie: Annotated[str | None, Cookie(alias=_ADMIN_COOKIE_NAME)] = None,
 ) -> Response:
     """控制台退出：镜像 /api/logout，只是 cookie 换成 admin_login。"""
-    with db_session() as session:
-        if not _revoke_login_token(session, admin_cookie):
-            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
-            if admin_cookie:
-                content["reason"] = _REASON_EXPIRED
-            result = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content=content
-            )
-            _clear_cookie(result, _ADMIN_COOKIE_NAME)
-            return result
-
-    result = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_cookie(result, _ADMIN_COOKIE_NAME)
-    return result
+    return _logout_response(_ADMIN_COOKIE_NAME, admin_cookie)
 
 
 @app.post("/api/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     login_cookie: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> Response:
-    with db_session() as session:
-        if not _revoke_login_token(session, login_cookie):
-            content: dict[str, str] = {"detail": _LOGIN_REQUIRED}
-            if login_cookie:
-                # 令牌已死时的退出也是会话过期语义：带 reason；匿名请求维持现状。
-                content["reason"] = _REASON_EXPIRED
-            result = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content=content
-            )
-            _clear_cookie(result, _COOKIE_NAME)
-            return result
-
-    result = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_cookie(result, _COOKIE_NAME)
-    return result
+    return _logout_response(_COOKIE_NAME, login_cookie)
 
 
 @app.get("/api/profile")
@@ -551,7 +544,8 @@ def change_password(
     （/api/login 同一个道理）。请求体里有密码，日志只记账号 id。
     管理员改自己的密码也走这里：聊天页和控制台共用这一个端点。
     """
-    client_ip = request.client.host if request.client else "unknown"
+    client = request.client
+    client_ip = client.host if client else "unknown"
 
     with db_session() as session:
         account = _password_account(session, login_cookie, admin_cookie)
