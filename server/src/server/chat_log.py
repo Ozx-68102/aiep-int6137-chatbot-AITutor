@@ -122,7 +122,7 @@ def fail_stuck_rounds() -> int:
 
     单进程前提（docs/CHAT_STREAM_PROTOCOL.md「单进程前提」一节）：进程重启时
     不可能有「还在写」的轮次——那些行必是死轮（写它的进程已经随旧进程
-    死了）。读时兜底（app._merge_current_turn）同样会把它们降级展示，
+    死了）。读时兜底（history.merge_current_turn）同样会把它们降级展示，
     这里把库一次清干净。返回受影响的行数；写库失败只记警告。
     """
     try:
