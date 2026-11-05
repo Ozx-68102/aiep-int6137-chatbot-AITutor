@@ -36,6 +36,8 @@
 
 ### N2. 消息分页接口（新增）
 
+> **暂缓（2026-11-05 拍板）**：现在不做——当前用量离需要分页很远。触发条件：单场会话的消息数涨到页面加载可感变慢（几百条量级），或维护者点名要分页/搜索。届时与 N3、O10 及前端的会话列表搜索/日期分组一并立项。
+
 - **位置**：`app.py:645-663`（`read_session_messages`）、`chat_log.py:122-145`（`read_messages`）。
 - **现状**：`GET /api/sessions/{id}/messages` 一次返回整场会话全部消息，`read_messages` 全量 `SELECT ... ORDER BY seq`，无 limit。
 - **影响**：长会话（学生一学期用下来几百轮很正常）响应体线性膨胀，每次刷新/切会话都全量传输、全量 Pydantic 序列化；`HistoryResponse.total` 只是 len，没有游标。
@@ -59,6 +61,8 @@
 - **工作量**：S。
 
 ### N3. 消息搜索接口（新增）
+
+> **暂缓（2026-11-05 拍板）**：随 N2（消息分页）同批暂缓，触发条件见 N2 注记。
 
 - **位置**：新端点；数据在 `message` 表（`db/models.py:104-137`）。
 - **现状**：没有任何搜索能力。学生找「上次讲二次函数的那段」只能一场一场翻。我们自己的 `message` 表已经是页面历史的唯一事实来源（chat_log.py 模块注释写明分工），搜索的数据基础是现成的。
@@ -191,6 +195,8 @@
 > **已实现（2026-11-05）**：编辑重发复用 POST /api/chat + retryOf，不新增端点；悬空提问改拿我们自己 message 表里读出的提问原文比对（MESSAGE_ACTIONS.md 方案①，chat_log.read_question），接口没加字段。功能描述见 docs/MESSAGE_ACTIONS.md。调研原文以 LayerFS 历史为准。
 
 ### N10. 会话创建的幂等（新增）
+
+> **暂缓（2026-11-05 拍板）**：前端已不再盲目重试建会话类 POST（frontend-app P1 注记），重复建的现实风险已被挡住；幂等键属跨栈的锦上添花根治，维护者拍板先记着，回头跨栈批次再做。
 
 - **位置**：`app.py:527-541`（`create_session`，id 由服务端 `uuid4` 生成）、`types/api.py:26-27`（`SessionCreate` 只有 title）。
 - **现状**：`POST /api/chat` 有 turn_id 幂等（CHAT_STREAM 表扬过的那条），但 `POST /api/sessions` 没有：网络抖动/双击下客户端重发会建出两个空会话。删除接口有 `delHistory` 幂等兜底（对不存在的 chatId 也返回 200），创建没有对应机制。
@@ -376,6 +382,8 @@
 - **工作量**：S。
 
 ### O10. `/api/sessions` 返回裸数组、无分页、置顶排序在前端
+
+> **暂缓（2026-11-05 拍板）**：随 N2/N3（会话规模化）同批暂缓；会话数涨到加载可感变慢再回头看。
 
 - **位置**：`app.py:518-525`（`list_sessions` 直接返回 `list[SessionItem]`）、`db/models.py:87`（`account.sessions` 关系按 `created_at` 排序）。
 - **现状**：全项目其他列表接口都返回对象（`AdminAccountsResponse`、`HistoryResponse`），只有会话列表是裸 JSON 数组；没有分页；`pinned`/`pinned_at` 的「置顶在前、按置顶时间排」逻辑只能前端做；排序是 `created_at` 升序（老会话在前），前端还得自己反转。登录响应（`LoginResponse.sessions`）也整个内嵌同一份列表。
@@ -595,6 +603,8 @@
 - **工作量**：S。
 
 ### P13. `logout` 对无效令牌返回 401，不幂等（新增）
+
+> **拍板不改（2026-11-05）**：现状是故意设计——吊不掉时按会话过期语义回 401 带 reason（routes/auth.py 注释写明「令牌已死时的退出也是会话过期语义」）；前端已经接住：退出调用撞 401 时静默进未登录态、不弹错（App.tsx 退出函数的 catch 分支）。后端改成「一律回成功」用户可见差异为零，维护者拍板不改，本条关闭。
 
 - **位置**：`app.py:363-381`（`logout`）、`app.py:342-361`（`admin_logout`）。
 - **现状**：令牌已过期/已吊销时点退出会得到 401 +「未登录」+ 清 cookie。前端把 401 当「被踢」处理的路径（ACCOUNT_MANAGEMENT 里那套 expired 状态机）可能被一次主动退出误触发；HTTP 语义上 DELETE 型操作应当幂等。

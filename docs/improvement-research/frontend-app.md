@@ -37,6 +37,8 @@
 
 ### N2. 会话列表搜索框
 
+> **暂缓（2026-11-05 拍板）**：随后端「会话规模化」（backend-api N2/N3/O10）同批暂缓，触发条件见那边的注记。
+
 - **位置**：`/src/components/sidebar/Sidebar.tsx`；`/src/i18n.ts` 加一个 key。
 - **现状**：侧栏只有「新建」按钮 + 全量平铺列表，会话一多只能滚动找。
 - **影响**：学生用了一个学期后列表几十条，找旧会话费时；这是聊天产品侧栏的标配能力。
@@ -71,6 +73,8 @@
 - **工作量**：S。
 
 ### N3. 会话列表按日期分组、显示时间
+
+> **暂缓（2026-11-05 拍板）**：随后端「会话规模化」（backend-api N2/N3/O10）同批暂缓，触发条件见那边的注记。
 
 - **位置**：`/src/api/session.ts`（`sessionFromItem`）、`/src/type/chat.ts`（`Session` 类型）、`/src/components/sidebar/Sidebar.tsx`、`/src/i18n.ts`。
 - **现状**：`SessionItem.created_at` 已经被运行时校验（`isSessionItem` 里 `typeof value.created_at === 'string'`），但 `sessionFromItem` 直接把它丢掉了——数据到手却没带上界面。列表只有「置顶在前、其余按创建时间倒序」，没有任何时间信息。
