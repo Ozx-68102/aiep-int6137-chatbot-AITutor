@@ -1,4 +1,4 @@
-import {type SubmitEvent, useEffect, useRef, useState} from 'react';
+import {lazy, Suspense, type SubmitEvent, useEffect, useRef, useState} from 'react';
 import {useDocumentMeta} from './hooks/use-document-meta.ts';
 import {narrowScreenNow, useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
@@ -14,7 +14,6 @@ import {logout, readProfile} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {createSession, emptySession, listSessions, login, sessionsFromList} from './api/session.ts';
 import type {LoginResult} from './api/session.ts';
-import {AdminConsole} from './components/admin/AdminConsole.tsx';
 import {ChatMain} from './components/chat/ChatMain.tsx';
 import type {WarningItem} from './components/chat/WarningBox.tsx';
 import {LoginScreen} from './components/login/LoginScreen.tsx';
@@ -47,21 +46,85 @@ import type {Message, Session} from './type/chat.ts';
 import {htmlLang, isLocale, localeFromSystem, type Locale} from './type/locale.ts';
 
 /**
+ * /admin 懒加载（O2）：AdminConsole 和它的子组件随动态 import 单独成块，
+ * 访问控制台才下载，聊天侧的用户不背管理员代码。分块由动态 import 自然
+ * 产生，vite.config.ts 不用动。AdminConsole 是命名导出，lazy 要 default
+ * 形状，这里包一层。
+ */
+const AdminConsole = lazy(() =>
+  import('./components/admin/AdminConsole.tsx').then((module) => ({
+    default: module.AdminConsole,
+  })),
+);
+
+// 分块加载失败的提示一次页面会话只弹一条：发布骑跨（旧页面要旧分块、
+// 服务器已换新）会让每个动态 import 都失败，不设这个标记会反复弹。
+// 模块级变量跨组件挂卸存活，刷新页面即复位——刷新后就拿到新分块了，
+// 一次就够。
+let chunkFailureNoticed = false;
+
+/**
+ * 接住动态分块加载失败（发布骑跨窗口）：Vite 对动态 import 失败统一派
+ * vite:preloadError，这里弹 toast 提示刷新页面拿新版本。刻意渲染在
+ * PageBoundary 外面：/admin 的分块加载失败时，lazy 的 rejection 会把整页
+ * 送进错误边界，toast 得留在边界外才看得见。
+ * 语言不属于任何页面状态：跟着本地记的资料走，读不到随系统（PageBoundary
+ * 同款做法）；失败瞬间取一次快照，不随后续切语言联动。
+ */
+function ChunkFailureToast() {
+  const [toast, setToast] = useState<(ToastItem & {lang: string}) | null>(null);
+  useEffect(() => {
+    function onPreloadError() {
+      if (chunkFailureNoticed) {
+        return;
+      }
+      chunkFailureNoticed = true;
+      const locale = readCachedProfile()?.locale ?? localeFromSystem();
+      setToast({id: 1, text: translations[locale].newVersionRefresh, lang: htmlLang[locale]});
+    }
+    window.addEventListener('vite:preloadError', onPreloadError);
+    return () => {
+      window.removeEventListener('vite:preloadError', onPreloadError);
+    };
+  }, []);
+  return (
+    <Toast
+      toast={toast}
+      lang={toast?.lang ?? 'en'}
+      onDismiss={() => {
+        setToast(null);
+      }}
+    />
+  );
+}
+
+/**
  * 路由用真实路径：/admin 整页渲染管理员控制台，其余地址交给聊天侧
  * （ChatApp），由它再认 /、/chat/:id、/password 和 /login；不带 id 的
  * /chat 和未知路径一律归位到根路径。控制台是完全独立的一页——聊天侧
- * 的会话和用户信息引导流程一概不跑（ChatApp 压根不挂载）。
+ * 的会话和用户信息引导流程一概不跑（ChatApp 压根不挂载）。懒加载分块
+ * 下载期间给一个与控制台自己的 checking 占位同款的空白占位，不引入新文案。
  */
 export default function App() {
   return (
-    <PageBoundary>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/admin" element={<AdminConsole />} />
-          <Route path="/*" element={<ChatApp />} />
-        </Routes>
-      </BrowserRouter>
-    </PageBoundary>
+    <>
+      <PageBoundary>
+        <BrowserRouter>
+          <Routes>
+            <Route
+              path="/admin"
+              element={
+                <Suspense fallback={<div className="h-full bg-base-200" />}>
+                  <AdminConsole />
+                </Suspense>
+              }
+            />
+            <Route path="/*" element={<ChatApp />} />
+          </Routes>
+        </BrowserRouter>
+      </PageBoundary>
+      <ChunkFailureToast />
+    </>
   );
 }
 

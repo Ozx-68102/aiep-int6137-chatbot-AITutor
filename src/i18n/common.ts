@@ -14,6 +14,7 @@ const zhCN = {
   actionFailed: '操作没成功，请再试一次',
   pageError: '页面出了点问题',
   refreshPage: '刷新页面',
+  newVersionRefresh: '有新版本了，刷新页面即可',
 };
 
 export type CommonCopy = typeof zhCN;
@@ -26,6 +27,7 @@ const zhTW: CommonCopy = {
   actionFailed: '操作沒成功，請再試一次',
   pageError: '頁面出了點問題',
   refreshPage: '重新整理頁面',
+  newVersionRefresh: '有新版本了，重新整理頁面即可',
 };
 
 const en: CommonCopy = {
@@ -36,6 +38,7 @@ const en: CommonCopy = {
   actionFailed: "That didn't work. Please try again.",
   pageError: 'Something went wrong',
   refreshPage: 'Reload page',
+  newVersionRefresh: 'A new version is available — reload the page.',
 };
 
 export const common: Record<Locale, CommonCopy> = {'zh-CN': zhCN, 'zh-TW': zhTW, en};
