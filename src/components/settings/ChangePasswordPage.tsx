@@ -1,6 +1,6 @@
 import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
-import {translations} from '../../i18n/index.ts';
+import {format, translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {PasswordStrength} from './PasswordStrength.tsx';
 import {isWeakPassword} from './password-strength.ts';
@@ -19,20 +19,32 @@ function allowedChars(value: string): string {
   return value.replace(/[^\x21-\x7E]/g, '');
 }
 
+/** 聊天侧（学生）账号的密码最小长度：跟后端 min_length_for_role('chat') 同一道门槛。 */
+const MIN_PASSWORD_LENGTH = 6;
+/** 密码最大长度：跟后端 check_password_policy 同一道门槛。 */
+const MAX_PASSWORD_LENGTH = 128;
+
+/** 客户端硬门槛的拒绝原因；显示文案按语言本地化（auth 域的两个键）。 */
+type PasswordRejection = 'tooShort' | 'tooCommon';
+
 /**
- * 客户端硬门槛，提交前拦截：消息跟后端 check_password_policy 一字不差
+ * 客户端硬门槛，提交前拦截：门槛语义跟后端 check_password_policy 一字不差
  * （分工见 docs/ACCOUNT_MANAGEMENT.md，前端是提示、后端是门槛；能在本地
  * 判定的提前拦掉，省一个来回，后端仍然会再拦一道）。这个页面是聊天侧
  * 学生用的，最小长度 6。空格和非 ASCII 在输入时就被 allowedChars 滤掉了，
  * 到不了这里；含用户名由后端拦，它的消息经 error 原样显示。
  * 弱口令拒绝名单从 password-strength.ts 导入，不在这里再写一份。
+ *
+ * 返回的是拒绝原因，不是现成文案：文案在 i18n 的 auth 域里三语齐
+ * （passwordTooShort / passwordTooCommon），简中文案仍与后端拒绝消息
+ * 逐字一致，{min}/{max} 占位符由 format 填。
  */
-function newPasswordRejected(password: string): string | null {
-  if (password.length < 6 || password.length > 128) {
-    return '密码长度要在 6 到 128 之间';
+function newPasswordRejected(password: string): PasswordRejection | null {
+  if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+    return 'tooShort';
   }
   if (isWeakPassword(password)) {
-    return '这个密码太常见了，换一个';
+    return 'tooCommon';
   }
   return null;
 }
@@ -67,6 +79,10 @@ export function ChangePasswordPage({
   const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
   // 门槛错误优先于可能残留的服务端错误：它是最近一次提交尝试的结果。
   const shownError = gateError ?? error;
+  // 门槛错误和连接兜底都是本地三语文案，按界面语言标注；其余的服务端
+  // 消息（detail）固定是简体中文，标 zh-Hans 让浏览器按中文字体渲染。
+  const localizedError = shownError === gateError || shownError === text.connectionError;
+  const shownErrorLang = localizedError ? htmlLang[locale] : 'zh-Hans';
 
   return (
     <main className="flex h-full items-center justify-center bg-base-200 px-4">
@@ -78,10 +94,16 @@ export function ChangePasswordPage({
           if (blocked) {
             return;
           }
-          // 客户端硬门槛：本地就能判定的拒绝，不发请求。
+          // 客户端硬门槛：本地就能判定的拒绝，不发请求；文案按语言本地化。
           const rejected = newPasswordRejected(newPassword);
-          if (rejected !== null) {
-            setGateError(rejected);
+          if (rejected === 'tooShort') {
+            setGateError(
+              format(text.passwordTooShort, {min: MIN_PASSWORD_LENGTH, max: MAX_PASSWORD_LENGTH}),
+            );
+            return;
+          }
+          if (rejected === 'tooCommon') {
+            setGateError(text.passwordTooCommon);
             return;
           }
           setGateError(null);
@@ -135,7 +157,7 @@ export function ChangePasswordPage({
             <p
               className="m-0 flex items-center gap-1.5"
               role="alert"
-              lang={shownError === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+              lang={shownErrorLang}
             >
               <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
               <span>{shownError}</span>
