@@ -386,7 +386,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   }
 
   function markPresent(messageId: string) {
-    setPresentIds((current) => (current.has(messageId) ? current : new Set(current).add(messageId)));
+    setPresentIds((current) =>
+      current.has(messageId) ? current : new Set(current).add(messageId),
+    );
   }
 
   /** 放映收尾（组件放完）或取消（停止、断流、发送失败）：id 移出登记。幂等。 */

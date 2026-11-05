@@ -38,8 +38,9 @@ function tickCount(length: number): number {
  * 文本拿到的都是全文。读屏不逐字：渐显部分 aria-hidden，另配一个 sr-only
  * 全文节点，辅助技术一次拿到全文；放映结束两层撤掉，DOM 与现状一致。
  *
- * present 被父层撤下（用户点停止、轮次以断流/中止收场）时立刻全显；
- * 历史消息、刷新恢复、断线补回的回答根本不会进 presentIds，天然全显。
+ * present 被父层撤下（用户点停止、轮次以断流/中止收场）时立刻全显——撤销
+ * 直接从 props 派生，不走状态翻转；历史消息、刷新恢复、断线补回的回答根本
+ * 不会进 presentIds，天然全显。
  */
 export function TypewriterText({
   id,
@@ -65,10 +66,13 @@ export function TypewriterText({
 }) {
   // 只在首渲染判定一次：本轮刚收到、从没放映过、且没开减弱动态效果才开演。
   // 组件重渲染不重跑这个判定，滚动、切标签页回来都不会重播。
-  const [presenting, setPresenting] = useState(
+  // 引擎的放映标记和全文在同一批 setState 里落地，挂载时 present 一定已就位；
+  // 万一晚到一帧，下面的销号效果会把它收敛成「不放映、直接全显」，不追帧。
+  const [running, setRunning] = useState(
     () => present && !everStarted.has(id) && !prefersReducedMotion(),
   );
   const [revealed, setRevealed] = useState(0);
+  const revealedRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   // 异步回调跨渲染拿最新值：统一走 ref 镜像（渲染期间写 ref 是被禁止的）。
   const textRef = useRef(text);
@@ -80,6 +84,10 @@ export function TypewriterText({
     onRevealRef.current = onReveal;
   });
 
+  // 放映中 = 自己还在跑 且 父层没撤销。撤销（停止/中止/断流）由 present 直接
+  // 派生：present 变 false 的这一帧就全显，定时器随效果清理停掉。
+  const presenting = running && present;
+
   function stopTimer() {
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
@@ -87,8 +95,9 @@ export function TypewriterText({
     }
   }
 
-  // 放映定时器。StrictMode 下效果会「跑—清—再跑」：进度在 revealed 状态里，
-  // 重跑只是接着吐，不会从头重播。
+  // 放映定时器：吐字推进和收尾都在 interval 回调里做（事件驱动的 setState，
+  // 不在效果体内同步 setState）。StrictMode 下效果「跑—清—再跑」：进度在
+  // revealed 状态和 ref 里，重跑只是接着吐，不会从头重播。
   useEffect(() => {
     if (!presenting) {
       return;
@@ -97,48 +106,37 @@ export function TypewriterText({
     timerRef.current = window.setInterval(() => {
       const full = textRef.current;
       const step = Math.max(1, Math.ceil(full.length / tickCount(full.length)));
-      setRevealed((current) => Math.min(full.length, current + step));
+      const next = Math.min(full.length, revealedRef.current + step);
+      revealedRef.current = next;
+      setRevealed(next);
+      if (next >= full.length) {
+        // 吐到当前全文末尾就收尾（全显、销号）。收尾之后文本再变长（上游
+        // 分块、极罕见）直接全显，不二次放映——「每条消息只放映一次」优先。
+        stopTimer();
+        setRunning(false);
+        onEndRef.current(id);
+      }
     }, TICK_MS);
     return () => {
       stopTimer();
     };
   }, [presenting, id]);
 
-  // 每拍：通知滚动容器贴底跟随；吐到当前全文末尾就收尾（全显、销号）。
-  // 收尾之后文本再变长（上游分块、极罕见）就直接全显，不会二次放映——
-  // 「每条消息只放映一次」优先于「放映到最后一个字」。
+  // 每拍长高：通知滚动容器贴底跟随（消息数组不变，外面的滚动效果指望不上）。
   useEffect(() => {
     if (!presenting) {
       return;
     }
     onRevealRef.current();
-    if (revealed >= textRef.current.length) {
-      stopTimer();
-      setPresenting(false);
+  }, [revealed, presenting]);
+
+  // 挂着号却没在放映的几种情况统一销号，别让 id 留在引擎的集合里：
+  // 放映过一半切走再回来（真重挂载）、减弱动态效果的用户、刚收尾还没等到
+  // 父层更新的一帧。onEnd 幂等，重复调用无害。
+  useEffect(() => {
+    if (present && !presenting) {
       onEndRef.current(id);
     }
-  }, [revealed, presenting, id]);
-
-  // 父层撤销（放映中点了停止、轮次以中止/断流收场）：立刻全显。
-  useEffect(() => {
-    if (presenting && !present) {
-      stopTimer();
-      setPresenting(false);
-    }
-  }, [presenting, present]);
-
-  // 挂着号却不该放映的两种情况都在这儿收拾：
-  // 1) 真重挂载（放映过一半切走再回来）或减弱动态效果的用户——不放映，销号；
-  // 2) present 标记晚于挂载一帧到达（理论上与文本同一批渲染，这里兜底）——开演。
-  useEffect(() => {
-    if (!present || presenting) {
-      return;
-    }
-    if (everStarted.has(id) || prefersReducedMotion()) {
-      onEndRef.current(id);
-      return;
-    }
-    setPresenting(true);
   }, [present, presenting, id]);
 
   if (!presenting) {
