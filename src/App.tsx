@@ -358,7 +358,6 @@ function ChatApp() {
     draftRef.current = draft;
     sessionInvalidRef.current = sessionInvalid;
     navigateRef.current = navigate;
-    enterLoginGuardedRef.current = enterLoginGuarded;
     routingRef.current = routing;
     serviceRef.current = service;
     engineRef.current = engine;
@@ -515,6 +514,13 @@ function ChatApp() {
     }
     enterLogin(detail);
   }
+
+  // enterLoginGuarded 的 ref 镜像单独放在它的声明之后：React Compiler 不接受
+  // 在函数声明之前把它捕获进任何闭包（会报「初始化期间读取」），而上面的大
+  // 镜像效果位于声明之前。storage 监听只读 ref，不直接捕获函数。
+  useEffect(() => {
+    enterLoginGuardedRef.current = enterLoginGuarded;
+  });
 
   function updateSession(sessionId: string, change: (session: Session) => Session) {
     setSessions((current) =>
