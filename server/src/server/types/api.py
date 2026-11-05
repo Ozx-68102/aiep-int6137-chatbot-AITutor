@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from server.turn_status import DoneReason, DoneStatus
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
@@ -125,8 +127,8 @@ class TurnDoneEvent(BaseModel):
     """
 
     turn_id: str
-    status: Literal["completed", "aborted", "failed"]
-    reason: Literal["stop", "upstream", "internal"] | None = None
+    status: DoneStatus
+    reason: DoneReason | None = None
     bytes_sent: int
 
 
