@@ -62,7 +62,7 @@ export function AdminConsole() {
           // 没登录：显示登录表单，不算错误。
           return;
         }
-        setLoginError(explain(error, translations[locale].connectionError));
+        setLoginError(explain(error, locale, translations[locale].connectionError));
       },
     );
     return () => {
@@ -80,8 +80,9 @@ export function AdminConsole() {
       await adminLogin(username, password);
       setAccounts(await fetchAdminAccounts());
     } catch (error) {
-      // 401（密码不对）、403（这个账号不是管理员）都带着中文 detail，照实显示。
-      setLoginError(explain(error, text.connectionError));
+      // 401（密码不对）、403（这个账号不是管理员）都带着中文 detail：简中
+      // 原样显示，英文/繁中优先按状态码映射（裁决规则见 src/api/failure.ts）。
+      setLoginError(explain(error, locale, text.connectionError));
     } finally {
       setLoginBusy(false);
     }
@@ -103,7 +104,7 @@ export function AdminConsole() {
         enterLoginForm(null);
         return;
       }
-      setLogoutError(explain(error, text.connectionError));
+      setLogoutError(explain(error, locale, text.connectionError));
     } finally {
       setLogoutBusy(false);
     }
@@ -137,7 +138,7 @@ export function AdminConsole() {
         return true;
       }
       // 404「找不到这个账号」这类错误显示在弹窗里，名单原样留着。
-      setResetError(explain(error, text.connectionError));
+      setResetError(explain(error, locale, text.connectionError));
       return false;
     }
   }

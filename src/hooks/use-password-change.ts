@@ -50,7 +50,7 @@ export function usePasswordChange(deps: PasswordChangeDeps) {
         current.onConnectionWarning();
         return;
       }
-      setError(explain(error, text.connectionError));
+      setError(explain(error, current.locale, text.connectionError));
     } finally {
       setBusy(false);
     }

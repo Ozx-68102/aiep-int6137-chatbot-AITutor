@@ -51,7 +51,8 @@ export function useProfileActions(deps: ProfileActionsDeps) {
         current.onConnectionWarning();
         return;
       }
-      setProfileError(explain(error, translations[current.locale].connectionError));
+      const locale = current.locale;
+      setProfileError(explain(error, locale, translations[locale].connectionError));
     } finally {
       setSavingLocale(false);
     }
@@ -76,7 +77,8 @@ export function useProfileActions(deps: ProfileActionsDeps) {
         current.onConnectionWarning();
         return;
       }
-      setProfileError(explain(error, translations[current.locale].connectionError));
+      const locale = current.locale;
+      setProfileError(explain(error, locale, translations[locale].connectionError));
     } finally {
       setSavingAvatar(false);
     }

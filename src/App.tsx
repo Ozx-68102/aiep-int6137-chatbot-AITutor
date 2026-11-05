@@ -288,7 +288,9 @@ function ChatApp() {
           return;
         }
         setLoginOffline(false);
-        setLoginDetail(explain(error, translations[localeFromSystem()].connectionError));
+        setLoginDetail(
+          explain(error, localeFromSystem(), translations[localeFromSystem()].connectionError),
+        );
         setAuth('anonymous');
       },
     );
@@ -427,7 +429,7 @@ function ChatApp() {
         service.showConnectionWarning();
         return;
       }
-      setLoginDetail(explain(error, text.connectionError));
+      setLoginDetail(explain(error, locale, text.connectionError));
     } finally {
       setLoginSubmitting(false);
     }
@@ -530,7 +532,7 @@ function ChatApp() {
         service.showConnectionWarning();
         return;
       }
-      profileApi.setProfileError(explain(error, text.connectionError));
+      profileApi.setProfileError(explain(error, locale, text.connectionError));
     } finally {
       setLoggingOut(false);
     }
@@ -593,7 +595,7 @@ function ChatApp() {
         return;
       }
       if (sessionId === '') {
-        setNotice(explain(error, text.connectionError));
+        setNotice(explain(error, locale, text.connectionError));
       }
     } finally {
       setSendingNew(false);
@@ -806,9 +808,10 @@ function ChatApp() {
               service.showConnectionWarning();
               return false;
             }
-            // 后端拒绝（404 轮次不存在、502 上游没收到，detail 是中文字符串）
-            // 或别的错：进输入区上方的警示横幅；按钮状态由 MessageActions 回退。
-            setNotice(explain(error, text.actionFailed));
+            // 后端拒绝（404 轮次不存在、502 上游没收到）或别的错：进输入区
+            // 上方的警示横幅；简中显示后端 detail 原文，英文/繁中优先按状态码
+            // 映射；按钮状态由 MessageActions 回退。
+            setNotice(explain(error, locale, text.actionFailed));
             return false;
           }
         }}

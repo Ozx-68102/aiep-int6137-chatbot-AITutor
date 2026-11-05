@@ -70,7 +70,7 @@ export function useSessionActions(deps: SessionActionsDeps) {
         onConnectionWarning();
         return false;
       }
-      setNotice(explain(error, text.connectionError));
+      setNotice(explain(error, locale, text.connectionError));
       return false;
     }
   }
@@ -92,7 +92,7 @@ export function useSessionActions(deps: SessionActionsDeps) {
         onConnectionWarning();
         return false;
       }
-      setNotice(explain(error, translations[locale].connectionError));
+      setNotice(explain(error, locale, translations[locale].connectionError));
       return false;
     }
   }
@@ -122,7 +122,7 @@ export function useSessionActions(deps: SessionActionsDeps) {
         onConnectionWarning();
         return false;
       }
-      setNotice(explain(error, translations[locale].connectionError));
+      setNotice(explain(error, locale, translations[locale].connectionError));
       return false;
     }
     setSessions((current) => current.filter((session) => session.id !== id));
@@ -155,7 +155,7 @@ export function useSessionActions(deps: SessionActionsDeps) {
         onConnectionWarning();
         return;
       }
-      setNotice(explain(error, translations[locale].connectionError));
+      setNotice(explain(error, locale, translations[locale].connectionError));
     }
   }
 

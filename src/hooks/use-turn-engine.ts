@@ -112,7 +112,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
           return;
         }
         depsRef.current.setNotice(
-          explain(error, translations[depsRef.current.locale].connectionError),
+          explain(error, depsRef.current.locale, textRef.current.connectionError),
         );
       })
       .finally(() => {
@@ -547,8 +547,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       // 后端没接下（ApiError 带 detail）或别的异常：归横幅报，不再往消息流里插错误消息。
-      const detail = error instanceof ApiError ? error.detail : null;
-      depsRef.current.setNotice(detail ?? textRef.current.connectionError);
+      // 统一走 explain：简中原样显示 detail，英文/繁中优先按状态码映射（裁决规则在 src/api/failure.ts）。
+      depsRef.current.setNotice(
+        explain(error, depsRef.current.locale, textRef.current.connectionError),
+      );
     } finally {
       aborters.current.delete(sessionId);
       stoppers.current.delete(sessionId);
