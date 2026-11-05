@@ -8,13 +8,13 @@
 
 `POST /api/chat` 回一条 SSE 流（`text/event-stream`）。流里只有四种帧，外加非 200 的响应：
 
-| 页面收到 | 意思 |
-|---|---|
-| `data: {"choices":[{"delta":{"content":"…"}}]}` | 内容帧：一段答案正文，取 `choices[0].delta.content`（后端 `_chunk`，前端 `contentFromPayload`） |
-| `event: progress` + `data: {"name","status"}` | 进度帧：上游工作流的节点状态，原样转发；不参与结局判定，不算回答正文 |
-| `event: done` + `data: {turn_id, status, reason, bytes_sent}` | 结局帧：这一轮的结局随流明说，页面收到即以它为准 |
-| `data: [DONE]` | 中继走完。正常写完的路径在结局帧之后发；失败/被停的路径没有这一帧 |
-| 非 200 + `{"detail": "中文句子"}` | 后端没接下这个请求（请求本身失败），不是流 |
+| 页面收到                                                      | 意思                                                                                            |
+|---------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| `data: {"choices":[{"delta":{"content":"…"}}]}`               | 内容帧：一段答案正文，取 `choices[0].delta.content`（后端 `_chunk`，前端 `contentFromPayload`） |
+| `event: progress` + `data: {"name","status"}`                 | 进度帧：上游工作流的节点状态，原样转发；不参与结局判定，不算回答正文                            |
+| `event: done` + `data: {turn_id, status, reason, bytes_sent}` | 结局帧：这一轮的结局随流明说，页面收到即以它为准                                                |
+| `data: [DONE]`                                                | 中继走完。正常写完的路径在结局帧之后发；失败/被停的路径没有这一帧                               |
+| 非 200 + `{"detail": "中文句子"}`                             | 后端没接下这个请求（请求本身失败），不是流                                                      |
 
 结局帧的载荷是 `TurnDoneEvent`（[server/src/server/types/api.py](../server/src/server/types/api.py)）：`status` 三选一（`completed` 写完了 / `aborted` 用户按了停止 / `failed` 失败）；`reason` 词汇固定（`stop` 用户按停 / `upstream` 上游失败 / `internal` 我们这边出错），正常写完为 null；`bytes_sent` 是这一轮发给页面的正文字节数。
 
@@ -50,12 +50,12 @@
 
 Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/src/server/reply_store.py)）：
 
-| 键 | 内容 |
-|---|---|
-| `h2botapp-chat:{会话id}:status` | 状态（线上值见「状态词表」一节） |
-| `h2botapp-chat:{会话id}:text` | 已经写出来的半截文字 |
-| `h2botapp-chat:{会话id}:turn` | 这一轮的编号和用户问的话 |
-| `h2botapp-chat:{会话id}:stop` | 停止标记（值是轮次编号，60 秒过期） |
+| 键                              | 内容                                |
+|---------------------------------|-------------------------------------|
+| `h2botapp-chat:{会话id}:status` | 状态（线上值见「状态词表」一节）    |
+| `h2botapp-chat:{会话id}:text`   | 已经写出来的半截文字                |
+| `h2botapp-chat:{会话id}:turn`   | 这一轮的编号和用户问的话            |
+| `h2botapp-chat:{会话id}:stop`   | 停止标记（值是轮次编号，60 秒过期） |
 
 **幂等**：`POST /api/chat` 拿请求里的编号对一下 Redis 记着的当前轮次——对得上且还在写，回 409「这一场会话还有一轮在写」；对得上且已落定，回一个空流（页面读库对账）。同一个编号不会开第二轮：重复点击、页面重发都不会让上游生成两遍。
 
