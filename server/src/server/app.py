@@ -66,7 +66,15 @@ from server.reply_store import (
     store_available,
 )
 from server.settings import load_settings
-from server.turn_status import ABORTED, COMPLETED, FAILED, STREAMING
+from server.turn_status import (
+    ABORTED,
+    COMPLETED,
+    FAILED,
+    STREAMING,
+    DoneReason,
+    DoneStatus,
+    TurnStatus,
+)
 from server.types import (
     AbortRequest,
     AdminAccountItem,
@@ -212,7 +220,7 @@ class _Relay:
         # 这一轮已经写出来的文字。落库的时候要写它。
         self.text = ""
         # 这一轮最后的状态：写完了、被停了、还是失败了。
-        self.status = COMPLETED
+        self.status: TurnStatus = COMPLETED
         # 摘要行用的最小计时：开始时刻、首个内容帧时刻（monotonic 秒）。
         self.started_at = time.monotonic()
         self.first_content_at: float | None = None
@@ -1138,7 +1146,7 @@ async def chat(
         _relay(body.chat_id, body.message, turn_id, relay, fastgpt)
     )
     _running.setdefault(body.chat_id, set()).add(task)
-    task.add_done_callback(lambda done: _forget(body.chat_id, done))
+    task.add_done_callback(lambda finished: _forget(body.chat_id, finished))
     # 先把响应头发出去，页面的等待气泡立刻就转起来。
     # 上游出问题时流会直接结束（没有 [DONE]），页面据此判断这一轮没写完。
     return StreamingResponse(
@@ -1253,9 +1261,9 @@ def _settle_round(
     放在单独的任务里：这一轮的任务可能正被取消（用户按了停止），
     在它里面 await 写库会写不成。
     """
-    status = FAILED if relay.failed else relay.status
+    outcome: TurnStatus = FAILED if relay.failed else relay.status
     task = asyncio.create_task(
-        _write_round_end(chat_id, turn_id, relay, status, fastgpt)
+        _write_round_end(chat_id, turn_id, relay, outcome, fastgpt)
     )
     _settle_tasks.add(task)
     task.add_done_callback(_settle_tasks.discard)
@@ -1265,7 +1273,7 @@ async def _write_round_end(
     chat_id: UUID,
     turn_id: str,
     relay: _Relay,
-    status: str,
+    outcome: TurnStatus,
     fastgpt: FastGPT,
 ) -> None:
     """这一轮落定以后写进我们自己的表。
@@ -1277,7 +1285,7 @@ async def _write_round_end(
     不再影响任何页面即时语义。
     """
     text = relay.text
-    if status == FAILED:
+    if outcome == FAILED:
         # 归档核对：失败以后上游可能已经把答案写完了（我们的 [DONE]
         # 丢了）。叫停已经发出去了，等它落地，再按编号核对一次上游。
         # 核对的结果只进库，不进页面。
@@ -1288,9 +1296,9 @@ async def _write_round_end(
             # 断的是我们的 [DONE]。存档用上游那份，库里状态改成写完了
             # （done 帧已经说过的 failed 不回改）。
             text = answer
-            status = COMPLETED
+            outcome = COMPLETED
     written = await asyncio.to_thread(
-        chat_log.finish_round, chat_id, UUID(turn_id), text, status
+        chat_log.finish_round, chat_id, UUID(turn_id), text, outcome
     )
     # 这一轮到此落定：打一行结构化摘要。只在这里打一次——上面的对账
     # 也在这个函数里，不会在重试或对账路径上重复打。
@@ -1298,7 +1306,7 @@ async def _write_round_end(
         turn_id=turn_id,
         chat_id=chat_id,
         account_id=relay.account_id,
-        outcome=status,
+        outcome=outcome,
         started_at=relay.started_at,
         first_content_at=relay.first_content_at,
         bytes_sent=relay.sent_bytes(),
@@ -1407,19 +1415,19 @@ async def _sse(relay: _Relay) -> AsyncIterator[str]:
             continue
         if item is None:
             # 中继落定：失败/被停的路径没有 [DONE]，结局帧在这里补发。
-            if not done_sent and relay.done_status is not None:
+            outcome = relay.done_status
+            if not done_sent and outcome is not None:
                 yield _done_chunk(
-                    relay.turn_id,
-                    relay.done_status,
-                    relay.done_reason,
-                    relay.sent_bytes(),
+                    relay.turn_id, outcome, relay.done_reason, relay.sent_bytes()
                 )
             break
-        if item == _DONE_FRAME and not done_sent and relay.done_status is not None:
-            yield _done_chunk(
-                relay.turn_id, relay.done_status, relay.done_reason, relay.sent_bytes()
-            )
-            done_sent = True
+        if item == _DONE_FRAME and not done_sent:
+            outcome = relay.done_status
+            if outcome is not None:
+                yield _done_chunk(
+                    relay.turn_id, outcome, relay.done_reason, relay.sent_bytes()
+                )
+                done_sent = True
         yield item
 
 
@@ -1448,7 +1456,9 @@ def _progress_chunk(event: ProgressEvent) -> str:
     return f"event: progress\ndata: {payload}\n\n"
 
 
-def _done_chunk(turn_id: str, status: str, reason: str | None, bytes_sent: int) -> str:
+def _done_chunk(
+    turn_id: str, outcome: DoneStatus, reason: DoneReason | None, bytes_sent: int
+) -> str:
     """跟前端钉死的结局帧：event: done + TurnDoneEvent JSON。
 
     与进度帧同款风格：命名事件、紧凑分隔符、ensure_ascii=False。
@@ -1457,7 +1467,7 @@ def _done_chunk(turn_id: str, status: str, reason: str | None, bytes_sent: int) 
     """
     event = TurnDoneEvent(
         turn_id=turn_id,
-        status=status,
+        status=outcome,
         reason=reason,
         bytes_sent=bytes_sent,
     )
