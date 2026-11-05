@@ -227,6 +227,8 @@
 
 ### P4. 新会话首条消息发送失败时，问题文本丢失
 
+> **已完成（2026-11-05）**：洞已堵上，做法与本节方案不同——不是在 catch 里放回输入框，而是把「清空输入框」的时机整体挪到了会话建成之后（clearUnsent/setDraft 在 createSession 成功后才执行）：建会话失败时打的字原样留在输入框；401（会话过期）路径走 saveUnsent 暂存、重登录后放回输入框；建成之后才断线时，提问已显示在线程里、文本不丢——那一轮缺重试按钮的问题归本文 P1，仍未修。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/App.tsx` `submitMessage` L530 附近（发送前 `clearUnsent(); setDraft('')`）→ `sendFirstMessage` L468 的 catch：L505-508 只有 401 分支 `saveUnsent(question)`；L511-513 `connectionFailure` 分支 showConnectionWarning 后直接 return；L514-516 其他错误且 `sessionId === ''` 时只 setNotice。
 - **现状**：用户在「新对话」里打了字点发送，`submitMessage` 立刻清空输入框和 unsent 缓存；如果 `createSession` 或首问因网络类错误失败，question 哪儿都没存——界面上没有（会话都没建出来）、unsent 没有、服务器没有。原 CHAT_STREAM_KNOWN_ISSUES.md 第 10 条（已退役，内容并入 docs/CHAT_PAGE_BEHAVIOR.md）修的是「被踢」路径，这条 connectionFailure 路径是同一个洞的另一半，还没堵。
 - **影响**：弱网下新对话首发失败 = 用户输入直接蒸发，和已修的第 10 条同等严重。

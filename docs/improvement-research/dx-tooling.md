@@ -88,6 +88,8 @@ export default defineConfig({
 
 ### 5. dist/ 提交进了 LayerFS main，产物与源码可能脱节
 
+> **已完成（2026-11-05）**：LayerFS main 已按本地 git 跟踪清单重新播种，dist/ 不再存在于 main；本地 git 侧 dist/ 一直在 .gitignore 里、从未被跟踪。产物一律在沙箱/部署机现构（LayerFS 沙箱实测 vite build 半秒内），「过期 dist」无从发生。规则沉淀的尾巴见第 19 条注记。
+
 - **位置**：LayerFS main 树 /dist/（git 侧被 .gitignore 忽略，仅 LayerFS 侧存在此问题）。
 - **现状**：main 里有一份完整构建产物，但没有任何机制保证它是当前 main 源码构建出来的；每次沙箱挂载都会带上它。
 - **影响**：可能误用过期 dist；store 占空间。
@@ -328,6 +330,8 @@ store-dir=node_modules/.pnpm-store
 
 ### 19. LayerFS main 树混入依赖树、构建产物与敏感文件
 
+> **部分完成（2026-11-05）**：第 1~3 步已全部落地——main 按本地 git 跟踪清单重新播种（145 个文件），/.env、/logs、/node_modules、/.pnpm-store、/dist、/server/.venv、各缓存目录、/.idea、各处 .DS_Store 都不在 main 里了（/.env.example 保留）。第 4 步（把「gitignored 路径不进 LayerFS main」写进 AGENTS.md）没有做，是本条唯一的尾巴。已知残留：含旧敏感文件的历史层仍在**本机** store 里，从未离开本机，维护者知情并接受；彻底清掉历史层属 harness 层操作，不在本条范围内。
+
 - **位置**：LayerFS main：/node_modules、/.pnpm-store、/dist、/server/.venv、/server/.ruff_cache、/server/src/server/__pycache__、/logs/server.log、/.env、/.idea、多处 .DS_Store。git 侧全部被 .gitignore 忽略，不受影响；问题仅存在于 LayerFS 侧。
 - **现状**：初始导入把 gitignored 内容全部带了进来。实测影响：(a) FINDINGS 记录 store.sqlite 已达 114 MB；(b) `fs grep` 根目录范围几乎不可用——本次调研 grep TODO 命中被 skip 1762 条，几乎全部来自 .venv 与 .pnpm-store 的第三方代码，必须逐次手工限定路径范围；(c) **/logs/server.log 含用户提问与 FastGPT 上游原文、/.env 含 FastGPT API key 与数据库/Redis 密码**（AGENTS.md 明令敏感；本调研只确认存在、未读内容），二者进入了持久化、项目访问者可读的版本化 store；(d) /.lww `%include .gitignore` 只解决这些路径的合并策略，不阻止它们进树。
 - **影响**：检索噪音拖慢所有读操作；store 膨胀；敏感文件入库是治理问题——LayerFS store 的生命周期与访问控制和本地 .gitignore 的假设不同。
@@ -405,6 +409,8 @@ store-dir=node_modules/.pnpm-store
 - **工作量**：S（并入第 7 条）。
 
 ### 26. 杂物文件：.DS_Store×5、.idea/（仅 LayerFS 树）
+
+> **已完成（2026-11-05）**：随第 19 条重新播种一并清掉——LayerFS main 里已无任何 .DS_Store 与 .idea/；本地 git 从未跟踪过这两类文件。
 
 - **位置**：/.DS_Store、/docs/.DS_Store、/docs/开发手册/.DS_Store、/src/.DS_Store、/server/.DS_Store；/.idea/。均只存在于 LayerFS main，git 侧被 .gitignore 忽略。
 - **现状**：macOS Finder 与 JetBrains 残留随初始导入进入版本化 store。

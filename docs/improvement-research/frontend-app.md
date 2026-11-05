@@ -220,6 +220,8 @@
 
 ### N8. 全局 ErrorBoundary：别让白屏成为唯一故障形态
 
+> **已完成（2026-11-05）**：落点与本节方案略有出入——边界做成了两层且都挂在 App.tsx 里：PageBoundary 包住整页 JSX（整页渲染炸了降级为「页面出了点问题」提示加「刷新页面」按钮，三语 pageError/refreshPage 键），BubbleBoundary 包住单条消息（一条炸了降级成纯文本气泡、原文照显）。main.tsx 入口没有再包一层，App 自身函数体抛的异常不在边界覆盖内——实际主要故障形态（子树渲染炸）已覆盖。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「错误边界与降级」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/main.tsx`、新增 `/src/components/shell/ErrorBoundary.tsx`。
 - **现状**：`main.tsx` 直接 `createRoot(...).render(<App/>)`，全树没有任何错误边界。渲染期任何一处抛异常（比如后端某天返回了校验漏网的形状、某个 `null.toFixed`）整页白屏，控制台之外零信息。
 - **影响**：无测试、无监控的项目里，白屏是最糟的失败形态：用户不知道发生了什么，也做不了任何操作。
@@ -653,6 +655,8 @@
 ## 三、未完善与潜在问题
 
 ### P1. `withConnectionRetry` 会重试非幂等 POST，可能重复建会话
+
+> **已完成（2026-11-05）**：比本节方案更严——连接层自动重试只对 GET 打开；POST/PATCH/DELETE 一律默认只跑一次，调用方显式传 retry:true 才重试（src/api/http.ts 的 autoRetry）。建会话、登录、改密、头像、abort 等 POST 都没打开重试，重复建会话无从发生；Idempotency-Key 的跨栈远期方案不再需要。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「超时与重试」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/api/http.ts`（`withConnectionRetry` 无条件包住 `requestJson`/`requestEmpty` 的所有请求）。
 - **现状**：重试条件是「非 ApiError，或 detail 为 null」，最多 4 次、间隔 300ms，不区分 HTTP 方法。`POST /api/sessions`（建会话）、`POST /api/login`、`POST /api/password`、`POST /api/avatar`、`POST /api/sessions/:id/abort` 全都会被重试。典型事故：服务器已经收到并处理了 `createSession`，响应在网络上丢了（fetch 抛错）→ 重试 → 库里出现两个同名会话，前端只认最后一个 id，另一个成为孤儿会话挂在列表里。
