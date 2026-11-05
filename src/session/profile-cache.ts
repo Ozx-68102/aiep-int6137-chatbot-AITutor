@@ -1,9 +1,14 @@
 import {isLocale, type Locale} from '../type/locale.ts';
 
-const key = 'h2bot-profile';
+/** 用户名与语言的本地缓存键：多标签页同步（App 的 storage 监听）认它。 */
+export const profileCacheKey = 'h2bot-profile';
 // 头像缓存单独一个 key：dataURL 化以后可能有几 MB，混进 h2bot-profile 里
 // 一旦超配额，会连用户名带语言一起写不进去。分开存，一边失败不牵连另一边。
-const avatarKey = 'h2bot-avatar';
+export const avatarCacheKey = 'h2bot-avatar';
+// 主动登出标记（P7）：登出成功的标签页写入时间戳值，其他标签页听到
+// storage 事件立即回登录界面，不等下一次 401。服务器侧吊销（会话过期、
+// 账号停用）不写这个标记，仍由 401 兜底——两者分工不同。
+export const logoutMarkerKey = 'h2bot-logout';
 
 export type CachedProfile = {username: string; locale: Locale};
 
@@ -13,7 +18,7 @@ export type CachedProfile = {username: string; locale: Locale};
  */
 export function readCachedProfile(): CachedProfile | null {
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = window.localStorage.getItem(profileCacheKey);
     if (raw === null) {
       return null;
     }
@@ -31,7 +36,7 @@ export function readCachedProfile(): CachedProfile | null {
 
 export function saveCachedProfile(profile: CachedProfile): void {
   try {
-    window.localStorage.setItem(key, JSON.stringify(profile));
+    window.localStorage.setItem(profileCacheKey, JSON.stringify(profile));
   } catch {
     return;
   }
@@ -39,9 +44,9 @@ export function saveCachedProfile(profile: CachedProfile): void {
 
 export function clearCachedProfile(): void {
   try {
-    window.localStorage.removeItem(key);
+    window.localStorage.removeItem(profileCacheKey);
     // 退出登录把头像缓存连同资料一起清掉，维持「退出即清」的设计。
-    window.localStorage.removeItem(avatarKey);
+    window.localStorage.removeItem(avatarCacheKey);
   } catch {
     return;
   }
@@ -51,7 +56,7 @@ type CachedAvatar = {url: string; dataUrl: string};
 
 function readAvatarEntry(): CachedAvatar | null {
   try {
-    const raw = window.localStorage.getItem(avatarKey);
+    const raw = window.localStorage.getItem(avatarCacheKey);
     if (raw === null) {
       return null;
     }
@@ -108,7 +113,33 @@ export async function cacheAvatarData(url: string): Promise<void> {
       return;
     }
     const entry: CachedAvatar = {url, dataUrl};
-    window.localStorage.setItem(avatarKey, JSON.stringify(entry));
+    window.localStorage.setItem(avatarCacheKey, JSON.stringify(entry));
+  } catch {
+    return;
+  }
+}
+
+/**
+ * 写入主动登出标记（P7）：值是写入时刻的时间戳，只用来区分「新标记」，
+ * 数值本身没有业务含义。storage 事件不派发给写入方标签页，所以写完标记
+ * 的登出方不会被自己二次触发。
+ */
+export function writeLogoutMarker(): void {
+  try {
+    window.localStorage.setItem(logoutMarkerKey, String(Date.now()));
+  } catch {
+    return;
+  }
+}
+
+/**
+ * 登录后清掉登出标记：事件只认写入瞬间，墓碑不必留着。清除同样会广播
+ * 一次 newValue 为 null 的 storage 事件，消费方只认 newValue 非 null 的
+ * 写入，不会被误踢。
+ */
+export function clearLogoutMarker(): void {
+  try {
+    window.localStorage.removeItem(logoutMarkerKey);
   } catch {
     return;
   }

@@ -28,10 +28,15 @@ import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast, type ToastItem} from './components/toast/Toast.tsx';
 import {translations} from './i18n/index.ts';
 import {
+  avatarCacheKey,
   clearCachedProfile,
+  clearLogoutMarker,
+  logoutMarkerKey,
+  profileCacheKey,
   readCachedAvatarData,
   readCachedProfile,
   saveCachedProfile,
+  writeLogoutMarker,
 } from './session/profile-cache.ts';
 import type {CachedProfile} from './session/profile-cache.ts';
 import {clearAllDrafts, clearDraft, readDraft, saveDraft} from './session/drafts.ts';
@@ -102,6 +107,9 @@ function ChatApp() {
   // 异步回调和效果调用的函数统一从 ref 里拿 navigate：走 ref 就不会成为
   // 各个效果的响应式依赖。
   const navigateRef = useRef(navigate);
+  // 多标签页的 storage 监听只注册一次，登出处理要读到最新的 enterLoginGuarded：
+  // 走 ref，别让它成为效果依赖——和 navigateRef 同一套路。
+  const enterLoginGuardedRef = useRef(enterLoginGuarded);
   const toastCount = useRef(0);
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
@@ -236,10 +244,56 @@ function ChatApp() {
     }
   }, [narrow]);
 
+  // 多标签页同步（N12 + P7）：其他标签页改语言/资料、主动登出，都经由
+  // localStorage 的 storage 事件当场广播过来，立即应用，不靠轮询。storage
+  // 事件只派发给「其他」标签页，写入方自己收不到，所以写了登出标记的
+  // 标签页不会被自己二次触发。服务器侧吊销（会话过期、账号停用）不在这
+  // 个监听的范围：它不写任何本地标记，仍由本页请求的 401 兜底
+  // （handleAuthError）——两者分工不同。
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key === logoutMarkerKey) {
+        // newValue 为 null 是登录方在清墓碑（openAccount），不是登出，不处理。
+        if (event.newValue !== null) {
+          // 别的标签页主动登出了：login cookie 全浏览器共享，本页的登录态
+          // 随之作废，立即进入登录界面路径，不等下一次 401。已经在会话失效
+          // 原地态里时横幅挂着、输入锁着，就保持原地（enterLoginGuarded 的
+          // 语义），不升级成整页清空。
+          enterLoginGuardedRef.current(null);
+        }
+        return;
+      }
+      if (event.key === profileCacheKey || event.key === avatarCacheKey) {
+        if (event.newValue === null) {
+          // 清缓存只发生在登出/被踢路径：主动登出由上面的登出标记接管，
+          // 服务器侧被踢照旧靠 401 兜底。这里不做二次处理，更不踢页面。
+          return;
+        }
+        const cached = readCachedProfile();
+        if (cached !== null) {
+          // 别的标签页改了语言或用户名：语言立即换，显示立即刷新。
+          setLocale(cached.locale);
+          setUsername(cached.username);
+        }
+        if (event.key === avatarCacheKey) {
+          const avatar = readCachedAvatarData();
+          if (avatar !== null) {
+            setAvatarUrl(avatar);
+          }
+        }
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
   useEffect(() => {
     draftRef.current = draft;
     sessionInvalidRef.current = sessionInvalid;
     navigateRef.current = navigate;
+    enterLoginGuardedRef.current = enterLoginGuarded;
     routingRef.current = routing;
     serviceRef.current = service;
     engineRef.current = engine;
@@ -452,6 +506,8 @@ function ChatApp() {
   }
 
   async function openAccount(result: LoginResult) {
+    // 登录回来了：清掉上一次登出留下的标记（事件只认写入瞬间，墓碑不留着）。
+    clearLogoutMarker();
     if (isLocale(result.locale)) {
       setLocale(result.locale);
     }
@@ -549,6 +605,9 @@ function ChatApp() {
       // 各会话的草稿也在主动退出时清空：共用电脑不留半截字（对齐
       // clearCachedProfile 的隐私处理）。被踢不清——重登录后草稿原样恢复。
       clearAllDrafts();
+      // 把主动登出广播给其他标签页（P7）：听到 storage 事件的标签页立即
+      // 回登录界面，不等下一次 401。写入方收不到自己的 storage 事件。
+      writeLogoutMarker();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         enterLogin(null);
