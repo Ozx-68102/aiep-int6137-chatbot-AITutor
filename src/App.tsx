@@ -1,5 +1,5 @@
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
-import {useNarrowScreen} from './hooks/use-narrow-screen.ts';
+import {narrowScreenNow, useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
 import {chatIdFromPath, usePathRouting} from './hooks/use-path-routing.ts';
 import {useProfileActions} from './hooks/use-profile-actions.ts';
@@ -69,9 +69,8 @@ function ChatApp() {
   const [loginDetail, setLoginDetail] = useState<string | null>(null);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(
-    () => !window.matchMedia('(max-width: 767px)').matches,
-  );
+  // 初始的宽窄判断与 useNarrowScreen 共用同一个断点查询串：改断点只改一处。
+  const [sidebarOpen, setSidebarOpen] = useState(() => !narrowScreenNow());
   // 用户在宽屏上想看到的侧边栏状态。窄屏自动收起只是临时的，不改它。
   const sidebarWanted = useRef(sidebarOpen);
   const narrow = useNarrowScreen(() => {
