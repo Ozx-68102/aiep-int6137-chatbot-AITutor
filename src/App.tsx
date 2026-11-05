@@ -770,6 +770,8 @@ function ChatApp() {
           });
         }}
         pending={activePending}
+        presentIds={engine.presentIds}
+        onPresentEnd={engine.endPresent}
         progressText={progressText}
         draft={draft}
         inputLocked={inputLocked}

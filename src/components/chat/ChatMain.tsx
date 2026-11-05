@@ -8,9 +8,9 @@ import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {BubbleBoundary} from './BubbleBoundary.tsx';
 import {bubbleClass} from './message-class.ts';
-import {MarkdownText} from './MarkdownText.tsx';
 import {MessageActions} from './MessageActions.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
+import {TypewriterText} from './TypewriterText.tsx';
 import {WarningBox, type WarningItem} from './WarningBox.tsx';
 
 /** 正在编辑的那条提问：气泡 id、轮次编号、框里当前的文字。 */
@@ -25,6 +25,8 @@ export function ChatMain({
   enteringIds,
   onAnimationEnd,
   pending,
+  presentIds,
+  onPresentEnd,
   progressText,
   draft,
   inputLocked,
@@ -44,6 +46,10 @@ export function ChatMain({
   enteringIds: Set<string>;
   onAnimationEnd: (id: string) => void;
   pending: boolean;
+  /** 要「打字机放映」的消息 id（轮次引擎登记）：只放映本轮刚收到的回答。 */
+  presentIds: Set<string>;
+  /** 放映结束（放完或取消）：引擎据此销号。 */
+  onPresentEnd: (id: string) => void;
   progressText: string | undefined;
   draft: string;
   inputLocked: boolean;
@@ -61,13 +67,17 @@ export function ChatMain({
   // 本组件整个重挂载，贴底状态自然复位。
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // atBottom 的 ref 镜像：放映每拍调用 handleReveal，闭包里不能读到旧渲染的状态。
+  const atBottomRef = useRef(true);
 
   function handleScroll() {
     const el = scrollRef.current;
     if (el === null) {
       return;
     }
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight <= 48);
+    const at = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+    setAtBottom(at);
+    atBottomRef.current = at;
   }
 
   function scrollToBottom() {
@@ -78,6 +88,18 @@ export function ChatMain({
     // 一步滚到底，不用平滑滚动：平滑滚动的中间状态会把贴底判定又打回去。
     el.scrollTop = el.scrollHeight;
     setAtBottom(true);
+    atBottomRef.current = true;
+  }
+
+  /** 打字机放映每拍长高：贴底时持续跟随（消息数组不变，下面的效果指望不上）。 */
+  function handleReveal() {
+    if (!atBottomRef.current) {
+      return;
+    }
+    const el = scrollRef.current;
+    if (el !== null) {
+      el.scrollTop = el.scrollHeight;
+    }
   }
   // 输入框自动长高：随内容增高，CSS 的 max-h-40 封顶后内部滚动。做成对
   // draft 的 effect：草稿被程序性清空/恢复（切会话、被踢后回填）时高度也同步。
@@ -217,8 +239,12 @@ export function ChatMain({
                           className={classes.bubble}
                           onAnimationEnd={() => onAnimationEnd(message.id)}
                         >
-                          <MarkdownText
+                          <TypewriterText
+                            id={message.id}
                             text={textShown}
+                            present={presentIds.has(message.id)}
+                            onEnd={onPresentEnd}
+                            onReveal={handleReveal}
                             copyLabel={text.copy}
                             copiedLabel={text.copied}
                           />

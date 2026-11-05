@@ -46,6 +46,11 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   // 会话 id → 上游工作流最新节点名：等待气泡里显示；第一个内容增量到达、
   // 这一轮结束（所有结局）时清掉。
   const [progressBySession, setProgressBySession] = useState<Record<string, string>>({});
+  // 要「打字机放映」的消息 id 集合：本轮流的第一个内容增量到达时登记
+  // （见 sendQuestion 的 onDelta），放映组件放完自己销号；轮次以中止/断流/
+  // 发送失败收场时由引擎销号——放映组件的 present 变 false，立刻全显。
+  // 放映只是视觉层，动画状态不进 sessions。
+  const [presentIds, setPresentIds] = useState<Set<string>>(() => new Set());
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
   const sendingRef = useRef<Set<string>>(new Set());
@@ -380,6 +385,22 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     });
   }
 
+  function markPresent(messageId: string) {
+    setPresentIds((current) => (current.has(messageId) ? current : new Set(current).add(messageId)));
+  }
+
+  /** 放映收尾（组件放完）或取消（停止、断流、发送失败）：id 移出登记。幂等。 */
+  function endPresent(messageId: string) {
+    setPresentIds((current) => {
+      if (!current.has(messageId)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(messageId);
+      return next;
+    });
+  }
+
   function clearPending(sessionId: string) {
     setPendingIds((current) => {
       const next = new Set(current);
@@ -474,6 +495,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
     aborters.current.set(sessionId, {controller, turnId});
+    // 本轮放映有没有登记过：第一个内容增量到达就登记，不等 done 帧——
+    // done 帧到达时全文已经渲染过一帧，晚登记会先闪全文再倒回放映。
+    let presentMarked = false;
     try {
       addWaitingMessage(sessionId, assistantId, turnId);
       const outcome = await streamReply(
@@ -485,6 +509,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
           // 第一个内容增量到达：进度文本完成使命（清空是幂等的，
           // 后续增量拿到同一份引用，不再触发重渲染）。
           clearProgress(sessionId);
+          if (!presentMarked) {
+            presentMarked = true;
+            markPresent(assistantId);
+          }
           applyStreamText(sessionId, assistantId, chunk);
         },
         controller.signal,
@@ -497,6 +525,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       clearProgress(sessionId);
       if (outcome === 'busy') {
         // 这场会话已经有一轮在写，这一次没发出去。把问题放回输入框，等答完再发。
+        endPresent(assistantId);
         removeTurn(sessionId, turnId);
         depsRef.current.setDraft(question);
         saveUnsent(question);
@@ -508,6 +537,8 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (outcome === 'aborted') {
+        // 被停的轮次不放映：半截文字立即全显。
+        endPresent(assistantId);
         // 用户按了停止。停止流程负责收尾：它去问服务器这一轮到底怎么样，
         // 页面上打的标记要跟服务器一致。
         const stop = stoppers.current.get(sessionId);
@@ -520,6 +551,8 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (outcome === 'interrupted') {
+        // 断流补回的回答一律立即全显，不走放映。
+        endPresent(assistantId);
         await recoverReply(sessionId, turnId);
         return;
       }
@@ -657,6 +690,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   /** 退出登录/被踢回登录页：把在飞的加载、轮询和等待标记一次清干净。 */
   function resetForLogin() {
     setPendingIds(new Set());
+    setPresentIds(new Set());
     setProgressBySession({});
     setHistoryLoadingId(null);
     loadedThreads.current.clear();
@@ -676,6 +710,8 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   return {
     pendingIds,
     setPendingIds,
+    presentIds,
+    endPresent,
     progressBySession,
     sessionWarning,
     setSessionWarning,
