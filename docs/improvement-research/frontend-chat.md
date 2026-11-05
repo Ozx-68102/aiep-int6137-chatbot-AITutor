@@ -70,9 +70,9 @@
 
 ### N4. 代码块复制按钮（可选：语法高亮）
 
-> **2026-11-05**：高亮库已定并已安装 **react-syntax-highlighter 16.1.2**（本节二选一里选它）。注意：该包不带类型声明，`@types/react-syntax-highlighter` 也还没装——接入前需要维护者补装类型包；装好之前若先接入，要用临时本地声明文件过渡。复制按钮不依赖高亮库，可先做。
+> **2026-11-05**：高亮库已定并已安装 **react-syntax-highlighter 16.1.2**（本节二选一里选它）。注意：该包不带类型声明，`@types/react-syntax-highlighter` 也还没装——接入前需要维护者补装类型包；装好之前若先接入，要用临时本地声明文件过渡。（更新：2026-11-05 维护者已补装 15.5.13，垫片已删，tsconfig `types` 显式加载官方环境声明。）复制按钮不依赖高亮库，可先做。
 
-> **已实现（2026-11-05）**：代码块复制按钮已落地（脚注 hover 区，代码块从 React 子树抽文本）；语法高亮按 react-syntax-highlighter 的 prism-light 按需路线接入——第一个命中语言的代码块触发动态 import，独立 chunk 约 45.5 kB，注册 python/javascript/typescript/java，没命中的语言保持纯文本；@types 未装期间用 src/types/react-syntax-highlighter.d.ts 垫片过渡，维护者装好官方类型后删除垫片。功能描述见 docs/MESSAGE_ACTIONS.md（第四期注记）和 docs/TECH.md「代码高亮」条。调研原文以 LayerFS 历史为准。
+> **已实现（2026-11-05）**：代码块复制按钮已落地（脚注 hover 区，代码块从 React 子树抽文本）；语法高亮按 react-syntax-highlighter 的 prism-light 按需路线接入——第一个命中语言的代码块触发动态 import，独立 chunk 约 45.5 kB，注册 python/javascript/typescript/java，没命中的语言保持纯文本；@types 未装期间用 src/types/react-syntax-highlighter.d.ts 垫片过渡；2026-11-05 维护者已补装 @types 15.5.13，垫片已删除，tsconfig 以 `"types": ["react-syntax-highlighter"]` 显式加载官方环境声明。功能描述见 docs/MESSAGE_ACTIONS.md（第四期注记）和 docs/TECH.md「代码高亮」条。调研原文以 LayerFS 历史为准。
 
 ### N5. 消息编辑重发（对齐 MESSAGE_ACTIONS.md，前端部分）
 
