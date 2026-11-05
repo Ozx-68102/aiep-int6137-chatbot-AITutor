@@ -9,7 +9,7 @@ import {
 } from '../../api/admin.ts';
 import {explain} from '../../api/failure.ts';
 import {ApiError} from '../../api/http.ts';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {readCachedProfile} from '../../session/profile-cache.ts';
 import {htmlLang, localeFromSystem, type Locale} from '../../type/locale.ts';
 import {AdminLoginForm} from './AdminLoginForm.tsx';

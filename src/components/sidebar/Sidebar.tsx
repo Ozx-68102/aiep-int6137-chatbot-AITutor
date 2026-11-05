@@ -2,7 +2,7 @@ import {PanelLeftClose, SquarePlus} from 'lucide-react';
 import {useLayoutEffect, useRef} from 'react';
 import {SessionRow} from './SessionRow.tsx';
 import logoUrl from '../../assets/H-Squared_Bot_Vector.svg';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {orderSessions} from '../../session/pin-order.ts';
 import type {Session} from '../../type/chat.ts';
 import type {Locale} from '../../type/locale.ts';

@@ -1,5 +1,5 @@
 import {Component, type ErrorInfo, type ReactNode} from 'react';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {readCachedProfile} from '../../session/profile-cache.ts';
 import {localeFromSystem} from '../../type/locale.ts';
 

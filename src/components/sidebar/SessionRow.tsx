@@ -1,7 +1,7 @@
 import {Ellipsis, Pin} from 'lucide-react';
 import {type MouseEvent, useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {sessionTitle} from '../../session/empty.ts';
 import type {Session} from '../../type/chat.ts';
 import {type Locale} from '../../type/locale.ts';

@@ -1,6 +1,6 @@
 import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {PasswordStrength} from './PasswordStrength.tsx';
 import {isWeakPassword} from './password-strength.ts';

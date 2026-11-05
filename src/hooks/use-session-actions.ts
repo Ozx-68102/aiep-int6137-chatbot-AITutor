@@ -3,7 +3,7 @@ import {useNavigate} from 'react-router';
 import {connectionFailure, explain} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {deleteSession, pinSession, renameSession} from '../api/session.ts';
-import {translations} from '../i18n.ts';
+import {translations} from '../i18n/index.ts';
 import type {Session} from '../type/chat.ts';
 import type {Locale} from '../type/locale.ts';
 

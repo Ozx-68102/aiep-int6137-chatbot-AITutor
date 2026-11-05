@@ -1,5 +1,5 @@
 import {useRef} from 'react';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {AvatarImage} from '../avatar/AvatarImage.tsx';
 

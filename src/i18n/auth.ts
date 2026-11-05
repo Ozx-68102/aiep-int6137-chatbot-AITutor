@@ -1,0 +1,85 @@
+import type {Locale} from '../type/locale.ts';
+
+/** 登录与账号词条：登录/登出、头像、修改密码、密码强度、会话失效提示。 */
+const zhCN = {
+  logOut: '退出登录',
+  logOutConfirm: '确定要退出登录吗？',
+  username: '用户名',
+  avatar: '头像',
+  avatarHint: '支持格式：PNG/JPG/JPEG/HEIC，大小不超过5MB',
+  uploadAvatar: '上传头像',
+  changeAvatar: '更换头像',
+  avatarSaving: '正在处理…',
+  password: '密码',
+  logIn: '登录',
+  changePassword: '修改密码',
+  oldPassword: '旧密码',
+  newPassword: '新密码',
+  confirmPassword: '确认新密码',
+  passwordHint: '只能用英文键盘上的字符，不能有空格，长度 6–128，不能包含用户名',
+  strengthTooWeak: '太弱',
+  strengthWeak: '弱',
+  strengthFair: '一般',
+  strengthStrong: '强',
+  passwordChanged: '密码已修改，请用新密码重新登录',
+  sessionExpired: '会话已过期，请重新登录',
+  accountDisabled: '账号已被停用，请联系管理员',
+  logInAgain: '重新登录',
+};
+
+export type AuthCopy = typeof zhCN;
+
+const zhTW: AuthCopy = {
+  logOut: '登出',
+  logOutConfirm: '確定要登出嗎？',
+  username: '使用者名稱',
+  avatar: '頭像',
+  avatarHint: '支援格式：PNG/JPG/JPEG/HEIC，大小不超過5MB',
+  uploadAvatar: '上傳頭像',
+  changeAvatar: '更換頭像',
+  avatarSaving: '正在處理…',
+  password: '密碼',
+  logIn: '登入',
+  changePassword: '修改密碼',
+  oldPassword: '舊密碼',
+  newPassword: '新密碼',
+  confirmPassword: '確認新密碼',
+  passwordHint: '只能用英文鍵盤上的字元，不能有空格，長度 6–128，不能包含使用者名稱',
+  strengthTooWeak: '太弱',
+  strengthWeak: '弱',
+  strengthFair: '一般',
+  strengthStrong: '強',
+  passwordChanged: '密碼已修改，請用新密碼重新登入',
+  sessionExpired: '會話已過期，請重新登入',
+  accountDisabled: '帳號已被停用，請聯絡管理員',
+  logInAgain: '重新登入',
+};
+
+const en: AuthCopy = {
+  logOut: 'Log out',
+  logOutConfirm: 'Are you sure you want to log out?',
+  username: 'Username',
+  avatar: 'Avatar',
+  avatarHint: 'Supported formats: PNG/JPG/JPEG/HEIC, up to 5MB',
+  uploadAvatar: 'Upload avatar',
+  changeAvatar: 'Change avatar',
+  avatarSaving: 'Working…',
+  password: 'Password',
+  logIn: 'Log in',
+  changePassword: 'Change password',
+  oldPassword: 'Current password',
+  newPassword: 'New password',
+  confirmPassword: 'Confirm new password',
+  passwordHint:
+    'English keyboard characters only, no spaces, 6–128 characters, cannot contain your username',
+  strengthTooWeak: 'Too weak',
+  strengthWeak: 'Weak',
+  strengthFair: 'Fair',
+  strengthStrong: 'Strong',
+  passwordChanged: 'Password changed. Please log in again with your new password.',
+  sessionExpired: 'Your session has expired. Please log in again.',
+  accountDisabled: 'This account has been disabled. Please contact your administrator.',
+  logInAgain: 'Log in again',
+};
+
+export const auth: Record<Locale, AuthCopy> = {'zh-CN': zhCN, 'zh-TW': zhTW, en};

@@ -5,7 +5,7 @@ import {ApiError} from '../api/http.ts';
 import {probePartial} from '../api/partial.ts';
 import type {PartialReply} from '../api/partial.ts';
 import {abortReply} from '../api/session.ts';
-import {translations} from '../i18n.ts';
+import {translations} from '../i18n/index.ts';
 import {startPartialPolling} from '../session/poll.ts';
 import {visibleText} from '../session/text.ts';
 import {loadThread} from '../session/thread.ts';

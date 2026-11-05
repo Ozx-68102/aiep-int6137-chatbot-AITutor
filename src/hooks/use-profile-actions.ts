@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {connectionFailure, explain} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {updateProfile, uploadAvatar} from '../api/profile.ts';
-import {translations} from '../i18n.ts';
+import {translations} from '../i18n/index.ts';
 import {saveCachedProfile} from '../session/profile-cache.ts';
 import type {Locale} from '../type/locale.ts';
 

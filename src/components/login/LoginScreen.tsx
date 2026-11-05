@@ -1,7 +1,7 @@
 import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
 import logoUrl from '../../assets/H-Squared_Bot_Vector.svg';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {LanguageMenu} from '../language/LanguageMenu.tsx';
 

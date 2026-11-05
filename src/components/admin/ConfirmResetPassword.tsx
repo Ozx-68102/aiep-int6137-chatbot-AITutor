@@ -1,6 +1,6 @@
 import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {CloseButton} from '../close-button/CloseButton.tsx';
 import {Modal} from '../shell/Modal.tsx';

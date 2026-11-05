@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {translations} from '../../i18n.ts';
+import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {
   loadPasswordStrength,

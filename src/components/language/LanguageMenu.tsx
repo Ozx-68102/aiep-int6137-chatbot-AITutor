@@ -1,6 +1,6 @@
 import {ChevronDown, Languages} from 'lucide-react';
 import {useEffect, useRef, useState} from 'react';
-import {locales, translations} from '../../i18n.ts';
+import {locales, translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 
 export function LanguageMenu({

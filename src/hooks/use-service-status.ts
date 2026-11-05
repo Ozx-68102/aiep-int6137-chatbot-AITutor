@@ -3,7 +3,7 @@ import {ApiError} from '../api/http.ts';
 import {readProfile} from '../api/profile.ts';
 import {listSessions, sessionsFromList} from '../api/session.ts';
 import {readStatus} from '../api/status.ts';
-import {translations} from '../i18n.ts';
+import {translations} from '../i18n/index.ts';
 import {saveCachedProfile} from '../session/profile-cache.ts';
 import type {Session} from '../type/chat.ts';
 import type {Locale} from '../type/locale.ts';
