@@ -67,6 +67,7 @@ export function LoginScreen({
               className="input w-full"
               name="username"
               autoComplete="username"
+              autoFocus
               value={username}
               onChange={(event) => setUsername(event.target.value)}
             />
@@ -82,6 +83,10 @@ export function LoginScreen({
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
+          {/* 忘记密码的静态提示：没有自助找回通道，把路指到管理员那里。 */}
+          <p className="m-0 text-xs text-stone-500" lang={htmlLang[locale]}>
+            {text.forgotPasswordHint}
+          </p>
           {error ? (
             <p
               className="m-0 flex items-center gap-1.5"
@@ -97,8 +102,17 @@ export function LoginScreen({
               {notice}
             </p>
           ) : null}
-          <button type="submit" className="btn btn-primary btn-block" disabled={blocked}>
-            {text.logIn}
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={blocked}
+            aria-busy={submitting}
+          >
+            {submitting ? (
+              <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+            ) : (
+              text.logIn
+            )}
           </button>
         </div>
       </form>
