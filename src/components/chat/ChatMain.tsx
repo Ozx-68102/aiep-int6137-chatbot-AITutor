@@ -404,7 +404,10 @@ export function ChatMain({
           ))}
         </div>
       ) : null}
-      <div className="border-t border-stone-300 px-4 pt-3 pb-4">
+      {/* 底部输入条：padding-bottom 取 max(1rem, 安全区)——iPhone 刘海屏/
+          横屏下发送按钮不再贴进圆角（N10；env() 生效前提是 index.html 的
+          viewport meta 带 viewport-fit=cover）。 */}
+      <div className="border-t border-stone-300 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <form ref={formRef} className="flex items-end gap-2" onSubmit={onSubmit}>
           <textarea
             ref={textareaRef}
