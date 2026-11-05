@@ -13,14 +13,17 @@ import {defineConfig} from 'vite';
 // .../node_modules/.pnpm/<pkg>@<ver>.../node_modules/<pkg>/...，
 // 取最后一段 node_modules 之后的部分；@scope/name 算一个包名。
 function packageNameOf(id: string): string | null {
-  const clean = id.split('?')[0];
+  // split 对任何字符串都返回至少一个元素的数组，下标 0 必然存在，?? 分支走不到
+  const clean = id.split('?')[0] ?? id;
   if (clean.startsWith('\0') || clean.endsWith('.css')) return null;
   const marker = '/node_modules/';
   const at = clean.lastIndexOf(marker);
   if (at === -1) return null;
   const parts = clean.slice(at + marker.length).split('/');
-  if (parts[0].startsWith('@')) return parts.slice(0, 2).join('/');
-  return parts[0];
+  // split 对任何字符串都返回至少一个元素的数组，parts[0] 必然存在，?? 分支走不到
+  const head = parts[0] ?? '';
+  if (head.startsWith('@')) return parts.slice(0, 2).join('/');
+  return head;
 }
 
 // react 家族：核心运行时加路由，升级依赖之外基本不动。

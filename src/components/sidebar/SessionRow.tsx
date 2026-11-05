@@ -162,7 +162,7 @@ export function SessionRow({
         return;
     }
     event.preventDefault();
-    items[next].focus();
+    items[next]?.focus();
   }
 
   function openMenu(event: MouseEvent<HTMLButtonElement>) {

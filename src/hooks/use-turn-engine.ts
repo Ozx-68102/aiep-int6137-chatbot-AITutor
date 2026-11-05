@@ -237,6 +237,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return {...session, messages: [...session.messages, message]};
       }
       const message = session.messages[index];
+      if (message === undefined) {
+        // index 来自 findIndex 且已排除 -1，元素必然存在，这里只是类型上的兜底
+        return session;
+      }
       if (!partial.text.startsWith(message.text)) {
         return session;
       }
@@ -365,8 +369,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       (message) => message.role === 'assistant' && message.turnId === turnId,
     );
     for (let index = answer - 1; index >= 0; index -= 1) {
-      if (messages[index].role === 'user') {
-        return messages[index].text;
+      const message = messages[index];
+      if (message !== undefined && message.role === 'user') {
+        return message.text;
       }
     }
     return null;

@@ -110,7 +110,7 @@ export function LanguageMenu({
         return;
     }
     event.preventDefault();
-    items[next].focus();
+    items[next]?.focus();
   }
 
   return (

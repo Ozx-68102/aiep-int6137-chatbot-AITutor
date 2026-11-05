@@ -52,7 +52,7 @@ function codeLanguage(children: ReactNode): string | null {
     }
     const match = /language-([\w+-]+)/.exec(props.className);
     if (match !== null) {
-      return match[1];
+      return match[1] ?? null;
     }
   }
   return null;

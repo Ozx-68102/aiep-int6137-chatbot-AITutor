@@ -143,8 +143,9 @@ export function ChatMain({
   }, [atBottom, active?.messages, editing?.text]);
   let lastUserMessageId: string | null = null;
   for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
-    if (chatMessages[index].role === 'user') {
-      lastUserMessageId = chatMessages[index].id;
+    const message = chatMessages[index];
+    if (message !== undefined && message.role === 'user') {
+      lastUserMessageId = message.id;
       break;
     }
   }

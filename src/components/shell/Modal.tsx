@@ -142,6 +142,10 @@ export function Modal({
       }
       const first = items[0];
       const last = items[items.length - 1];
+      if (first === undefined || last === undefined) {
+        // 上面刚判过 items 非空，first/last 必然存在，这里只是类型上的兜底
+        return;
+      }
       const current = document.activeElement;
       if (current === null || !panel.contains(current)) {
         // 焦点不知怎么落到了面板外面：直接拉回第一个元素。

@@ -263,7 +263,8 @@ function piecesFromEvent(event: string): StreamPiece[] {
     return [];
   }
   if (dataLines.length === 1) {
-    const piece = pieceFromData(dataLines[0]);
+    // 上面刚判过 dataLines.length === 1，首元素必然存在
+    const piece = pieceFromData(dataLines[0]!);
     return piece === null ? [] : [piece];
   }
   const joined = pieceFromData(dataLines.join('\n'));
