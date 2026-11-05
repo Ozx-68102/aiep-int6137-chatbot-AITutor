@@ -11,7 +11,15 @@ Redis 的线上值是唯一例外：「写完了」历来写的是 "finished"，
 映射（线上值 <-> 本模块词表），"finished" 这个词不出 reply_store。
 """
 
-STREAMING = "streaming"
-COMPLETED = "completed"
-FAILED = "failed"
-ABORTED = "aborted"
+from typing import Literal
+
+STREAMING: Literal["streaming"] = "streaming"
+COMPLETED: Literal["completed"] = "completed"
+FAILED: Literal["failed"] = "failed"
+ABORTED: Literal["aborted"] = "aborted"
+
+# 类型别名：函数签名和模型字段用它们标注，状态词不再退化成裸 str。
+# DoneStatus 不含 streaming：done 帧只在轮次落定时发。
+TurnStatus = Literal["streaming", "completed", "failed", "aborted"]
+DoneStatus = Literal["completed", "failed", "aborted"]
+DoneReason = Literal["stop", "upstream", "internal"]
