@@ -1,7 +1,28 @@
-import {useRef} from 'react';
+import {CircleAlert} from 'lucide-react';
+import {useRef, useState} from 'react';
 import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {AvatarImage} from '../avatar/AvatarImage.tsx';
+
+// 头像上传的客户端预检门槛，口径和 avatarHint 的文案保持一致：
+// PNG/JPG/JPEG/HEIC，不超过 5MB。这里只是把明显不合格的文件当场拦下、
+// 省一次白跑的上传，服务端校验仍然是权威。
+const maxAvatarBytes = 5 * 1024 * 1024;
+
+// HEIC/HEIF 的 MIME 字符串以 IANA 注册为准（RFC 4337、ISO/IEC 23008-12）：
+// 单图是 image/heic、image/heif，多帧序列是 image/heic-sequence、
+// image/heif-sequence。Safari 对 .heic 文件报 image/heic；部分浏览器
+// （如 Windows 上的 Chrome）file.type 是空串，这时退回按扩展名判断，
+// 不然 HEIC 会被误拦。
+const allowedAvatarTypes = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/heic',
+  'image/heic-sequence',
+  'image/heif',
+  'image/heif-sequence',
+]);
+const allowedAvatarExtensions = new Set(['png', 'jpg', 'jpeg', 'heic', 'heif']);
 
 export function AvatarPicker({
   locale,
@@ -20,6 +41,25 @@ export function AvatarPicker({
 }) {
   const text = translations[locale];
   const inputRef = useRef<HTMLInputElement>(null);
+  // 预检拒绝文件时的当场提示；下一次重新选文件就清掉。
+  const [pickError, setPickError] = useState<string | null>(null);
+
+  function handlePick(file: File) {
+    const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+    const typeAllowed =
+      allowedAvatarTypes.has(file.type) ||
+      (file.type === '' && allowedAvatarExtensions.has(extension));
+    if (!typeAllowed) {
+      setPickError(text.avatarWrongType);
+      return;
+    }
+    if (file.size > maxAvatarBytes) {
+      setPickError(text.avatarTooLarge);
+      return;
+    }
+    setPickError(null);
+    onPick(file);
+  }
 
   return (
     <div className="flex items-start gap-4 border-b border-base-300 py-4">
@@ -46,7 +86,7 @@ export function AvatarPicker({
               // 选同一个文件也要能再触发一次。
               event.target.value = '';
               if (file) {
-                onPick(file);
+                handlePick(file);
               }
             }}
           />
@@ -61,6 +101,16 @@ export function AvatarPicker({
             {busy ? text.avatarSaving : custom ? text.changeAvatar : text.uploadAvatar}
           </button>
         </div>
+        {pickError ? (
+          <p
+            className="m-0 mt-2 flex items-center gap-1.5 text-xs"
+            role="alert"
+            lang={htmlLang[locale]}
+          >
+            <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
+            <span>{pickError}</span>
+          </p>
+        ) : null}
       </div>
     </div>
   );
