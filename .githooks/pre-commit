@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# 提交前检查：格式 + 代码规范，前端后端一起查，全部只查不改文件。
+#
+# 查什么（就是 scripts/check-all.sh 那四步，单一出处，钩子不另拼一套）：
+#   前端：oxlint（规范）、oxfmt --check（格式）、tsc --noEmit（类型）
+#   后端：ruff check（规范）、ruff format --check（格式）
+#
+# 为什么这些能进钩子、构建不能：钩子每次提交都要跑，必须快。oxlint、oxfmt、
+# ruff 都是 Rust 写的，秒级；tsc 用的是 TypeScript 7 的原生编译器，全量类型
+# 检查在这个项目上只要几秒（AGENTS.md 的「验收」一节：含 tsc 的构建"几秒就完"），
+# 所以带上。若将来项目变大、tsc 慢到影响提交体验，把 [3/4] 那步从
+# scripts/check-all.sh 挪回 CI 独占即可，其余步骤不动。
+# 构建（pnpm build）不在钩子里跑，留给 CI（.github/workflows/ci.yml）。
+#
+# 怎么启用：新克隆的仓库在根目录执行一次
+#   bash scripts/setup-hooks.sh
+# 它会把 core.hooksPath 指到 .githooks/ 并给这里的所有钩子加执行权限，
+# 本文件不用单独装。已经启用过的仓库拉下新代码后也是自动生效的。
+#
+# 紧急跳过：git commit --no-verify
+# 跳过意味着这些检查一步都没跑。CI 和后面接手的人还是会撞上同样的问题，
+# 跳过的后果自负；跳完记得尽快补跑 bash scripts/check-all.sh。
+
+set -euo pipefail
+
+# 钩子由 git 在仓库根目录调用；这里再显式回到根目录，
+# 保证手动执行 bash .githooks/pre-commit 调试时行为一致。
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+echo "pre-commit: 开始提交前检查（格式 + 代码规范，前后端）"
+
+if bash scripts/check-all.sh; then
+  echo "pre-commit: 全部通过，继续提交"
+  exit 0
+fi
+
+{
+  echo ""
+  echo "pre-commit: 检查未通过，本次提交已被拦下（文件没有被改动）。"
+  echo "pre-commit: 按上面的提示修完后，自己完整跑一遍：bash scripts/check-all.sh"
+  echo "pre-commit: 紧急情况可以 git commit --no-verify 跳过本钩子，"
+  echo "pre-commit: 但跳过的检查 CI 还是会跑，问题不会消失，后果自负。"
+} >&2
+exit 1

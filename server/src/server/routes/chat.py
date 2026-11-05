@@ -130,8 +130,8 @@ async def chat(
 
     # 同一个请求又来了（重复点击、页面重发）：这一轮已经登记过了，
     # 不能再开一轮，不然上游会生成两遍。
-    if current_turn_id(body.chat_id) == turn_id:
-        if round_in_flight(body.chat_id):
+    if await current_turn_id(body.chat_id) == turn_id:
+        if await round_in_flight(body.chat_id):
             raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
         logger.info("这一轮已经登记过 %s，不再重开", body.chat_id)
         return StreamingResponse(
@@ -140,14 +140,14 @@ async def chat(
 
     # 同一场会话同时只跑一轮。上一轮还在写的时候再发一次，
     # FastGPT 那边会多出一轮，Redis 里的半截文字也会被清掉重来，两轮的片段交错着写。
-    if round_in_flight(body.chat_id):
+    if await round_in_flight(body.chat_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
 
-    if stop_requested(body.chat_id, turn_id):
+    if await stop_requested(body.chat_id, turn_id):
         # 用户在对话请求到达之前就按了停止：这一轮不开。
         # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」。
-        begin_reply(body.chat_id, turn_id, body.message)
-        mark_aborted(body.chat_id)
+        await begin_reply(body.chat_id, turn_id, body.message)
+        await mark_aborted(body.chat_id)
         written = await asyncio.to_thread(
             record_stopped_round, body.chat_id, body.turn_id, body.message
         )
@@ -180,7 +180,7 @@ async def chat(
         await _clear_failed_turn(body.chat_id, body.retry_of, body.message, fastgpt)
 
     # 先登记这一轮，页面断流之后才知道请求有没有落地。
-    begin_reply(body.chat_id, turn_id, body.message)
+    await begin_reply(body.chat_id, turn_id, body.message)
     relay = Relay()
     relay.account_id = account_id
     relay.turn_id = turn_id

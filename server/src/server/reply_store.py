@@ -1,10 +1,12 @@
 import json
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
+# redis.asyncio 的异常和同步客户端同在 redis.exceptions 这个模块里，
+# RedisError 照旧是基类，except 写法不变。
 from redis.exceptions import RedisError
 
 from server.infra.redis_client import get_redis
@@ -29,8 +31,8 @@ class PartialReply:
     question: str | None
 
 
-@contextmanager
-def _tolerate(operation: str, chat_id: UUID) -> Iterator[None]:
+@asynccontextmanager
+async def _tolerate(operation: str, chat_id: UUID) -> AsyncIterator[None]:
     """半截文字是可选的，Redis 写不通就记一条警告，不能把聊天整个弄挂。"""
     try:
         yield
@@ -38,72 +40,74 @@ def _tolerate(operation: str, chat_id: UUID) -> Iterator[None]:
         logger.warning("Redis 写入失败 %s %s", operation, chat_id, exc_info=True)
 
 
-def begin_reply(chat_id: UUID, turn_id: str, question: str) -> None:
+async def begin_reply(chat_id: UUID, turn_id: str, question: str) -> None:
     """登记一轮：编号、提问、状态。刷新页面以后靠它把这一轮认出来。"""
-    with _tolerate("begin_reply", chat_id):
+    async with _tolerate("begin_reply", chat_id):
         ttl = load_settings().redis_key_ttl_seconds
         pipe = get_redis().pipeline(transaction=False)
         pipe.set(_status_key(chat_id), STREAMING, ex=ttl)
         pipe.delete(_text_key(chat_id))
         pipe.set(_turn_key(chat_id), _turn_value(turn_id, question), ex=ttl)
-        pipe.execute()
+        await pipe.execute()
 
 
-def discard_reply(chat_id: UUID) -> None:
+async def discard_reply(chat_id: UUID) -> None:
     """这一轮根本没开始（上游还没接上），登记的信息也一并清掉。"""
-    with _tolerate("discard_reply", chat_id):
-        get_redis().delete(_status_key(chat_id), _text_key(chat_id), _turn_key(chat_id))
+    async with _tolerate("discard_reply", chat_id):
+        await get_redis().delete(
+            _status_key(chat_id), _text_key(chat_id), _turn_key(chat_id)
+        )
 
 
-def append_chunk(chat_id: UUID, text: str) -> None:
+async def append_chunk(chat_id: UUID, text: str) -> None:
     if text == "":
         return
 
-    with _tolerate("append_chunk", chat_id):
+    async with _tolerate("append_chunk", chat_id):
         ttl = load_settings().redis_key_ttl_seconds
         pipe = get_redis().pipeline(transaction=False)
         pipe.set(_status_key(chat_id), STREAMING, ex=ttl)
         pipe.append(_text_key(chat_id), text)
         pipe.expire(_text_key(chat_id), ttl)
-        pipe.execute()
+        await pipe.execute()
 
 
-def _mark(chat_id: UUID, value: str) -> None:
+async def _mark(chat_id: UUID, value: str) -> None:
     """把状态词写成 value，顺手给文字和轮次键续命。"""
     ttl = load_settings().redis_key_ttl_seconds
     pipe = get_redis().pipeline(transaction=False)
     pipe.set(_status_key(chat_id), value, ex=ttl)
     pipe.expire(_text_key(chat_id), ttl)
     pipe.expire(_turn_key(chat_id), ttl)
-    pipe.execute()
+    await pipe.execute()
 
 
-def mark_finished(chat_id: UUID) -> None:
-    with _tolerate("mark_finished", chat_id):
-        _mark(chat_id, _REDIS_FINISHED)
+async def mark_finished(chat_id: UUID) -> None:
+    async with _tolerate("mark_finished", chat_id):
+        await _mark(chat_id, _REDIS_FINISHED)
 
 
-def mark_failed(chat_id: UUID) -> None:
-    with _tolerate("mark_failed", chat_id):
-        _mark(chat_id, FAILED)
+async def mark_failed(chat_id: UUID) -> None:
+    async with _tolerate("mark_failed", chat_id):
+        await _mark(chat_id, FAILED)
 
 
-def mark_aborted(chat_id: UUID) -> None:
+async def mark_aborted(chat_id: UUID) -> None:
     """用户按了停止。已经写出来的文字留着，状态改成 aborted。"""
-    with _tolerate("mark_aborted", chat_id):
-        _mark(chat_id, ABORTED)
+    async with _tolerate("mark_aborted", chat_id):
+        await _mark(chat_id, ABORTED)
 
 
-def store_available() -> bool:
+async def store_available() -> bool:
     try:
-        return bool(get_redis().ping())
+        return bool(await get_redis().ping())
     except RedisError:
         return False
 
 
-def read_partial(chat_id: UUID) -> PartialReply:
+async def read_partial(chat_id: UUID) -> PartialReply:
     """读不通就照旧报错：页面要靠这个分清「服务器没这一轮」和「问不到服务器」。"""
-    raw_status, raw_text, raw_turn = get_redis().mget(
+    raw_status, raw_text, raw_turn = await get_redis().mget(
         _status_key(chat_id), _text_key(chat_id), _turn_key(chat_id)
     )
     status = _as_text(raw_status)
@@ -121,16 +125,16 @@ def read_partial(chat_id: UUID) -> PartialReply:
     return PartialReply(status=status, text=text, turn_id=turn_id, question=question)
 
 
-def round_in_flight(chat_id: UUID) -> bool:
+async def round_in_flight(chat_id: UUID) -> bool:
     """这场会话是不是已经有一轮在写。Redis 不通就当没有，聊天照常走。"""
     try:
-        return read_partial(chat_id).status == STREAMING
+        return (await read_partial(chat_id)).status == STREAMING
     except RedisError:
         logger.warning("Redis 读不到 %s 的状态，按没有在写处理", chat_id, exc_info=True)
         return False
 
 
-def request_stop(chat_id: UUID, turn_id: str) -> None:
+async def request_stop(chat_id: UUID, turn_id: str) -> None:
     """用户按了停止。
 
     记下这一轮的编号：即使这一轮还没开始（停止请求先到），后到的对话请求看到
@@ -139,17 +143,17 @@ def request_stop(chat_id: UUID, turn_id: str) -> None:
     if turn_id == "":
         return
 
-    with _tolerate("request_stop", chat_id):
-        get_redis().set(_stop_key(chat_id), turn_id, ex=_STOP_TTL_SECONDS)
+    async with _tolerate("request_stop", chat_id):
+        await get_redis().set(_stop_key(chat_id), turn_id, ex=_STOP_TTL_SECONDS)
 
 
-def stop_requested(chat_id: UUID, turn_id: str) -> bool:
+async def stop_requested(chat_id: UUID, turn_id: str) -> bool:
     """这一轮是不是已经被要求停下了。Redis 不通就当没有，聊天照常走。"""
     if turn_id == "":
         return False
 
     try:
-        value = get_redis().get(_stop_key(chat_id))
+        value = await get_redis().get(_stop_key(chat_id))
     except RedisError:
         logger.warning(
             "Redis 读不到 %s 的停止标记，按没有停处理", chat_id, exc_info=True
@@ -159,13 +163,43 @@ def stop_requested(chat_id: UUID, turn_id: str) -> bool:
     return value == turn_id
 
 
-def current_turn_id(chat_id: UUID) -> str:
+async def current_turn_id(chat_id: UUID) -> str:
     """当前这一轮的编号。读不到就当没有。"""
     try:
-        return read_partial(chat_id).turn_id or ""
+        return (await read_partial(chat_id)).turn_id or ""
     except RedisError:
         logger.warning("Redis 读不到 %s 的轮次编号，按没有处理", chat_id, exc_info=True)
         return ""
+
+
+# 轮次相关键的全部后缀：状态、半截文字、轮次（带提问）、停止标记。
+# 跟文件底下的 _*_key 构造函数保持一致；限流计数
+# （h2botapp-chat:ratelimit:*）不以这些后缀结尾，下面的清理碰不到它。
+_ROUND_KEY_SUFFIXES = (":status", ":text", ":turn", ":stop")
+
+
+async def clear_orphan_round_keys() -> int:
+    """清掉 h2botapp-chat: 前缀下的孤儿轮次键，返回清了几个。
+
+    只给启动对账（lifespan）用：单进程前提下，进程刚启动时不可能真有
+    一轮在写，这些键必是上一世进程留下的孤儿——为什么可以无条件清，
+    见 lifespan.py 调用处的注释和 docs/CHAT_STREAM_PROTOCOL.md
+    「单进程前提」一节。
+    用 SCAN 不用 KEYS：KEYS 会把整个 Redis 堵住。Redis 不通就如实
+    抛错，调用方接住记警告、不阻止启动（Redis 是可选加固）。
+    """
+    client = get_redis()
+    removed = 0
+    for suffix in _ROUND_KEY_SUFFIXES:
+        batch: list[str] = []
+        async for key in client.scan_iter(match=f"h2botapp-chat:*{suffix}", count=100):
+            batch.append(key)
+            if len(batch) >= 100:
+                removed += await client.delete(*batch)
+                batch.clear()
+        if batch:
+            removed += await client.delete(*batch)
+    return removed
 
 
 def _turn_value(turn_id: str, question: str) -> str:

@@ -1,0 +1,78 @@
+# 持续集成：push 到 main、以及所有 pull request，都会跑这个工作流。
+# 分支名规矩见根目录 AGENTS.md 的「Git」一节（Conventional Branch），
+# 功能分支靠 pull_request 这条触发，不用把每个分支名都列进来。
+#
+# 两个作业并行：前端检查 + 构建，后端检查。
+# 这里只做静态检查和构建验证，故意不跑数据库迁移、不起服务、不跑测试：
+#   - CI 环境没有 PostgreSQL 和 Redis，迁移和服务启动都要连它们，跑了必失败；
+#   - 本仓库没有自动化测试（见 AGENTS.md 的「验收」），所以没有测试步骤。
+# 迁移怎么办：结构变更走 Alembic，验证方式见 server/AGENTS.md 的「迁移」一节。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: 前端检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm 版本显式写死为 12.16.1，与 package.json 的 packageManager 字段、
+      # docs/TECH.md 的版本表保持一致，不让 action 自己去猜。
+      # 必须放在 setup-node 之前，下面的 cache: pnpm 才找得到 pnpm 命令。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.16.1
+
+      # Node 版本读 .nvmrc（lts/jod，即 Node 22 系），与本地开发环境同源；
+      # cache: pnpm 缓存 pnpm store，加速依赖安装。
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # 严格按 pnpm-lock.yaml 安装：锁文件和 package.json 对不上就直接失败，
+      # 保证 CI 装的依赖和本地、和这次提交完全一致。
+      - run: pnpm install --frozen-lockfile
+
+      # 仓库现成的一键检查（package.json 的 check 脚本）：
+      # oxlint（代码规范）+ oxfmt --check（格式，只查不改）+ tsc --noEmit（类型）。
+      - run: pnpm check
+
+      # 再完整构建一次确认能出产物（build = tsc --noEmit + vite build，产物在 dist/）。
+      # 构建成功不代表产物齐全，所以最后确认入口页面 dist/index.html 真的存在。
+      - run: pnpm build
+      - run: test -f dist/index.html
+
+  backend:
+    name: 后端检查
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv 负责装 Python 和依赖；enable-cache 缓存 uv 的下载目录，加速后续运行。
+      # 缓存键按 server/uv.lock 算，锁文件不变就不重新下。
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: server/uv.lock
+
+      # Python 版本按 server/.python-version（3.13）显式装好；
+      # uv sync 也读这个文件，两边不会打架。
+      - run: uv python install 3.13
+
+      # 严格按 server/uv.lock 安装依赖。只装依赖，不连数据库、不起服务。
+      - run: uv sync --frozen
+
+      # ruff 两件套（与 scripts/check-server.sh 在本地跑的是同样两项）：
+      # ruff check 查代码规范，ruff format --check 只查格式、不改文件。
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .

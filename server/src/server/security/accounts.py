@@ -97,18 +97,23 @@ def login_client_ip(request: Request) -> str:
     return client.host if client else "unknown"
 
 
-def raise_if_login_locked(username: str, request: Request) -> None:
-    """进密码验证之前先查账号和 IP 两个维度的锁定（照改密端点的做法）。"""
+async def raise_if_login_locked(username: str, request: Request) -> None:
+    """进密码验证之前先查账号和 IP 两个维度的锁定（照改密端点的做法）。
+
+    限流计数走异步 Redis：本函数跟着变成 async，调用点 await。
+    """
     account_key = login_account_key(username)
     client_ip = login_client_ip(request)
-    locked = is_locked(RATELIMIT_ACCOUNT_SCOPE, account_key) or is_locked(
+    locked = await is_locked(RATELIMIT_ACCOUNT_SCOPE, account_key) or await is_locked(
         RATELIMIT_IP_SCOPE, client_ip
     )
     if locked:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, RATE_LIMITED)
 
 
-def register_login_failure(exc: HTTPException, username: str, request: Request) -> None:
+async def register_login_failure(
+    exc: HTTPException, username: str, request: Request
+) -> None:
     """登录没成时两个维度都记失败。只数 401。
 
     没这个人和密码不对是同一句 401，计数也不分这两种：不然「试几次以后
@@ -117,8 +122,8 @@ def register_login_failure(exc: HTTPException, username: str, request: Request) 
     """
     if exc.status_code != status.HTTP_401_UNAUTHORIZED:
         return
-    register_failure(RATELIMIT_ACCOUNT_SCOPE, login_account_key(username))
-    register_failure(RATELIMIT_IP_SCOPE, login_client_ip(request))
+    await register_failure(RATELIMIT_ACCOUNT_SCOPE, login_account_key(username))
+    await register_failure(RATELIMIT_IP_SCOPE, login_client_ip(request))
 
 
 def _cached_account(session: Session, login_cookie: str | None) -> Account | None:

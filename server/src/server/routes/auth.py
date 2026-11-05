@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Annotated
 
@@ -50,25 +51,31 @@ _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
 
 
 @router.post("/api/login")
-def login(body: LoginRequest, request: Request, response: Response) -> LoginResponse:
+async def login(
+    body: LoginRequest, request: Request, response: Response
+) -> LoginResponse:
     # 先查锁定再进验证：锁定期间连密码哈希都不碰（argon2 是 CPU 活）。
-    raise_if_login_locked(body.username, request)
-    with db_session() as session:
-        try:
-            result, token = _login_account(session, body.username, body.password)
-        except HTTPException as exc:
-            register_login_failure(exc, body.username, request)
-            raise
+    await raise_if_login_locked(body.username, request)
+    # 端点从同步 def 改成 async def：限流计数要 await 异步 Redis 客户端。
+    # 原来「整个端点跑线程池」的用意不变——数据库和 argon2 仍是同步的
+    # CPU/IO 活，打包丢进线程里跑（_login_account_row），不堵事件循环。
+    try:
+        result, token = await asyncio.to_thread(
+            _login_account_row, body.username, body.password
+        )
+    except HTTPException as exc:
+        await register_login_failure(exc, body.username, request)
+        raise
 
     # 登录成功清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的
     # 账号在正常登录，它们的计数不该跟着被清掉（跟改密端点同款语义）。
-    clear_failures(RATELIMIT_ACCOUNT_SCOPE, login_account_key(body.username))
+    await clear_failures(RATELIMIT_ACCOUNT_SCOPE, login_account_key(body.username))
     set_cookie(response, COOKIE_NAME, token)
     return result
 
 
 @router.post("/api/admin/login")
-def admin_login(
+async def admin_login(
     body: LoginRequest, request: Request, response: Response
 ) -> AdminLoginResponse:
     """控制台那一边：只认 role 是 admin 的账号，发 admin_login cookie。
@@ -77,18 +84,16 @@ def admin_login(
     「用户名或密码不正确」；限流也是同一套。控制台界面是后面那批活，
     接口先立起来。
     """
-    raise_if_login_locked(body.username, request)
-    with db_session() as session:
-        try:
-            account = verified_account(session, body.username, body.password)
-            require_role(account, ROLE_ADMIN)
-            token = new_token(session, account)
-            username = account.username
-        except HTTPException as exc:
-            register_login_failure(exc, body.username, request)
-            raise
+    await raise_if_login_locked(body.username, request)
+    try:
+        username, token = await asyncio.to_thread(
+            _admin_login_row, body.username, body.password
+        )
+    except HTTPException as exc:
+        await register_login_failure(exc, body.username, request)
+        raise
 
-    clear_failures(RATELIMIT_ACCOUNT_SCOPE, login_account_key(body.username))
+    await clear_failures(RATELIMIT_ACCOUNT_SCOPE, login_account_key(body.username))
     set_cookie(response, ADMIN_COOKIE_NAME, token)
     return AdminLoginResponse(username=username)
 
@@ -128,7 +133,7 @@ def logout(
 
 
 @router.post("/api/password", status_code=status.HTTP_204_NO_CONTENT)
-def change_password(
+async def change_password(
     body: PasswordChange,
     request: Request,
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
@@ -136,55 +141,108 @@ def change_password(
 ) -> Response:
     """改密码：验旧密码、写新哈希，把这个账号的登录全踢下线。
 
-    argon2 是 CPU 活：端点用同步的，跑在线程池里，不堵事件循环
-    （/api/login 同一个道理）。请求体里有密码，日志只记账号 id。
+    argon2 是 CPU 活：端点改成 async def 之后，验证、哈希与数据库读写
+    仍全部丢进线程里跑（_password_snapshot / verify_password /
+    _apply_password_change），不堵事件循环；限流计数走异步 Redis，
+    直接 await。请求体里有密码，日志只记账号 id。
     管理员改自己的密码也走这里：聊天页和控制台共用这一个端点。
     """
     client = request.client
     client_ip = client.host if client else "unknown"
 
-    with db_session() as session:
-        account = password_account(session, login_cookie, admin_cookie)
-        account_id = str(account.id)
-        # 锁定期间不做验证：不然锁形同虚设，攻击者还能拿这个接口继续试旧密码。
-        locked = is_locked(RATELIMIT_ACCOUNT_SCOPE, account_id) or is_locked(
-            RATELIMIT_IP_SCOPE, client_ip
-        )
-        if locked:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, RATE_LIMITED)
+    # 第一步（线程）：从两边 cookie 里认出账号，带出 id、用户名、role 和旧哈希。
+    account_id, username, role, password_hash = await asyncio.to_thread(
+        _password_snapshot, login_cookie, admin_cookie
+    )
 
-        if not verify_password(account.password_hash, body.old_password):
-            register_failure(RATELIMIT_ACCOUNT_SCOPE, account_id)
-            register_failure(RATELIMIT_IP_SCOPE, client_ip)
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, _OLD_PASSWORD_WRONG)
+    # 锁定期间不做验证：不然锁形同虚设，攻击者还能拿这个接口继续试旧密码。
+    if await is_locked(RATELIMIT_ACCOUNT_SCOPE, account_id) or await is_locked(
+        RATELIMIT_IP_SCOPE, client_ip
+    ):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, RATE_LIMITED)
 
-        if body.new_password != body.new_password_confirm:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, _NEW_PASSWORD_MISMATCH)
+    # 验旧密码（argon2，CPU 活）同样丢线程。错了就两个维度各记一次失败。
+    verified = await asyncio.to_thread(
+        verify_password, password_hash, body.old_password
+    )
+    if not verified:
+        await register_failure(RATELIMIT_ACCOUNT_SCOPE, account_id)
+        await register_failure(RATELIMIT_IP_SCOPE, client_ip)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _OLD_PASSWORD_WRONG)
 
-        policy_error = check_password_policy(
-            body.new_password,
-            account.username,
-            min_length=min_length_for_role(account.role),
-        )
-        if policy_error is not None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
+    if body.new_password != body.new_password_confirm:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _NEW_PASSWORD_MISMATCH)
 
-        # 写哈希和吊销令牌在同一个事务里：不留「密码改了、旧令牌还活着」的缝。
-        # 所有设备都踢，含当前这一台，重新登录。
-        account.password_hash = hash_password(body.new_password)
-        # 密码已经改成自己的了，「必须改密」的标记就地清掉，同一个事务。
-        account.must_change_password = False
-        session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
+    policy_error = check_password_policy(
+        body.new_password,
+        username,
+        min_length=min_length_for_role(role),
+    )
+    if policy_error is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
+
+    # 写哈希和吊销令牌在同一个事务里（_apply_password_change）：不留
+    # 「密码改了、旧令牌还活着」的缝。所有设备都踢，含当前这一台，重新登录。
+    await asyncio.to_thread(
+        _apply_password_change, login_cookie, admin_cookie, body.new_password
+    )
 
     # 只清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的账号在
     # 正常改密，它们的计数不该跟着被清掉。
-    clear_failures(RATELIMIT_ACCOUNT_SCOPE, account_id)
+    await clear_failures(RATELIMIT_ACCOUNT_SCOPE, account_id)
     logger.info("密码已修改 %s", account_id)
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
     # 令牌已经全吊销：两个 cookie 都清掉，不管这次是从哪一边来的。
     clear_cookie(result, COOKIE_NAME)
     clear_cookie(result, ADMIN_COOKIE_NAME)
     return result
+
+
+def _password_snapshot(
+    login_cookie: str | None, admin_cookie: str | None
+) -> tuple[str, str, str, str]:
+    """改密第一步（线程里）：从两边 cookie 里认出账号，带出验证要用的信息。
+
+    返回 (账号 id, 用户名, role, 旧密码哈希)。这一步只读不写：中间的
+    锁定检查（异步 Redis）没法在同步线程里 await，所以认出账号就出来，
+    真正写库的事务在 _apply_password_change 里。
+    """
+    with db_session() as session:
+        account = password_account(session, login_cookie, admin_cookie)
+        return str(account.id), account.username, account.role, account.password_hash
+
+
+def _apply_password_change(
+    login_cookie: str | None,
+    admin_cookie: str | None,
+    new_password: str,
+) -> None:
+    """改密最后一步（线程里）：写新哈希、吊销全部令牌，同一个事务。
+
+    重新按 cookie 认一遍账号：中途账号被删或令牌被吊销的话，
+    password_account 会按会话过期语义报错，不会写到不该写的账号上。
+    """
+    with db_session() as session:
+        account = password_account(session, login_cookie, admin_cookie)
+        account.password_hash = hash_password(new_password)
+        # 密码已经改成自己的了，「必须改密」的标记就地清掉，同一个事务。
+        account.must_change_password = False
+        session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
+
+
+def _login_account_row(username: str, password: str) -> tuple[LoginResponse, str]:
+    """登录的线程那半：开会话、验密码、发令牌（数据库 + argon2）。"""
+    with db_session() as session:
+        return _login_account(session, username, password)
+
+
+def _admin_login_row(username: str, password: str) -> tuple[str, str]:
+    """控制台登录的线程那半：开会话、验密码和 role、发令牌。"""
+    with db_session() as session:
+        account = verified_account(session, username, password)
+        require_role(account, ROLE_ADMIN)
+        token = new_token(session, account)
+        return account.username, token
 
 
 def _login_account(

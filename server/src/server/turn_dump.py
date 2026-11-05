@@ -15,6 +15,7 @@
 别贴进公开渠道。
 """
 
+import asyncio
 import sys
 from uuid import UUID
 
@@ -53,7 +54,10 @@ def _dump_reply_store(session_id: UUID) -> None:
     """Redis 里的半截回复：正在写（或刚落定）那一轮的现场。"""
     print(f"== Redis 半截回复（会话 {session_id}）==")
     try:
-        partial = read_partial(session_id)
+        # read_partial 换成了异步（redis.asyncio）。本工具是同步 CLI，
+        # 进程里没有运行中的事件循环：asyncio.run 临时起一个把这次读取
+        # 跑完，用完即弃，单例客户端绑在临时循环上没有副作用。
+        partial = asyncio.run(read_partial(session_id))
     except RedisError as error:
         print(f"Redis 读不到：{error}")
         print()

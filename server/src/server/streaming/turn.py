@@ -37,7 +37,7 @@ async def relay_turn(
             if isinstance(event, str):
                 if relay.first_content_at is None:
                     relay.first_content_at = time.monotonic()
-                reply_store.append_chunk(chat_id, event)
+                await reply_store.append_chunk(chat_id, event)
                 relay.text += event
                 outgoing = framing.chunk(event)
                 logger.debug("发给页面 %s", outgoing.removesuffix("\n\n"))
@@ -45,7 +45,7 @@ async def relay_turn(
                 relay.sent = True
                 continue
 
-            reply_store.mark_finished(chat_id)
+            await reply_store.mark_finished(chat_id)
             # 结局落定：done 帧说 completed。done 帧是即时判断，库是
             # 最终事实（见 sse_stream 的 docstring）。
             relay.done_status = COMPLETED
@@ -67,7 +67,9 @@ async def relay_turn(
         relay.done_reason = "stop"
         # 停止端点在掐这个任务之前已经叫停了上游，摘要行照实记。
         relay.stop_sent = True
-        reply_store.mark_aborted(chat_id)
+        # 这里可以放心地 await Redis：取消已经投递过了，这一下写入带着
+        # 短超时，写完仍把 CancelledError 原样抛上去，停止的语义不变。
+        await reply_store.mark_aborted(chat_id)
         raise
     except FastGPTError:
         relay.failed = True
@@ -82,9 +84,9 @@ async def relay_turn(
         try:
             if relay.failed:
                 if relay.sent:
-                    reply_store.mark_failed(chat_id)
+                    await reply_store.mark_failed(chat_id)
                 else:
-                    reply_store.discard_reply(chat_id)
+                    await reply_store.discard_reply(chat_id)
         finally:
             # 不能 await：任务被取消时再 await 会把取消吞掉。
             relay.queue.put_nowait(None)

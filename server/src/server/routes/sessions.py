@@ -149,7 +149,7 @@ async def delete_session(
 
     # (d) 走到这里会话必定从用户眼前消失：清掉 Redis 里半截的回答缓存。
     # 上面 503 那条路不清——会话还活着，半截内容要原样留着。
-    discard_reply(session_id)
+    await discard_reply(session_id)
 
     # (b) 本地行刚删掉、或者本来就没有（outcome == "missing"），都照样
     # 接着删上游。上游的删除接口对已删的会话是幂等的（delHistory 对
@@ -188,10 +188,10 @@ async def abort_session_reply(
     turn_id = str(body.turn_id) if body is not None and body.turn_id is not None else ""
     if turn_id == "":
         # 页面没带编号就用当前这一轮的编号。
-        turn_id = current_turn_id(session_id)
+        turn_id = await current_turn_id(session_id)
     # 停止这一侧的日志行也带上轮次编号，跟对话那一侧的日志对得上。
     set_turn_context(turn_id)
-    request_stop(session_id, turn_id)
+    await request_stop(session_id, turn_id)
 
     task = registry.running.get(session_id)
     if not task:
@@ -211,7 +211,7 @@ async def abort_session_reply(
 
 
 @router.get("/api/sessions/{session_id}/partial")
-def read_session_partial(
+async def read_session_partial(
     session_id: UUID,
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> PartialReplyResponse:
@@ -224,11 +224,12 @@ def read_session_partial(
     「刷新续传与断流恢复」一节，2026-11-05 维护者拍板）。Redis 读不通照旧抛错（500）：
     那是「问不到服务器」，不是「没在写」，客户端靠状态码区分这两种。
     """
-    with db_session() as session:
-        account = account_from_cookie(session, login_cookie)
-        require_session(session, account, session_id)
+    # 端点改成 async def：读半截文字要 await 异步 Redis 客户端。
+    # 鉴权那步（查库）仍丢进线程跑：authorize_session 里面就是
+    # account_from_cookie + require_session，和原来的写法一致。
+    await asyncio.to_thread(authorize_session, session_id, login_cookie)
 
-    partial = read_partial(session_id)
+    partial = await read_partial(session_id)
     if partial.status != STREAMING:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _PARTIAL_NOT_STREAMING)
     return PartialReplyResponse(
@@ -265,7 +266,7 @@ async def read_session_messages(
             status.HTTP_503_SERVICE_UNAVAILABLE, _MESSAGES_READ_ERROR
         ) from None
 
-    messages = merge_current_turn(stored, read_partial(session_id))
+    messages = merge_current_turn(stored, await read_partial(session_id))
     return HistoryResponse(total=len(messages), messages=messages)
 
 
