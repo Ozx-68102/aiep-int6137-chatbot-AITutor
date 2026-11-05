@@ -216,6 +216,7 @@ export function ChatMain({
                           stoppedText={text.replyStopped}
                           retryLabel={text.retry}
                           entering={entering}
+                          retryBusy={pending}
                           onRetry={onRetry}
                           onAnimationEnd={() => onAnimationEnd(message.id)}
                           copyLabel={text.copy}
@@ -256,6 +257,7 @@ export function ChatMain({
                         stoppedText={text.replyStopped}
                         retryLabel={text.retry}
                         entering={entering}
+                        retryBusy={pending}
                         onRetry={onRetry}
                         onAnimationEnd={() => onAnimationEnd(message.id)}
                         copyLabel={text.copy}

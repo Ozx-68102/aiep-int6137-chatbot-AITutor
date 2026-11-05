@@ -32,6 +32,7 @@ export function MessageActions({
   stoppedText,
   retryLabel,
   entering = false,
+  retryBusy = false,
   onRetry,
   onAnimationEnd,
   canEdit = false,
@@ -51,6 +52,8 @@ export function MessageActions({
   stoppedText: string;
   retryLabel: string;
   entering?: boolean;
+  /** 会话有一轮在飞（pending）：重试按钮一律禁用——服务器同一场会话只跑一轮，再点只会撞 409。 */
+  retryBusy?: boolean;
   onRetry: (turnId: string) => void;
   onAnimationEnd?: () => void;
   /** 编辑按钮：只出现在最后一轮的用户提问下（docs/MESSAGE_ACTIONS.md 第三期）。 */
@@ -77,6 +80,21 @@ export function MessageActions({
   const copyTimer = useRef<number | null>(null);
   // 一次只允许一个在飞的反馈请求：请求期间再点忽略，避免回退互相覆盖。
   const votingRef = useRef(false);
+  // 重试按钮的本地加载态（P8）：点击立即转圈/禁用，防止连点被 sendingRef
+  // 静默吞掉、看着像没点上。正常情况下这条气泡马上被重试流程移除，组件
+  // 自然卸载；引擎没接（比如找不到提问原文直接拒绝）时靠下面的兜底还原。
+  const [retryClicked, setRetryClicked] = useState(false);
+  useEffect(() => {
+    if (!retryClicked) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setRetryClicked(false);
+    }, 2000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [retryClicked]);
   useEffect(
     () => () => {
       if (copyTimer.current !== null) {
@@ -155,9 +173,17 @@ export function MessageActions({
           <button
             type="button"
             className="btn btn-sm btn-outline btn-neutral"
-            onClick={() => onRetry(message.turnId ?? '')}
+            disabled={retryBusy || retryClicked}
+            onClick={() => {
+              setRetryClicked(true);
+              onRetry(message.turnId ?? '');
+            }}
           >
-            <RotateCcw className="size-4" aria-hidden="true" />
+            {retryClicked ? (
+              <span className="loading loading-spinner loading-xs" aria-hidden="true" />
+            ) : (
+              <RotateCcw className="size-4" aria-hidden="true" />
+            )}
             {retryLabel}
           </button>
         </div>
