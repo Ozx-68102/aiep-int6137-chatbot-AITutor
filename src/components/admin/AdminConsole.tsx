@@ -10,6 +10,7 @@ import {
 } from '../../api/admin.ts';
 import {explain} from '../../api/failure.ts';
 import {ApiError} from '../../api/http.ts';
+import {useDocumentMeta} from '../../hooks/use-document-meta.ts';
 import {translations} from '../../i18n/index.ts';
 import {readCachedProfile} from '../../session/profile-cache.ts';
 import {htmlLang, localeFromSystem, type Locale} from '../../type/locale.ts';
@@ -41,10 +42,9 @@ export function AdminConsole() {
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  useEffect(() => {
-    document.documentElement.lang = htmlLang[locale];
-    document.title = 'H^2 Bot';
-  }, [locale]);
+  // lang 和标签页标题走 useDocumentMeta（O8：与 ChatApp 的同款效果消重）；
+  // 控制台整页独立，标题带上页面名（N11）。
+  useDocumentMeta(locale, text.adminConsole);
 
   useEffect(() => {
     let cancelled = false;

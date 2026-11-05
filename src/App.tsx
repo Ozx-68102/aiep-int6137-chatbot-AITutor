@@ -1,4 +1,5 @@
 import {type SubmitEvent, useEffect, useRef, useState} from 'react';
+import {useDocumentMeta} from './hooks/use-document-meta.ts';
 import {narrowScreenNow, useNarrowScreen} from './hooks/use-narrow-screen.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
 import {chatIdFromPath, usePathRouting} from './hooks/use-path-routing.ts';
@@ -222,10 +223,11 @@ function ChatApp() {
     });
   }
 
-  useEffect(() => {
-    document.documentElement.lang = htmlLang[locale];
-    document.title = 'H^2 Bot';
-  }, [locale]);
+  // 标签页标题（N11）：有活跃会话且有标题就是「{会话名} - H^2 Bot」，
+  // 新对话、无标题、未登录都只是「H^2 Bot」。切会话、改名、置顶刷新
+  // （sessions 整份替换）、登录登出都经由 active 自动跟随，不用额外接线。
+  // lang 与 title 两件事统一住在 useDocumentMeta（O8）。
+  useDocumentMeta(locale, active?.title ?? null);
 
   useEffect(() => {
     // 窗口从窄变宽：按用户之前的偏好把侧边栏恢复回去。
