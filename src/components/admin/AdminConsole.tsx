@@ -1,4 +1,5 @@
-import {useEffect, useState} from 'react';
+import {CircleAlert, RotateCw} from 'lucide-react';
+import {useEffect, useRef, useState} from 'react';
 import {
   adminLogin,
   adminLogout,
@@ -37,6 +38,8 @@ export function AdminConsole() {
   const [resetUsername, setResetUsername] = useState<string | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = htmlLang[locale];
@@ -69,6 +72,76 @@ export function AdminConsole() {
       cancelled = true;
     };
   }, [locale]);
+
+  /** 手动刷新：重拉账号表，出错就显示在表格上方的警示行里。 */
+  async function refreshAccounts() {
+    if (refreshBusy) {
+      return;
+    }
+    setRefreshBusy(true);
+    setRefreshError(null);
+    try {
+      setAccounts(await fetchAdminAccounts());
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        // 登录过期：带着服务器给的说法回登录表单。
+        enterLoginForm(error.detail);
+        return;
+      }
+      setRefreshError(explain(error, locale, text.connectionError));
+    } finally {
+      setRefreshBusy(false);
+    }
+  }
+
+  // 轮询的每一拍要读到最新的对话框与手动刷新状态：渲染期间写 ref 被禁止，
+  // 所以放进效果里镜像（和 use-session-actions 的 depsRef 同一套路）。
+  const pollSkipRef = useRef({dialogOpen: false, refreshBusy: false});
+  useEffect(() => {
+    pollSkipRef.current = {
+      dialogOpen: confirmLogout || resetUsername !== null || resetResult !== null,
+      refreshBusy,
+    };
+  });
+
+  // 自动轮询：账号列表打开（即已登录）时，每 30 秒静默重拉一次。
+  // 以下情况跳过这一拍，且都不动管理员的本地交互态：
+  // - document.hidden：页面没人看，刷新没有意义；恢复可见后下一拍自然继续；
+  // - 任何对话框/面板开着（退出确认、重置密码确认、新密码面板）：
+  //   别把管理员正在做的事刷掉，等全部关上再说；
+  // - 手动刷新在飞：避免两个请求并发互相覆盖。
+  // 静默合并：成功就整表替换数据，不弹提示；失败（包括 401）什么都不做，
+  // 等下一拍或手动刷新——登录态真过期了，会由管理员下一次显式操作接住。
+  const accountsOpen = accounts !== null;
+  useEffect(() => {
+    if (!accountsOpen) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
+      const {dialogOpen, refreshBusy: manualBusy} = pollSkipRef.current;
+      if (dialogOpen || manualBusy) {
+        return;
+      }
+      fetchAdminAccounts().then(
+        (items) => {
+          if (!cancelled) {
+            setAccounts(items);
+          }
+        },
+        () => {
+          // 静默轮询：失败不打扰管理员。
+        },
+      );
+    }, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [accountsOpen]);
 
   async function submitLogin(username: string, password: string) {
     if (loginBusy) {
@@ -112,6 +185,7 @@ export function AdminConsole() {
 
   function enterLoginForm(detail: string | null) {
     setAccounts(null);
+    setRefreshError(null);
     setConfirmLogout(false);
     setLogoutError(null);
     setResetUsername(null);
@@ -166,17 +240,47 @@ export function AdminConsole() {
         <h1 className="m-0 text-lg" lang={htmlLang[locale]}>
           {text.adminConsole}
         </h1>
-        <button
-          type="button"
-          className="btn btn-outline"
-          onClick={() => {
-            setLogoutError(null);
-            setConfirmLogout(true);
-          }}
-        >
-          <span lang={htmlLang[locale]}>{text.logOut}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            aria-label={text.refreshAccounts}
+            title={text.refreshAccounts}
+            disabled={refreshBusy}
+            aria-busy={refreshBusy}
+            onClick={() => {
+              void refreshAccounts();
+            }}
+          >
+            {refreshBusy ? (
+              <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+            ) : (
+              <RotateCw aria-hidden="true" className="size-4" />
+            )}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => {
+              setLogoutError(null);
+              setConfirmLogout(true);
+            }}
+          >
+            <span lang={htmlLang[locale]}>{text.logOut}</span>
+          </button>
+        </div>
       </header>
+      {refreshError !== null ? (
+        <p
+          className="m-0 flex items-center gap-1.5"
+          role="alert"
+          lang={refreshError === text.connectionError ? htmlLang[locale] : 'zh-Hans'}
+        >
+          <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
+          <span>{refreshError}</span>
+        </p>
+      ) : null}
+      {/* 账号表全量渲染，不做分页：账号数上百再考虑后端分页。 */}
       <div className="card overflow-x-auto border border-base-300 bg-base-100">
         <table className="table table-zebra">
           <thead>
@@ -189,6 +293,13 @@ export function AdminConsole() {
             </tr>
           </thead>
           <tbody>
+            {accounts.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="py-8 text-center text-stone-500" lang={htmlLang[locale]}>
+                  {text.noAccounts}
+                </td>
+              </tr>
+            ) : null}
             {accounts.map((account) => (
               <tr key={account.username}>
                 <td className="break-all">{account.username}</td>
