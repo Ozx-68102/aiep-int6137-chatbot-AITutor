@@ -11,10 +11,12 @@ from server.errors import install_handlers
 from server.lifespan import lifespan
 from server.middleware import RefreshLoginCookie
 from server.routes import routers
+from server.security.headers import SecurityHeaders
 
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(RefreshLoginCookie)
+app.add_middleware(SecurityHeaders)
 install_handlers(app)
 for _router in routers:
     app.include_router(_router)

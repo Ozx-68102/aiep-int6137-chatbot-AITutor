@@ -121,6 +121,8 @@ def _ensure_initial_account(session: Session) -> None:
             id=uuid4(),
             username=_INITIAL_USERNAME,
             password_hash=PasswordHasher().hash(_INITIAL_PASSWORD),
+            # 预设口令是公开写死的，第一次登录就得改掉。
+            must_change_password=True,
             language_setting=LanguageSetting(locale=_INITIAL_LOCALE),
         ),
     )
@@ -148,6 +150,9 @@ def _ensure_console_admin(session: Session) -> None:
             username=_CONSOLE_USERNAME,
             password_hash=PasswordHasher().hash(_CONSOLE_PASSWORD),
             role="admin",
+            # 同上：预设的 admin/admin 必须改掉。控制台那侧暂时不强制
+            # 这个标记（见 routes/admin.py 的注释），但标要照打。
+            must_change_password=True,
             language_setting=LanguageSetting(locale=_INITIAL_LOCALE),
         ),
     )

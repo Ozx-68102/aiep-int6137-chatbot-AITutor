@@ -55,6 +55,10 @@ class SessionPin(BaseModel):
 class LoginResponse(BaseModel):
     locale: str
     sessions: list[SessionItem]
+    # 这个账号是不是被标了「必须改密」（预设账号、被控制台重置过密码的
+    # 账号）。前端拿它决定要不要先把用户按到改密界面去。命名跟响应模型
+    # 的现有约定走：snake_case、不带 alias（同 avatar_url、pinned_at）。
+    must_change_password: bool
 
 
 class AdminLoginResponse(BaseModel):
@@ -92,6 +96,10 @@ class ProfileResponse(BaseModel):
     # 头像的地址。默认头像由前端提供（/avatar-default.svg），
     # 自己传的头像走接口，地址后面带内容哈希：换了图地址就变，缓存自动失效。
     avatar_url: str
+    # 同 LoginResponse.must_change_password。默认 False 是过渡态：构造
+    # 这个模型的 routes/profile.py 还没把账号上的真值传进来，在那之前
+    # 这个接口先恒回 false；登录响应里的值是真的。
+    must_change_password: bool = False
 
 
 class ProfileUpdate(BaseModel):
@@ -155,12 +163,14 @@ class HistoryResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    # 语言字段（locale）已删：后端没有任何地方读它，报错文案的三语化
+    # 由前端按状态码映射负责。Pydantic v2 默认 extra=ignore，旧前端
+    # 继续发 locale 也不会 422，字段被静默丢掉。
     model_config = ConfigDict(populate_by_name=True)
 
     message: str = Field(min_length=1, max_length=8000)
     chat_id: UUID = Field(alias="chatId")
     turn_id: UUID = Field(alias="turnId")
-    locale: str | None = None
     # 重发哪一轮：带着它就是把上一轮删掉，重新答一遍同一句提问。
     retry_of: UUID | None = Field(default=None, alias="retryOf")
 

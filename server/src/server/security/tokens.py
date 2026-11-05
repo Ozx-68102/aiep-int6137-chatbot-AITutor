@@ -38,31 +38,42 @@ def new_token(session: Session, account: Account) -> str:
     return token
 
 
-def renew_login_token(session: Session, login_cookie: str | None) -> UUID | None:
-    """校验加续期合成一条 SQL：还没过期就续期，并把账号 id 带回来。
+def renew_login_token(
+    session: Session, login_cookie: str | None
+) -> tuple[UUID, bool] | None:
+    """校验加续期合成一条 SQL：还没过期就续期，把账号 id 和该账号的
+    must_change_password 标记一起带回来。
 
     原来是 SELECT 查到行、ORM 再写回 expires_at，一件事跑两趟；现在
-    UPDATE ... WHERE expires_at > now() RETURNING account_id 一趟做完。
+    UPDATE ... WHERE expires_at > now() RETURNING 一趟做完。WHERE 里带上
+    关联 account 的条件，PostgreSQL 就把这条 UPDATE 渲染成
+    UPDATE login_token SET ... FROM account WHERE ...，RETURNING 顺带
+    account 上的标记列——还是一轮数据库往返，不加第二次查询。
     令牌不存在或者已经过期都返回 None——401 的语义留在调用方，不变。
     synchronize_session=False：会话里不会挂着 LoginToken 对象，不需要同步，
     也省掉 auto 策略先做的那次 SELECT。
     """
     if login_cookie is None or login_cookie == "":
         return None
-    return session.scalar(
+    row = session.execute(
         update(LoginToken)
         .where(
             LoginToken.token_hash == token_hash(login_cookie),
             LoginToken.expires_at > func.now(),
+            LoginToken.account_id == Account.id,
         )
         .values(expires_at=login_deadline())
-        .returning(LoginToken.account_id)
+        .returning(LoginToken.account_id, Account.must_change_password)
         .execution_options(synchronize_session=False)
-    )
+    ).first()
+    if row is None:
+        return None
+    account_id, must_change_password = row
+    return account_id, must_change_password
 
 
-def renew_cookie_token(login_cookie: str) -> UUID | None:
-    """中间件那一份：自己开会话，校验加续期，把账号 id 带回来。"""
+def renew_cookie_token(login_cookie: str) -> tuple[UUID, bool] | None:
+    """中间件那一份：自己开会话，校验加续期，把账号 id 和标记带回来。"""
     with db_session() as session:
         return renew_login_token(session, login_cookie)
 

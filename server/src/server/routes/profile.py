@@ -5,6 +5,7 @@ from fastapi import (
     APIRouter,
     Cookie,
     File,
+    Header,
     HTTPException,
     Response,
     UploadFile,
@@ -66,6 +67,7 @@ def upload_avatar(
 @router.get("/api/avatar")
 def read_avatar(
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ) -> Response:
     with db_session() as session:
         account = account_from_cookie(session, login_cookie)
@@ -74,14 +76,43 @@ def read_avatar(
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _NO_AVATAR)
 
+    etag = f'"{_avatar_version(data)}"'
+    # 条件请求：浏览器缓存里的 ETag 和当前一致，说明图没变，回 304
+    # 不带 body，省一次图片传输。不匹配就走下面的原逻辑。
+    if _etag_matches(if_none_match, etag):
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED,
+            headers={"ETag": etag},
+        )
+
     return Response(
         content=data,
         media_type="image/png",
         headers={
             "Cache-Control": "private, max-age=86400",
-            "ETag": f'"{_avatar_version(data)}"',
+            "ETag": etag,
         },
     )
+
+
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    """If-None-Match 里有没有和当前 ETag 等值的项（忽略 W/ 前缀和引号）。"""
+    if if_none_match is None:
+        return False
+    if if_none_match.strip() == "*":
+        # 星号按 HTTP 语义匹配任何当前表示。
+        return True
+    current = _strip_etag(etag)
+    # 逗号分隔的多个值逐个比对；ETag 值本身不含逗号，直接 split 就够。
+    return any(_strip_etag(item) == current for item in if_none_match.split(","))
+
+
+def _strip_etag(value: str) -> str:
+    """去掉弱校验前缀和引号，留下可比较的裸值。"""
+    value = value.strip()
+    if value[:2].upper() == "W/":
+        value = value[2:].strip()
+    return value.strip('"')
 
 
 def _profile_response(account: Account) -> ProfileResponse:
@@ -97,6 +128,7 @@ def _profile_response(account: Account) -> ProfileResponse:
         username=account.username,
         locale=locale,
         avatar_url=_avatar_url(account),
+        must_change_password=account.must_change_password,
     )
 
 

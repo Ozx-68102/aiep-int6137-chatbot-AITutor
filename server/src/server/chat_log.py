@@ -142,29 +142,33 @@ def fail_stuck_rounds() -> int:
 
 
 def read_messages(session_id: UUID) -> list[StoredMessage]:
-    """一场会话的记录，按先后顺序。读不出来就当没有，让上游那份顶上。"""
-    try:
-        with db_session() as session:
-            rows = session.scalars(
-                select(ChatMessage)
-                .where(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.seq)
-            ).all()
-            # 在会话还开着的时候把内容取出来：会话一关，这些行就读不到了。
-            return [
-                StoredMessage(
-                    id=str(row.id),
-                    turn_id=str(row.turn_id),
-                    role=ROLE_USER if row.role == ROLE_USER else ROLE_ASSISTANT,
-                    text=row.text,
-                    status=row.status,
-                    seq=row.seq,
-                )
-                for row in rows
-            ]
-    except SQLAlchemyError:
-        logger.warning("会话记录读不出来 %s", session_id, exc_info=True)
-        return []
+    """一场会话的记录，按先后顺序。数据库错误如实上抛。
+
+    这里是 HTTP 读路径（GET messages；history.backfill_session 抄完也走
+    这里），SQLAlchemyError 由路由接住回 503。不能吞掉异常返回空列表：
+    那样路由回 200 加空历史，把数据库故障伪装成「没有消息」，页面分不清
+    是库坏了还是这场会话真是空的。
+    对比下面的 _write：轮次进行中的写库失败是故意吞的（归档降级，上游
+    还有一份兜底）。读写两个方向语义不同，别拉齐。
+    """
+    with db_session() as session:
+        rows = session.scalars(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.seq)
+        ).all()
+        # 在会话还开着的时候把内容取出来：会话一关，这些行就读不到了。
+        return [
+            StoredMessage(
+                id=str(row.id),
+                turn_id=str(row.turn_id),
+                role=ROLE_USER if row.role == ROLE_USER else ROLE_ASSISTANT,
+                text=row.text,
+                status=row.status,
+                seq=row.seq,
+            )
+            for row in rows
+        ]
 
 
 def read_question(session_id: UUID, turn_id: UUID) -> str | None:
@@ -173,6 +177,10 @@ def read_question(session_id: UUID, turn_id: UUID) -> str | None:
     删轮之前用：重发时旧轮可能只在上游留下一条悬空提问记录，
     请求体里带的可能是新文字（编辑重发），只有表里的原文才能和它对上。
     要在 delete_round 删行之前调用，行删了就查不到了。
+
+    吞掉数据库错误是有意的：这里是聊天重发路径，不是 HTTP 读端点，
+    读不到原文只是退化成「找不到悬空记录」，不该让重发整个失败。
+    如实上抛的读路径见 read_messages。
     """
     try:
         with db_session() as session:
@@ -192,6 +200,7 @@ def has_turn(session_id: UUID, turn_id: UUID) -> bool:
     """这场会话的表里有没有这一轮（点赞点踩端点用）。
 
     读库失败按没有处理：宁可回 404，也不把一个查不到的轮次放去上游。
+    这个吞是有意的（失败方向保守）；如实上抛的读路径见 read_messages。
     """
     try:
         with db_session() as session:

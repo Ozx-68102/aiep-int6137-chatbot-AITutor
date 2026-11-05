@@ -143,8 +143,8 @@ def account_from_cookie(session: Session, login_cookie: str | None) -> Account:
     """
     account = _cached_account(session, login_cookie)
     if account is None:
-        account_id = renew_login_token(session, login_cookie)
-        account = None if account_id is None else _account_by_id(session, account_id)
+        renewed = renew_login_token(session, login_cookie)
+        account = None if renewed is None else _account_by_id(session, renewed[0])
     if account is None:
         # 没带 cookie 的是匿名请求：401 维持现状（不带 reason）。带了 cookie
         # 但不认识（过期/被吊销/被删）才是会话过期语义，带上 expired。
@@ -163,8 +163,8 @@ def admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
     不像登录那样需要把「密码对了但角色不对」分开说。
     中间件的缓存只盖聊天侧的 login cookie，控制台这边自己查一轮。
     """
-    account_id = renew_login_token(session, admin_cookie)
-    account = None if account_id is None else _account_by_id(session, account_id)
+    renewed = renew_login_token(session, admin_cookie)
+    account = None if renewed is None else _account_by_id(session, renewed[0])
     if account is None or account.role != ROLE_ADMIN:
         # 同 account_from_cookie：匿名请求维持现状，cookie 不认识才算会话过期。
         if not admin_cookie:
@@ -186,12 +186,12 @@ def password_account(
     account = _cached_account(session, login_cookie)
     if account is not None and account.role == ROLE_CHAT:
         return account
-    account_id = renew_login_token(session, login_cookie)
-    account = None if account_id is None else _account_by_id(session, account_id)
+    renewed = renew_login_token(session, login_cookie)
+    account = None if renewed is None else _account_by_id(session, renewed[0])
     if account is not None and account.role == ROLE_CHAT:
         return account
-    account_id = renew_login_token(session, admin_cookie)
-    account = None if account_id is None else _account_by_id(session, account_id)
+    renewed = renew_login_token(session, admin_cookie)
+    account = None if renewed is None else _account_by_id(session, renewed[0])
     if account is not None and account.role == ROLE_ADMIN:
         return account
     if not login_cookie and not admin_cookie:

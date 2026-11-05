@@ -44,6 +44,12 @@ class Account(Base):
     role: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'chat'")
     )
+    # 这个账号是不是必须改密码：预设账号（test01、控制台 admin）和控制台
+    # 重置出来的密码都打标，聊天侧的接口被中间件一律拦成 403（豁免清单
+    # 见 middleware.py），用户自己改密成功才清掉。
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     # 用户自己传的头像。存的是处理过的图（256 见方的 PNG），空着就用默认头像。
     # 延迟加载：几十 KB 的 bytea，绝大多数查询用不到它，别跟着行一起背；
     # 真正读 account.avatar 时才多一条按主键的 SELECT（都在 db_session 里，

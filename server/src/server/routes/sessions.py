@@ -6,15 +6,15 @@
 
 import asyncio
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, HTTPException, Response, status
-from sqlalchemy import delete
+from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, db_session
-from server.errors import SERVER_ERROR
 from server.fastgpt import FastGPTError
 from server.history import backfill_session, merge_current_turn
 from server.log import set_turn_context
@@ -54,15 +54,29 @@ _PARTIAL_NOT_STREAMING = "这一轮已经不在写了"
 # 点赞点踩（第四期）：轮次找不到、上游没收到，各一句。detail 一律字符串。
 _FEEDBACK_TURN_MISSING = "找不到这一轮，没法记反馈"
 _FEEDBACK_UPSTREAM_ERROR = "反馈没送到，稍后再试"
+# 读端点碰上数据库读不出来时的 503：不能把错误吞成 200 加空列表，
+# 那会把数据库故障伪装成「没有记录」，页面分不清。
+_SESSIONS_READ_ERROR = "暂时读不到会话列表，请稍后再试"
+_MESSAGES_READ_ERROR = "暂时读不到记录，请稍后再试"
+# 删会话：本地数据库出错回 503，此时上游一点没动，会话完好可重试。
+_DELETE_DB_ERROR = "暂时删不掉会话，请稍后再试"
 
 
 @router.get("/api/sessions")
 def list_sessions(
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> list[SessionItem]:
-    with db_session() as session:
-        account = account_from_cookie(session, login_cookie)
-        return session_items(account)
+    try:
+        with db_session() as session:
+            account = account_from_cookie(session, login_cookie)
+            return session_items(account)
+    except SQLAlchemyError:
+        # 数据库读不出来：如实报 503。吞掉的话页面会以为这个账号
+        # 一场会话都没有。
+        logger.warning("会话列表读不出来", exc_info=True)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, _SESSIONS_READ_ERROR
+        ) from None
 
 
 @router.post("/api/sessions")
@@ -113,20 +127,48 @@ async def delete_session(
     session_id: UUID,
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> Response:
+    """删会话：先删本地，再删上游（维护者拍板的顺序）。
+
+    老顺序是先删上游历史再删本地行：上游成功、本地失败时，会留下一个
+    用户看得见、却删不掉的僵尸会话。新顺序保证：会话从用户眼前消失时，
+    本地一定已经删掉了；上游的残留用户看不见，删失败只记日志。
+    """
     await asyncio.to_thread(authorize_session, session_id, login_cookie)
     # 配置检查放在鉴权之后（同 /api/chat 的理由）。
     fastgpt = require_client()
 
+    # (a) 先删本地行。数据库出错 → 503：这时上游一点没动，会话完好，
+    # 用户可以稍后重试。
     try:
-        await fastgpt.delete_history(session_id)
-    except FastGPTError:
+        outcome = await asyncio.to_thread(_delete_session_row, session_id, login_cookie)
+    except SQLAlchemyError:
+        logger.warning("删会话 %s：本地数据库出错", session_id, exc_info=True)
         raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            SERVER_ERROR,
+            status.HTTP_503_SERVICE_UNAVAILABLE, _DELETE_DB_ERROR
         ) from None
 
-    await asyncio.to_thread(_delete_session_row, session_id, login_cookie)
+    # (d) 走到这里会话必定从用户眼前消失：清掉 Redis 里半截的回答缓存。
+    # 上面 503 那条路不清——会话还活着，半截内容要原样留着。
     discard_reply(session_id)
+
+    # (b) 本地行刚删掉、或者本来就没有（outcome == "missing"），都照样
+    # 接着删上游。上游的删除接口对已删的会话是幂等的（delHistory 对
+    # 不存在的会话回 404，delete_history 把 404 当成功），多叫一次没有
+    # 副作用。「本来就没有」覆盖的是上次尝试留下的中间态：上次删掉了
+    # 本地行、没删成上游（进程死在半路，或并发的两个删除请求一前一后），
+    # 这次要是跳过，上游那份残留就永远没人清了。
+    # (c) 上游删失败不再改响应：会话已经从用户眼前消失，回错误码只会让
+    # 页面把一场已经不存在的会话显示成「删除失败」。异常文本自带
+    # step/状态码/响应开头，记一行 warning，照样回 204。
+    try:
+        await fastgpt.delete_history(session_id)
+    except FastGPTError as exc:
+        logger.warning(
+            "删会话 %s：本地已处理（%s），上游历史没删掉：%s",
+            session_id,
+            outcome,
+            exc,
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -209,9 +251,19 @@ async def read_session_messages(
     """
     await asyncio.to_thread(authorize_session, session_id, login_cookie)
 
-    stored = await asyncio.to_thread(chat_log.read_messages, session_id)
-    if not stored:
-        stored = await backfill_session(session_id)
+    try:
+        stored = await asyncio.to_thread(chat_log.read_messages, session_id)
+        if not stored:
+            stored = await backfill_session(session_id)
+    except SQLAlchemyError:
+        # read_messages 的数据库错误现在如实上抛（见 chat_log.read_messages
+        # 的 docstring）：这里接住回 503，不让数据库故障伪装成「空会话」。
+        # 上游失败由 backfill_session 自己转成 502（HTTPException），
+        # 不会被这个 except 截住。
+        logger.warning("会话 %s 记录读不出来", session_id, exc_info=True)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, _MESSAGES_READ_ERROR
+        ) from None
 
     messages = merge_current_turn(stored, read_partial(session_id))
     return HistoryResponse(total=len(messages), messages=messages)
@@ -249,13 +301,35 @@ async def update_feedback(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _delete_session_row(session_id: UUID, login_cookie: str | None) -> None:
+def _delete_session_row(
+    session_id: UUID, login_cookie: str | None
+) -> Literal["deleted", "missing"]:
+    """删掉本地的会话行。三种结果，调用方分开对待。
+
+    - "deleted"：行在，删掉了；
+    - "missing"：行本来就没有（并发的重复删除，或上次尝试已删掉本地
+      行），调用方仍要接着删上游；
+    - 数据库错误：SQLAlchemyError 如实上抛，调用方回 503，上游一点不动。
+
+    不用 require_session：它的 404 是「会话不存在」的端点语义，而这里
+    「不存在」是幂等删除的正常结果，不是错误。鉴权在前面
+    authorize_session 已经做过，这里再按账号对一遍是第二道保险——
+    别人的会话碰都不碰。
+    """
     with db_session() as session:
         account = account_from_cookie(session, login_cookie)
-        chat_session = require_session(session, account, session_id)
+        chat_session = session.scalar(
+            select(ChatSession).where(
+                ChatSession.id == session_id,
+                ChatSession.account_id == account.id,
+            )
+        )
+        if not isinstance(chat_session, ChatSession):
+            return "missing"
         # 消息先删：它有外键指着这场会话。
         session.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
         session.delete(chat_session)
+        return "deleted"
 
 
 def session_items(account: Account) -> list[SessionItem]:

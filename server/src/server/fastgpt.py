@@ -13,8 +13,33 @@ from server.url import join_url
 logger = logging.getLogger("server.fastgpt")
 
 
+# snippet 截断到这个长度：错误正文可能整页 HTML，日志装不下。
+_SNIPPET_LIMIT = 200
+
+
 class FastGPTError(Exception):
-    pass
+    """上游调用失败。带上信息，让接到它的那行日志自己就能说清出了什么事。
+
+    - step：哪一步失败，取 FastGPT 类里的方法名（"events"、"records"、
+      "feedback"、"delete_item"、"delete_history"）。
+    - upstream_status：上游回的 HTTP 状态码；连不上、请求没发出去时是 None。
+    - snippet：上游错误正文的开头一小段（截到 200 字符）。只放错误正文：
+      请求头里带着 API key，绝不进异常文本；records 的成功正文带学生数据，
+      所以解析类的失败只带 step、不带 snippet（细节在 raise 之前的
+      logger.error 行里）。
+    """
+
+    def __init__(
+        self,
+        step: str,
+        *,
+        upstream_status: int | None = None,
+        snippet: str | None = None,
+    ) -> None:
+        self.step = step
+        self.upstream_status = upstream_status
+        self.snippet = _snippet(snippet)
+        super().__init__(_describe(step, upstream_status, self.snippet))
 
 
 class StreamDone:
@@ -111,7 +136,11 @@ class FastGPT:
                     )
                     # 截断到 500 字符：错误正文可能整页 HTML，日志装不下。
                     logger.error("FastGPT 错误正文 %s", error_body[:500])
-                    raise FastGPTError
+                    raise FastGPTError(
+                        "events",
+                        upstream_status=response.status_code,
+                        snippet=error_body,
+                    )
 
                 current_event = ""
                 async for line in response.aiter_lines():
@@ -150,7 +179,7 @@ class FastGPT:
         except httpx2.HTTPError as exc:
             # 连不上、读超时这些都算上游的问题，记一行就够，不打整页栈。
             logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
-            raise FastGPTError from None
+            raise FastGPTError("events") from None
 
     async def records(
         self,
@@ -170,12 +199,16 @@ class FastGPT:
             )
         except httpx2.HTTPError as exc:
             logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
-            raise FastGPTError from None
+            raise FastGPTError("records") from None
         if response.status_code != 200:
             logger.error("FastGPT 返回 %s", response.status_code)
-            raise FastGPTError
+            raise FastGPTError(
+                "records",
+                upstream_status=response.status_code,
+                snippet=response.text,
+            )
 
-        return _record_page(_read_body(response))
+        return _record_page(_read_body(response, "records"), "records")
 
     async def stop_chat(self, chat_id: UUID) -> bool:
         """让上游停下这一轮。
@@ -245,11 +278,15 @@ class FastGPT:
             )
         except httpx2.HTTPError as exc:
             logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
-            raise FastGPTError from None
+            raise FastGPTError("feedback") from None
         if response.status_code != 200:
             logger.error("FastGPT 反馈返回 %s", response.status_code)
-            raise FastGPTError
-        _read_body(response)
+            raise FastGPTError(
+                "feedback",
+                upstream_status=response.status_code,
+                snippet=response.text,
+            )
+        _read_body(response, "feedback")
 
     async def delete_item(self, chat_id: UUID, content_id: str) -> bool:
         """删掉这场会话里的某一条记录（软删）。
@@ -274,7 +311,7 @@ class FastGPT:
             logger.error("FastGPT 删除记录返回 %s", response.status_code)
             return False
         try:
-            body = _read_body(response)
+            body = _read_body(response, "delete_item")
         except FastGPTError:
             return False
         return isinstance(body, dict)
@@ -287,13 +324,19 @@ class FastGPT:
             )
         except httpx2.HTTPError as exc:
             logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
-            raise FastGPTError from None
+            raise FastGPTError("delete_history") from None
         if response.status_code == 404:
+            # 已经删过：当成功。上游这个接口对已删的会话是幂等的，
+            # 「本地没有行也照样来删上游」才不会有副作用。
             return
         if response.status_code != 200:
             logger.error("FastGPT 返回 %s", response.status_code)
-            raise FastGPTError
-        _read_body(response)
+            raise FastGPTError(
+                "delete_history",
+                upstream_status=response.status_code,
+                snippet=response.text,
+            )
+        _read_body(response, "delete_history")
 
 
 def open_fastgpt(settings: Settings) -> FastGPT | None:
@@ -314,6 +357,24 @@ def open_fastgpt(settings: Settings) -> FastGPT | None:
 
 def _json(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _snippet(text: str | None) -> str | None:
+    """响应正文取开头一小段：压掉换行，异常消息保持一行。"""
+    if text is None:
+        return None
+    clipped = " ".join(text.split())[:_SNIPPET_LIMIT]
+    return clipped or None
+
+
+def _describe(step: str, upstream_status: int | None, snippet: str | None) -> str:
+    """拼 str()：一句能直接落日志的人话。"""
+    parts = [f"FastGPT {step} 失败"]
+    if upstream_status is not None:
+        parts.append(f"上游状态 {upstream_status}")
+    if snippet:
+        parts.append(f"响应开头：{snippet}")
+    return "，".join(parts)
 
 
 def _progress_event(line: str) -> ProgressEvent | None:
@@ -389,41 +450,49 @@ def _content(payload: object) -> str | None:
     return content
 
 
-def _read_body(response: httpx2.Response) -> dict[str, object]:
+def _read_body(response: httpx2.Response, step: str) -> dict[str, object]:
+    """响应正文 JSON → dict。step 是调用它的方法名，原样进异常。
+
+    解析和结构类的失败不带 snippet：走到这里 HTTP 已经是 200，正文可能
+    带学生数据（records 的成功响应），不能漏进异常文本；细节看 raise
+    之前的 logger.error 行。
+    """
     try:
         payload = response.json()
     except json.JSONDecodeError:
         logger.error("FastGPT 返回了无法解析的正文")
-        raise FastGPTError from None
-    return _ok_body(payload)
+        raise FastGPTError(step) from None
+    return _ok_body(payload, step)
 
 
-def _ok_body(payload: object) -> dict[str, object]:
+def _ok_body(payload: object, step: str) -> dict[str, object]:
     if not isinstance(payload, dict):
-        raise FastGPTError
+        raise FastGPTError(step)
 
     code = payload.get("code")
     if isinstance(code, bool) or not isinstance(code, int):
         logger.error("FastGPT 返回 code 无效")
-        raise FastGPTError
+        raise FastGPTError(step)
     if code != 200:
         logger.error("FastGPT 返回 code %s", code)
-        raise FastGPTError
+        raise FastGPTError(step)
     return payload
 
 
-def _record_page(payload: dict[str, object]) -> ChatRecordPage:
+def _record_page(payload: dict[str, object], step: str) -> ChatRecordPage:
+    # 结构不对也不带 snippet：这是 code==200 的成功响应，正文带学生的
+    # 对话内容，不能进异常文本。
     data = payload.get("data")
     if not isinstance(data, dict):
-        raise FastGPTError
+        raise FastGPTError(step)
 
     total = data.get("total")
     if isinstance(total, bool) or not isinstance(total, int):
-        raise FastGPTError
+        raise FastGPTError(step)
 
     raw_list = data.get("list")
     if not isinstance(raw_list, list):
-        raise FastGPTError
+        raise FastGPTError(step)
 
     records: list[ChatRecord] = []
     for item in raw_list:

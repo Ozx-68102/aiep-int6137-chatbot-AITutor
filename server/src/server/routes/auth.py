@@ -172,6 +172,8 @@ def change_password(
         # 写哈希和吊销令牌在同一个事务里：不留「密码改了、旧令牌还活着」的缝。
         # 所有设备都踢，含当前这一台，重新登录。
         account.password_hash = hash_password(body.new_password)
+        # 密码已经改成自己的了，「必须改密」的标记就地清掉，同一个事务。
+        account.must_change_password = False
         session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
 
     # 只清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的账号在
@@ -201,5 +203,7 @@ def _login_account(
     result = LoginResponse(
         locale=language.locale,
         sessions=session_items(account),
+        # 账号行本来就查出来了，标记直接带上：前端靠它决定要不要先改密。
+        must_change_password=account.must_change_password,
     )
     return result, token

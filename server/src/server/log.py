@@ -10,6 +10,10 @@ _FORMAT = "%(asctime)s %(levelname)s %(name)s [turn %(turn_id)s] %(message)s"
 _STREAM_FORMAT = "%(levelprefix)s %(message)s"
 _LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "server.log"
 _MAX_BYTES = 5 * 1024 * 1024
+# 归档堆积的警告阈值：数量或总大小任一超标就提醒（维护者要调阈值改这里）。
+# 归档只增不删是拍板决定，这里只报警，不动文件。
+_ARCHIVE_WARN_COUNT = 20
+_ARCHIVE_WARN_BYTES = 500 * 1024 * 1024
 _FILE_HANDLER: logging.FileHandler | None = None
 
 # 当前在处理哪一轮：对话和停止端点的入口处设置。asyncio 建后台任务时会
@@ -62,6 +66,7 @@ class _SizeLogFile(logging.FileHandler):
         if source.exists():
             source.rename(_archive_path(source))
         self.stream = self._open()
+        _warn_if_archives_pile_up(source.parent)
 
 
 def configure_logging() -> None:
@@ -104,6 +109,24 @@ def _attach(logger: logging.Logger, handler: logging.Handler) -> None:
     if handler in logger.handlers:
         return
     logger.addHandler(handler)
+
+
+def _warn_if_archives_pile_up(log_dir: Path) -> None:
+    """轮转完成后数一下归档，堆太多了提醒人工处理。
+
+    只在轮转时跑，频率很低；归档目录文件不多，listdir 加 stat 的开销
+    可以接受，不算昂贵遍历。
+    """
+    # 归档命名是 server-<时间戳>.log（见 _archive_path），当前日志
+    # server.log 不匹配这个模式，不会数进去。
+    archives = list(log_dir.glob("server-*.log"))
+    total_bytes = sum(item.stat().st_size for item in archives)
+    if len(archives) > _ARCHIVE_WARN_COUNT or total_bytes > _ARCHIVE_WARN_BYTES:
+        logging.getLogger("server.log").warning(
+            "日志归档已堆积：%d 个、共 %.1f MB；无自动清理策略，请人工处理",
+            len(archives),
+            total_bytes / (1024 * 1024),
+        )
 
 
 def _archive_path(source: Path) -> Path:

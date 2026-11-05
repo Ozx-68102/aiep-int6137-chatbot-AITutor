@@ -80,7 +80,7 @@ def needs_rehash(stored_hash: str) -> bool:
 
 
 def generate_password(length: int = 12) -> str:
-    """随机密码。控制台建号、重置密码用；这类密码豁免下面的密码策略。"""
+    """随机密码。控制台重置密码用；这类密码豁免下面的密码策略。"""
     return "".join(secrets.choice(_ALPHABET) for _ in range(length))
 
 
