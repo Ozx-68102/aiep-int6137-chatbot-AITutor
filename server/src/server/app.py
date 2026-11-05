@@ -1666,7 +1666,8 @@ def _login_account_key(username: str) -> str:
 
 
 def _login_client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    client = request.client
+    return client.host if client else "unknown"
 
 
 def _raise_if_login_locked(username: str, request: Request) -> None:
