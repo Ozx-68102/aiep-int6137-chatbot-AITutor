@@ -10,9 +10,9 @@
  * MarkdownText.tsx 的 HIGHLIGHT_LANGUAGES 里静态复制了一份（那边要在
  * 不加载本 chunk 的前提下判断该不该加载），改语言时两边一起改。
  *
- * 类型：包本身不带类型声明，@types/react-syntax-highlighter 还没装
- * （装依赖只能维护者做），暂时靠 src/types/react-syntax-highlighter.d.ts
- * 的垫片过类型检查；维护者装好官方类型后删除垫片。
+ * 类型：官方 @types/react-syntax-highlighter 已在 devDependencies
+ * （2026-11-05 补装），tsconfig 以 "types" 显式把它的环境声明拉进程序；
+ * 早先过渡用的 src/types/ 垫片已删除。
  */
 import java from 'react-syntax-highlighter/dist/esm/languages/prism/java';
 import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
