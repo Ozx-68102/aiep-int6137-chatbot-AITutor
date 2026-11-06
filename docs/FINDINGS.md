@@ -226,10 +226,10 @@ server 的依赖是 `httpx2`（2.16.0），环境里没有 `httpx` 包。这个�
 
 症状与证据（本会话实测）：
 
-- 会话的 LayerFS worker 起初没在运行（endpoint.json 缺失）；harness 于 15:26 自动拉起 `layerfs-worker` 容器，端口映射和 endpoint.json 会自动改写，GUI 重启后容器仍存活。
+- 会话的 LayerFS worker 起初没在运行（endpoint.json 缺失）；宿主程序于 15:26 自动拉起 `layerfs-worker` 容器，端口映射和 endpoint.json 会自动改写，GUI 重启后容器仍存活。
 - worker 起来后，所有项目调用（`project list_branches`、`fs read`，**连不存在的项目名也一样**）在约 5ms 内报 `Failed: Os NotFound`——失败发生在项目查找之前。而 store 卷 `layerfs-aiep-int6137-chatbot-aitutor-store-mvzakkdi` 本身完好：`global/store.sqlite` 114MB、SQLite 文件头有效、最后写入当天 11:53；worker 容器内 bundle、daemon、native 模块、卷内 store 全部可见。
 - 按文档允许的 `layerfs init` 做了一次探测，被拒 `Store install: Store destination exists`（未写入数据）；此后 `sandbox create` / `project list_sandboxes` 的报错变为 `Store open: physical Store I/O: pack persistence: Malformed`。无法判定是 init 探测改动了磁盘状态，还是两类调用走到了 open 路径的不同深度。
-- **GUI 侧边栏 LayerFS 面板显示一字不差的同一句 Malformed**——它是与会话 CLI 独立的访问路径，但走同一个 worker 和同一个卷。所以损坏在 store 数据本身，**与会话模式无关**（「LayerFS × DSH minimalist」vs「标准模式」）；标准模式会话能看 Work/History，是因为那两页读会话记录，不开项目 store。
+- **GUI 侧边栏 LayerFS 面板显示一字不差的同一句 Malformed**——它是与会话 CLI 独立的访问路径，但走同一个 worker 和同一个卷。所以损坏在 store 数据本身，**与会话模式无关**（「极简模式」vs「标准模式」）；标准模式会话能看 Work/History，是因为那两页读会话记录，不开项目 store。
 - 重启 GUI、重启 worker 容器均无效（数据和卷跨重启存活）。
 
 上游对照（Ephemeral-AI-Lab/layerfs，公开仓库，浅克隆 `35d3657` 核对源码）：
@@ -241,27 +241,27 @@ server 的依赖是 `httpx2`（2.16.0），环境里没有 `httpx` 包。这个�
 
 结论：这份 store 在 1.x 下不可恢复，只能删掉重建。（**此结论已被下一条更正：store 数据完好，死的是项目记录**。）本地目录是当初 init 的源目录、且比 LayerFS 侧更新（新装的 daisyui / tailwind-bootstrap-grid 只在本地），重建的实际损失仅限 LayerFS 侧未同步回本地的历史——store 打不开，无法列出确认有哪些。
 
-## 2026-11-03 macOS 上 `layerfs init` 结构性损坏，重建项目必须走 harness 自己的流程
+## 2026-11-03 macOS 上 `layerfs init` 结构性损坏，重建项目必须走宿主自己的流程
 
 上游 #513（open，2026-10-30）描述与本机实测完全一致：macOS worker 路线下（会话环境带 `LAYERFS_WORKER_ENDPOINT` 等变量），`layerfs init` 即使对全新项目名也报 `Store destination exists`。issue 指出 macOS 上唯一能工作的初始化路径是 `@layerfs/runtime` 的 `project.start_init`（它会预置卷、设置每项目 STORE_PATH），而 CLI 直接暴露 `LayerFS.init`，绕过了这层编排。维护者答复：修复排进 LayerFS 2.0（roadmap #446），当前阶段冻结。
 
-所以规矩是：**不要试图删卷后用 CLI init 手动重建**；重建项目要走 harness/GUI 自带的创建入口。相关背景：#534（open）记录了原生 macOS 路线并发 `LayerFS.open` 报 Store busy 等问题，同属「macOS 路线未修完」一族。
+所以规矩是：**不要试图删卷后用 CLI init 手动重建**；重建项目要走宿主图形界面自带的创建入口。相关背景：#534（open）记录了原生 macOS 路线并发 `LayerFS.open` 报 Store busy 等问题，同属「macOS 路线未修完」一族。
 
 ## 2026-11-03 更正：坏的不是 store 数据，是「项目记录」；本会话的 init 探测把故障升级了
 
-default-workspace 侧做了只读深查（SQLite 直读 + 源码对照），上一条的诊断要更正三处：
+另一路会话侧做了只读深查（SQLite 直读 + 源码对照），上一条的诊断要更正三处：
 
 - **store 数据一个字节都没坏**：卷里 `store.sqlite` 的 `PRAGMA integrity_check` 返回 ok、`foreign_key_check` 0 行，22 分支 / 91 提交 / 15 层 / 25,227 对象完好（含 password-backend、console-server、split-findings 等真实开发分支）。`Malformed` 不是数据损坏，是**身份校验拒绝**：open 时用 `project.record` 里的 binding 去比对 store 存的 `binding_key`/`catalog_id`（`schema.rs` 的 `validate()`），不等就报 `Integrity` → 打印成 `pack persistence: Malformed`。
 - **死的是 home 目录里的项目记录**。时间线：~12:36 macOS 清理重建了 `tmpdir`，旧 `project.record` 随之丢失——这才是 15:25 起 `Os NotFound` 的真正原因（记录引用的 home 侧 sealed store 文件不存在）；**15:35 本会话跑的 `layerfs init` 探测生成了新的随机绑定密钥并写入新记录**，而「装进卷」一步被拒（`Store destination exists`），于是记录和卷里的老 store 成了两套身份，15:37 起每次 open 都被拒。上一条里「无法判定 init 探测是否改动了磁盘状态」现在确认：改了，而且是故障形态从「缺记录」（插件有 `noRecord` 分支可识别）恶化成「记录与 store 不匹配」（难以识别）的转折点。
-- **「不可恢复」不成立**：老 store 可以用官方恢复工具（`dsh/tools/restore-store.mjs` + `LAYERFS_READER`）只读导出；但老记录里随机生成的 `cursor_key` 只存在于丢失的那份记录里，「把老 store 原样接回」缺一块拼图。干净路径仍是走 harness 的 remove（删卷 + 删记录）再重新 Import。
+- **「不可恢复」不成立**：老 store 可以用官方恢复脚本（restore-store，配合 `LAYERFS_READER` 环境变量）只读导出；但老记录里随机生成的 `cursor_key` 只存在于丢失的那份记录里，「把老 store 原样接回」缺一块拼图。干净路径仍是走宿主的 remove（删卷 + 删记录）再重新 Import。
 
 规矩升级：**macOS 上任何情况下都不要再跑 `layerfs init`**——即使安装被拒它也会写入新记录和新绑定密钥，主动制造身份错配。上一条的「不要删卷后 CLI init 手动重建」从「走不通」升级为「有害」。
 
-根子是插件的持久/易失不对称：绑定和 store 卷是持久的，而 home（`config.js` 默认 `tmpdir()/dsh-layerfs/home`）会被 macOS 系统清理——记录和 store 生命周期不一致。止血方案是给 layerfs-host 配稳定 home 路径（`config.js` 支持 `home` 键，如 `~/.dsh/layerfs-home`），改动在 default-workspace 的 profile 配置里做。
+根子是插件的持久/易失不对称：绑定和 store 卷是持久的，而 home（`config.js` 默认落在系统临时目录下的固定子目录）会被 macOS 系统清理——记录和 store 生命周期不一致。止血方案是给 layerfs-host 配稳定 home 路径（`config.js` 支持 `home` 键，指到用户主目录下的固定目录），改动在宿主的 profile 配置里做。
 
 ## 2026-11-03 LayerFS store 已恢复；沙箱里 pnpm/tsc/vite 可用——前提是 node_modules 按 Linux 重建
 
-傍晚 default-workspace 侧把老 store 救了回来（22 分支 / 91 提交重新可读；修复发生在记录层，数据本体从头到尾没坏，诊断见上一条）。当时本地 git 领先 LayerFS 8 个提交，灌回按下面流程走完，可复现：
+傍晚另一路会话侧把老 store 救了回来（22 分支 / 91 提交重新可读；修复发生在记录层，数据本体从头到尾没坏，诊断见上一条）。当时本地 git 领先 LayerFS 8 个提交，灌回按下面流程走完，可复现：
 
 1. **diff**：117 个 git 跟踪文件逐个从 main 分页读出（`fs.read` 带 `nextLine` 循环，pnpm-lock.yaml 超过单窗口 48KiB）、md5 对比本地——差异集恰好是 8 个提交涉及的 32 个文件，无缺失；
 2. **复刻**：fork 分支 `daisyui-migration`，把 8 个 git 提交逐个 `fs.apply` 上去（每个文件的内容取 `git show <hash>:<path>`，提交信息照抄，FINDINGS.md 两步演进这类中间态也保留）；

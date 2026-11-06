@@ -65,7 +65,7 @@
 - 远端开着禁止删除和禁止强推，别去关它。要改已经推送的内容，用新提交、`git revert` 或 `git commit-tree`；推送之后不要强推，要解除这两条规则先问维护者
 - 提交说明用英文写成 `feat: add session pinning` 这种样子：类型、冒号、一句话；类型后面不要加括号（`feat(server): ...` 会被钩子拒绝）
 - 类型按语义选：用户能感知到的界面或能力变化（含视觉改版）用 feat；纯代码排版用 style；行为不变的重构用 refactor；依赖增删用 chore
-- 提交信息必须自足：只描述改动本身，标题和正文都不得出现只存在于开发会话或特定工具链里的词——wave/波次编号、phase/期数编号、LayerFS、DSH、复刻、回灌这类一律禁止（2026-11-06 经维护者许可把历史里 23 笔旧消息清理成了自足表述）。从 LayerFS 侧复刻提交到 git 时，原信息含这类词就当场改写，不照抄；LayerFS 侧自己的提交信息不受此限
+- 提交信息必须自足：只描述改动本身，标题和正文都不得出现只存在于开发会话或特定工具链里的词——wave/波次编号、phase/期数编号、LayerFS 与宿主工具名、复刻、回灌这类一律禁止（2026-11-06 经维护者许可把历史里 23 笔旧消息清理成了自足表述）。从 LayerFS 侧复刻提交到 git 时，原信息含这类词就当场改写，不照抄；LayerFS 侧自己的提交信息不受此限
 - 分支名遵循 Conventional Branch（https://conventionalbranch.org）：`main`、`master`、`develop` 不用前缀；其余写成 `<type>/<description>`。类型只用 feature、feat、bugfix、fix、hotfix、release、chore，以及 ai、copilot、cursor、claude、codex。描述只用小写字母、数字、连字符和点，例如 `feature/add-login-page`。推送前由 `.githooks/pre-push` 检查，正则是 https://conventionalbranch.org/v1.1.0/spec.json 里的那条，用 Perl 匹配
 - 远端 GitHub 已经导入同一份分支名规则集（https://conventionalbranch.org/enforce/#rulesets）。不合规的分支名推不上去，本地用 `--no-verify` 跳过钩子也绕不过
 - 用 LayerFS 并行开发时，最终合并在 LayerFS 里做：0 冲突才落地 git——用 `git commit-tree` 把那边的分支和提交复刻过来，拓扑、每个提交的时间戳、每一步的改动痕迹都照搬。唯一例外是只建目录的步骤（LayerFS 的 `fs.mkdir` 提交）：git 不跟踪空目录，这类步骤没有对应物，复刻时跳过、让后续提交直接挂到上一个有内容的提交上——git 历史里不允许出现零改动的空提交（2026-11-06 踩过「皇帝的新文件夹」）；分支名和提交信息按上面两条钩子规矩写（commit-tree 是底层命令，不触发钩子，所以要逐条拿 `.githooks/commit-msg` 预检）。复刻出来的合并提交，信息里引用的分支名要用 git 侧的合规名（`feature/password-relax` 这种），不要照抄 LayerFS 的合并消息——LayerFS 分支名不允许斜杠，照抄过来必不合规（2026-11-03 踩过）。有冲突就停下来问维护者怎么合，不自己拍板
