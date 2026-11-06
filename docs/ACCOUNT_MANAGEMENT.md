@@ -65,16 +65,18 @@
 
 ## 强制改密码
 
-- [ ] `account` 加 `must_change_password` 列（init.py 里补，跟 `_ensure_avatar_column` 一个写法）。
+- [x] `account` 加 `must_change_password` 列（后端已落地：迁移 `0002_account_must_change_password`——原文记录的「init.py 里补」写法已被「表结构变更一律写迁移文件」的规矩取代，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「令牌表与定时清扫」）。`ProfileResponse` 已返回该字段，登录校验链路（`renew_login_token`）顺带把它带出来。
 - [ ] 登录时为真就跳改密码页。
 - [ ] 后端兜底：除 `/api/profile` 和改密接口外，其余聊天接口返回 403「请先修改密码」。
+
+backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前端未消费——`parseProfile` 还不读这个字段，「首登强制改密」流程（含上面两条）待立项。
 
 ## 忘记密码
 
 - [ ] 现阶段不做自助重置：没有邮箱、短信这类验证通道，证明不了「是本人」，开重置入口等于把账号送给猜得出的人（2026-11-03 维护者确认）。
 - [x] 正路是控制台的管理员重置（见「控制台」一节）：学生找管理员，管理员重置后给一次性初始密码。（重置接口和界面 2026-11-03 已建）
-- [ ] `must_change_password` 逼首次登录就改（列还没加，见「强制改密码」一节）；在那之前，一次性密码靠人工督促修改。
-- [ ] 登录页可以先放一句静态提示（「忘记密码请联系管理员」），不依赖验证通道；加不加、什么时候加，跟控制台一起定。
+- [ ] `must_change_password` 逼首次登录就改（列已加、后端已返回，前端消费待立项，见「强制改密码」一节）；在那之前，一次性密码靠人工督促修改。
+- [x] 登录页可以先放一句静态提示（「忘记密码请联系管理员」），不依赖验证通道；加不加、什么时候加，跟控制台一起定。（2026-11-06 已落地：`forgotPasswordHint` 三语「忘记密码？请联系管理员」；同批登录页用户名输入框加 `autoFocus`，学生登录按钮提交中 `aria-busy` ＋ loading spinner，管理员登录按钮同款——[LoginScreen.tsx](../src/components/login/LoginScreen.tsx)、[AdminLoginForm.tsx](../src/components/admin/AdminLoginForm.tsx)）
 
 ## 共用的密码方法
 
@@ -112,13 +114,28 @@
 - [x] `POST /api/admin/logout`。
 - [x] 界面（三语）：登录表单、账号表、重置确认、一次性密码面板、退出确认；`/admin` 路径下聊天侧引导流程完全不挂载。
 
+2026-11-06 补充（前端波次一・管理侧栏，[AdminConsole.tsx](../src/components/admin/AdminConsole.tsx)、[NewPasswordPanel.tsx](../src/components/admin/NewPasswordPanel.tsx)）：
+
+- [x] 账号表空态行（`noAccounts` 三语，跨三列居中）。
+- [x] 表头手动刷新按钮（`refreshAccounts` 键，lucide `RotateCw`，busy 时 `aria-busy` ＋转圈）：401 带服务器说法回登录表单；其余错误在表格上方一行 `role=alert` 警示。
+- [x] 30 秒静默轮询：仅列表视图打开（即已登录）时跑；`document.hidden`、任何对话框/面板开着（退出确认、重置确认、新密码面板，跳过状态在效果里镜像进 `pollSkipRef`）、手动刷新在飞，都跳过这一拍；成功静默整表替换，失败（含 401）静默——登录态真过期了，由管理员下一次显式操作接住。分页未做，代码注释记「账号数上百再考虑后端分页」。
+- [x] 重置密码面板精修（原列在「后续批次」）：密码行右侧复制按钮（clipboard 失败静默，面板 `select-all` 仍可手动选中；「已复制」2 秒复位，`copy`/`copied` 键复用）；点背景、按 Esc 都不关——给 Modal 传 no-op `onClose` 占位，面板的显式关闭按钮直调真 `onClose`（Modal 自身的「点背景关」没改，其余弹窗不受影响）。
+
 后续批次（未排期）：
 
 - [ ] 建号界面：「建议以 test 开头」只是提示，不强制。（本轮决定建号维持现状——init.py 预设 + 数据操作，界面等有需要再做）
 - [ ] 禁用词规则只管聊天侧注册；控制台管理员账号由 init.py 建，不走注册。
-- [ ] 重置密码弹窗精修：三行大字、右侧复制按钮、点背景不能关（现有的 Modal 点背景会关，[src/components/shell/Modal.tsx](../src/components/shell/Modal.tsx)）；关闭后无法再查看。架子是简版面板。
-- [ ] 重置密码时置 `must_change_password`（列还没加，见「强制改密码」一节）。
+- [x] 重置密码弹窗精修：三行大字、右侧复制按钮、点背景不能关（现有的 Modal 点背景会关，[src/components/shell/Modal.tsx](../src/components/shell/Modal.tsx)）；关闭后无法再查看。架子是简版面板。（2026-11-06：复制按钮与「点背景/Esc 不关」已落地，做法见上文补充）
+- [ ] 重置密码时置 `must_change_password`（列已加、后端已随 `ProfileResponse` 返回；重置时打标记与前端消费都未做，见「强制改密码」一节）。
 - [ ] 管理员在控制台改自己密码的界面入口（后端 `/api/password` 已认 `admin_login`）。
+
+## 头像
+
+（前端行为与 wire 修复记录，2026-11-06 落地；上传端点 `POST /api/avatar` 与 `account.avatar` 列的存储结构此前已有，本节不重复。）
+
+- **客户端预检**（[AvatarPicker.tsx](../src/components/settings/AvatarPicker.tsx)）：选文件当场拦下明显不合格的，省一次白跑的上传——大小 ≤ 5MB；类型 PNG/JPG/JPEG/HEIC/HEIF，MIME 认全族（单图 `image/heic`、`image/heif` 与多帧 `image/heic-sequence`、`image/heif-sequence`；部分浏览器对 `.heic` 报空 `file.type`，退按扩展名 png/jpg/jpeg/heic/heif 判）。不合格当场 `role=alert` 提示（`avatarTooLarge` / `avatarWrongType`，三语齐）、不发请求。服务端校验仍是权威——预检是提示不是门槛（与本文件「分工」原则一致）。
+- **头像数据缓存**（[profile-cache.ts](../src/session/profile-cache.ts)）：独立键 `h2bot-avatar` 存 `{url, dataUrl}`——`parseProfile` 拿到非默认头像 URL 即 fire-and-forget 抓取转 dataURL 写入（>5MB 跳过；离线、抓取失败、配额超限都静默降级，界面退回默认头像，不弹提示）。App 的 `avatarUrl` 惰性初始化读缓存，离线启动侧栏和设置弹窗显示本人头像、不闪默认图；退出登录随 `h2bot-profile` 一起清（`clearCachedProfile`）。键与 `h2bot-profile` 分开：dataURL 可能几 MB，混存会因超配额连用户名带语言一起写不进去。
+- **wire 字段修复**（2026-11-06）：后端 `ProfileResponse` 发的是 `avatar_url`（snake_case，不像 `ChatRequest` 那批请求模型带 camelCase 别名），前端 `parseProfile` 自 2026-11-02 引入起误读 `value.avatarUrl`——真头像永远落回默认图，离线头像缓存也从未生效；已改为读 `value.avatar_url`（[profile.ts](../src/api/profile.ts)，代码注释记录了原委）。全前端其余解析器（session/partial/messages/status）与请求/响应体核对过，没有第二处字段错位。
 
 ## 基础安全
 
@@ -201,7 +218,7 @@
 
 ## 数据库要加的
 
-- [ ] `account`：`role`（已加，2026-11-03）、`must_change_password`、`disabled`、`created_at`
+- [ ] `account`：`role`（已加，2026-11-03）、`must_change_password`（已加，迁移 0002，2026-11-06 核实）、`disabled`、`created_at`
 - [ ] `login_token`：`revoked_at`
 - [ ] 新表 `audit_log`
 

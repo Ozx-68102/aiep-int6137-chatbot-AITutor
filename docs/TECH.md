@@ -21,7 +21,7 @@
 npm install -g pnpm
 ```
 
-仓库里有 `pnpm-lock.yaml`。装依赖和跑命令都用 pnpm，不要用 npm 或 yarn。
+仓库里有 `pnpm-lock.yaml`。装依赖和跑命令都用 pnpm，不要用 npm 或 yarn。`package.json` 的 `packageManager` 字段钉了 `pnpm@12.16.1`（2026-11-06 加，corepack 与 CI 的 pnpm/action-setup 都认它）；`engines` 字段没加，Node 版本仍靠 `.nvmrc` 约定。
 
 ## 前端
 
@@ -31,15 +31,16 @@ npm install -g pnpm
 - 图标：lucide-react 1.61.0
 - 样式：Tailwind CSS 4.3.3，插件 @tailwindcss/vite 4.3.3
 - 组件库：daisyUI 5.7.50（Tailwind 插件，`src/index.css` 里用 `@plugin` 接线）。内置主题已关掉，只用自定义 `aiep` 主题：语义变量（base-*、primary、error 等）与 stone/emerald 色板同值。组件类按需生成，源码里没出现的类不会进产物
-- 栅格：tailwind-bootstrap-grid 7.0.0（Tailwind 插件）。提供 Bootstrap 风格的 row、col-1..col-12、offset-N、g-0..g-5；响应式用 Tailwind 原生 variant 写法（`md:col-6`），没有 `col-md-6` 这种 BS 风格类；`.container` 生成已关闭，页面宽度仍走 `max-w-*`
 - 动画：tw-animate-css 1.4.0
 - 代码高亮：react-syntax-highlighter 16.1.2（2026-11-05 装上并同日接线：`dist/esm/prism-light` 按需路线，只注册 python / javascript / typescript / java；第一个命中语言的代码块触发动态 `import()`，独立 chunk 约 45.5 kB（gzip 约 13.4 kB），主包不因此上涨；`@types/react-syntax-highlighter` 15.5.13 已于 2026-11-05 装为开发依赖，临时垫片已删除；该包的子路径类型是环境模块声明，tsconfig 用 `"types": ["react-syntax-highlighter"]` 显式把它拉进编译才生效）
-- 语言：TypeScript 7.0.2
+- 语言：TypeScript 7.0.2。tsconfig 在 `strict` 全开之外再加两档（2026-11-06）：`noUncheckedIndexedAccess`（索引访问的类型含 `undefined`）与 `exactOptionalPropertyTypes`（可选属性不再默默接受显式 `undefined`）
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
 - 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint、oxfmt --check 加类型检查（`pnpm exec tsc --noEmit`）一起跑
 - 类型检查和打包：`pnpm build`，等于 `pnpm exec tsc --noEmit && vite build`。产物在 `dist/`，已被忽略
+- 构建产物形态（2026-11-06 实测）：vendor 拆块走 `vite.config.ts` 的 `build.rolldownOptions.output.codeSplitting.groups`（Vite 8 是 rolldown 内核，旧 `manualChunks` 写法已废弃）——`vendor-react` 254.74 kB（react、react-dom、scheduler、react-router 家族），`vendor-markdown` 413.63 kB（react-markdown、remark、rehype、micromark、katex 整树；与高亮树共享的 14 个包显式排除在分组外，保持高亮按需块自包含）；主块 124 kB；`/admin` 懒加载出独立分块 `AdminConsole-*.js` 10.86 kB（gzip 2.98 kB）；代码高亮按需块 45.6 kB、zxcvbn 字典 4 个懒加载块不变。`build.sourcemap: 'hidden'`：生成 `.map` 但产物 JS 不写 `sourceMappingURL` 注释，部署不发布 `.map`（留构建机，排障时手动加载）
+- 界面文案（i18n）：按功能域拆成 `src/i18n/` 下的 `index`、`common`、`chat`、`auth`、`admin`、`errors`、`format` 七个文件（2026-11-06，原单文件 `src/i18n.ts`），每域三语同屏、方便核对齐不齐。类型机制：简中对象 `typeof` 推导 `Messages` 类型，繁中/英文双层显式标注（域文件里一层、index 合并结果再一层）——任何一键在任何语言缺失都是 tsc 编译错误，不再留到运行时变 `undefined` 渲染成空白。带参数的文案走 `format(template, {name})` 具名占位插值（`src/i18n/format.ts`）。错误文案词条在 `src/i18n/errors.ts`，状态码映射与裁决规则在 `src/api/failure.ts`：简中界面后端 `detail` 逐字优先，英文/繁中用状态码映射文案（403/404/408/422/429/500/502/503，401 按 `reason` 分流 expired/disabled），映射不到退 `detail`；改密页客户端门槛的两条提示同批三语化，简中与后端 `check_password_policy` 逐字一致
 - 部署：真实路径路由要求托管方配 SPA 回落（任何未知路径返回 index.html），Nginx 配置和故障排查见 [NGINX_SPA_DEPLOYMENT_GUIDE.md](NGINX_SPA_DEPLOYMENT_GUIDE.md)
-- `pnpm test` 是占位脚本，会直接失败。仓库里没有自动化测试
+- `pnpm test` 只输出一句如实说明「本项目不使用测试框架，见 AGENTS.md」并正常退出（exit 0，2026-11-06 改，不再是 npm init 模板那个假失败）。仓库里没有自动化测试
 
 ## 后端
 
