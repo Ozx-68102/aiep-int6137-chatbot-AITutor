@@ -48,9 +48,9 @@ export function ChatMain({
   enteringIds: Set<string>;
   onAnimationEnd: (id: string) => void;
   pending: boolean;
-  /** 要「打字机放映」的消息 id（轮次引擎登记）：只放映本轮刚收到的回答。 */
+  /** 要「打字机播放」的消息 id（轮次引擎登记）：只播放本轮刚收到的回答。 */
   presentIds: Set<string>;
-  /** 放映结束（放完或取消）：引擎据此销号。 */
+  /** 播放结束（放完或取消）：引擎据此把 id 移出登记。 */
   onPresentEnd: (id: string) => void;
   progressText: string | undefined;
   draft: string;
@@ -67,11 +67,11 @@ export function ChatMain({
 }) {
   const text = translations[locale];
   // 滚动跟随：距底 48px 以内算贴底。贴底时内容变化自动滚到底；用户往上滚
-  // 就停止跟随，露出悬浮的「回到底部」圆钮。切换会话时 App.tsx 用 key 把
+  // 就停止跟随，露出悬浮的「回到底部」圆形按钮。切换会话时 App.tsx 用 key 把
   // 本组件整个重挂载，贴底状态自然复位。
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
-  // atBottom 的 ref 镜像：放映每拍调用 handleReveal，闭包里不能读到旧渲染的状态。
+  // atBottom 的 ref 镜像：播放每个周期调用 handleReveal，闭包里不能读到旧渲染的状态。
   const atBottomRef = useRef(true);
 
   function handleScroll() {
@@ -95,7 +95,7 @@ export function ChatMain({
     atBottomRef.current = true;
   }
 
-  /** 打字机放映每拍长高：贴底时持续跟随（消息数组不变，下面的效果指望不上）。 */
+  /** 打字机播放每个周期长高：贴底时持续跟随（消息数组不变，下面的效果指望不上）。 */
   function handleReveal() {
     if (!atBottomRef.current) {
       return;
@@ -106,7 +106,7 @@ export function ChatMain({
     }
   }
   // 输入框自动长高：随内容增高，CSS 的 max-h-40 封顶后内部滚动。做成对
-  // draft 的 effect：草稿被程序性清空/恢复（切会话、被踢后回填）时高度也同步。
+  // draft 的 effect：草稿被程序性清空/恢复（切会话、被强制下线后回填）时高度也同步。
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -158,9 +158,9 @@ export function ChatMain({
     setEditing(null);
   }
 
-  // 欢迎语气泡只在「还没有任何消息」的会话视图出现：!active 是新对话落地视图，
+  // 欢迎语气泡只在「还没有任何消息」的会话视图出现：!active 是新对话初始视图，
   // messagesKnown 且为空是新建后确认无历史的空会话。历史加载中（messagesKnown
-  // 为假）不显示，免得加载完成时被旧消息顶掉、闪一下。
+  // 为假）不显示，免得加载完成时被旧消息替换掉、闪现一下。
   const showWelcome = !active || (active.messagesKnown && active.messages.length === 0);
   const welcomeClass = bubbleClass('assistant', false);
 
@@ -381,7 +381,7 @@ export function ChatMain({
               })
             : null}
           {/* 欢迎语是合成气泡：只存在于无任何消息的会话视图（新会话开始），
-              首条消息落地即退场，有历史的旧会话不追溯。不进消息表、不进请求
+              首条消息一出现就退场，有历史的旧会话不追溯。不进消息表、不进请求
               上下文、不带操作行（2026-11-06 决定）；文案固定繁中，出处见
               welcome-text.ts。纯文本无 markdown 解析风险，不套 BubbleBoundary；
               也不是真消息，不登记 enteringIds 进场动画。 */}
@@ -463,9 +463,9 @@ export function ChatMain({
                 <CircleStop aria-hidden="true" />
               </button>
             ) : (
-              // pending 且输入框有字：停止按钮换成禁用的发送按钮（拍板行为）；
+              // pending 且输入框有字：停止按钮换成禁用的发送按钮（维护者决定的行为）；
               // 清空输入（全选删除）停止按钮就回来。disabled 按钮不响应鼠标
-              // 事件——悬停浮层（daisyUI tooltip）和点按提示都挂在外壳 span 上，
+              // 事件——悬停浮层（daisyUI tooltip）和点按提示都放在外壳 span 上，
               // 按钮加 pointer-events-none 让 hover/点按可靠地落到外壳。
               <span
                 className="tooltip tooltip-top shrink-0"

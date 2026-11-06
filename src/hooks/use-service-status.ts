@@ -11,7 +11,7 @@ import type {Locale} from '../type/locale.ts';
 
 const statusIntervalMs = 30000;
 // online 之后的确认重试退避：从 1 秒起、每次失败翻倍、封顶 15 秒——
-// 确认不通就一直重试，但不打满请求。
+// 确认不通就一直重试，但不会把请求发得太密。
 const confirmStartMs = 1000;
 const confirmMaxMs = 15000;
 
@@ -44,15 +44,15 @@ type ServiceStatusDeps = {
 };
 
 /**
- * 服务健康状态：30 秒轮询 /api/status，标记连不上/数据库/回复库三档降级，
+ * 服务健康状态：30 秒轮询 /api/status，标记连不上/数据库/回复存储三档降级，
  * 以及服务器从「连不上」回来时补齐工作区（refreshWorkspace）的动作。
  *
  * 浏览器的网络事件也接在这里（N10）：offline 立刻挂「无法连接到服务器」
- * 常驻横幅，不用等最坏 30 秒的下一拍；online 不轻信（网卡通了不代表
+ * 常驻横幅，不用等最坏 30 秒的下一个周期；online 不轻信（网卡通了不代表
  * 服务器够得着），主动探测 /api/status 确认，失败按 1s/2s/4s…封顶 15s
  * 指数退避重试。确认通过之后常规轮询的倒计时清零重新开始，并广播
- * networkOkEvent 唤醒在飞的半截回答轮询（src/session/poll.ts）和断线
- * 补查（use-turn-engine 的 catchUp），让它们也立刻以全新的一拍开始。
+ * networkOkEvent 唤醒进行中的半截回答轮询（src/session/poll.ts）和断线
+ * 补查（use-turn-engine 的 catchUp），让它们也立刻以全新的周期开始。
  */
 export function useServiceStatus(deps: ServiceStatusDeps) {
   const {auth} = deps;
@@ -105,12 +105,12 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
       return;
     }
     let stopped = false;
-    // 常规节拍的定时器：同一时刻只存在这一个（confirm 成功分支先清再挂）。
+    // 常规周期的定时器：同一时刻只存在这一个（confirm 成功分支先清再重新设置）。
     let timer = 0;
-    // online 确认循环的退避定时器、在飞标记和代数。确认循环在飞时，常规
-    // 节拍与可见性补查都让路：同一时刻只有一条探测链在打 /api/status，
-    // 不会双份探测打架。代数用来作废旧链：offline 或新的 online 都把代数
-    // 加一，旧链的在飞探测回来后发现代数不匹配就退出，不会再挂自己的
+    // online 确认循环的退避定时器、进行中标记和世代编号。确认循环正在进行时，常规
+    // 周期与可见性补查都让路：同一时刻只有一条探测链在请求 /api/status，
+    // 不会双份探测互相冲突。世代编号用来作废旧的确认循环：offline 或新的 online 都把世代编号
+    // 加一，旧的确认循环的进行中探测回来后发现世代编号不匹配就退出，不会再设置自己的
     // 退避定时器——不会出现两条确认循环并存。
     let retryTimer = 0;
     let confirming = false;
@@ -156,8 +156,8 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     };
 
     const tick = async () => {
-      // 确认循环在飞（online 后的退避重试期间）：这一拍不探测，只续命。
-      // 确认成功后定时器会被整个清零重挂（见 confirm），不会剩半拍在这等。
+      // 确认循环正在进行（online 后的退避重试期间）：这个周期不探测，只把定时器排到下一个周期。
+      // 确认成功后定时器会被整个清零后重新设置（见 confirm），不会剩半个周期在这等。
       if (!confirming) {
         await check();
       }
@@ -177,7 +177,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
         return;
       }
       if (!navigator.onLine) {
-        // 物理网络又断了：探测必然失败，不白发请求，等下一次 online 事件
+        // 物理网络又断了：探测必然失败，不白白发请求，等下一次 online 事件
         // 重新启动确认。
         confirming = false;
         return;
@@ -195,20 +195,20 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
       }
       confirming = false;
       backoffMs = confirmStartMs;
-      // 常规轮询的倒计时清零重新开始：先清掉旧定时器再同步挂一个全新的
-      // 整拍。两行之间没有异步间隙，任何时刻都只有这一个 30 秒定时器，
-      // 不存在新旧定时器并存、同一拍被打两次的窗口。
+      // 常规轮询的倒计时清零重新开始：先清掉旧定时器再同步设置一个全新的
+      // 完整周期。两行之间没有异步间隙，任何时刻都只有这一个 30 秒定时器，
+      // 不存在新旧定时器并存、同一个周期被探测两次的窗口。
       window.clearTimeout(timer);
       timer = window.setTimeout(tick, statusIntervalMs);
-      // 唤醒在飞的半截回答轮询（src/session/poll.ts）和断线补查
-      // （use-turn-engine）：让它们也立刻以全新的一拍开始，不等各自的旧定时器。
+      // 唤醒进行中的半截回答轮询（src/session/poll.ts）和断线补查
+      // （use-turn-engine）：让它们也立刻以全新的周期开始，不等各自的旧定时器。
       window.dispatchEvent(new Event(networkOkEvent));
     };
 
     const onOffline = () => {
-      // 物理断网：立刻挂常驻横幅，不等最坏 30 秒的下一拍。
+      // 物理断网：立刻挂常驻横幅，不等最坏 30 秒的下一个周期。
       markService('unreachable');
-      // 作废在飞/等待中的确认链：断网期间不发必然失败的请求，等 online 重来。
+      // 作废进行中/等待中的确认链：断网期间不发必然失败的请求，等 online 重来。
       confirmGeneration += 1;
       window.clearTimeout(retryTimer);
       confirming = false;
@@ -216,7 +216,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
 
     const onOnline = () => {
       // 浏览器报的 online 不轻信：网卡通了不代表服务器够得着，主动探测确认。
-      // 已有确认循环在飞就不开第二条（它的代数仍是当前值，继续跑）。
+      // 已有确认循环正在进行就不开第二条（它的世代编号仍是当前值，继续跑）。
       if (confirming) {
         return;
       }
@@ -227,7 +227,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     };
 
     const onVisibility = () => {
-      // 确认循环在飞时让路给它，避免双份补查打架。
+      // 确认循环正在进行时让路给它，避免双份补查互相冲突。
       if (document.visibilityState === 'visible' && !confirming) {
         void check();
       }

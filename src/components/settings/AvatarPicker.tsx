@@ -7,7 +7,7 @@ import {AvatarImage} from '../avatar/AvatarImage.tsx';
 
 // 头像上传的客户端预检门槛，口径和 avatarHint 的文案保持一致：
 // PNG/JPG/JPEG/HEIC，不超过 5MB。这里只是把明显不合格的文件当场拦下、
-// 省一次白跑的上传，服务端校验仍然是权威。
+// 省得白白上传一次，服务端校验仍然是权威。
 const maxAvatarBytes = 5 * 1024 * 1024;
 
 // HEIC/HEIF 的 MIME 字符串以 IANA 注册为准（RFC 4337、ISO/IEC 23008-12）：
@@ -45,7 +45,7 @@ export function AvatarPicker({
   // 预检拒绝文件时的当场提示；下一次重新选文件就清掉。
   const [pickError, setPickError] = useState<string | null>(null);
   // 离线启动时资料接口还没回来，App 传下来的 avatarUrl 是 null：用本地
-  // 缓存的头像 dataURL 顶上，不闪默认图。挂载时读一次就够；在线以后
+  // 缓存的头像 dataURL 显示，不闪现默认图。挂载时读一次就够；在线以后
   // 一律以 prop 为准。
   const [cachedAvatar] = useState(() => readCachedAvatarData());
 

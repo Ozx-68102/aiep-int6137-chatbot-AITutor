@@ -14,7 +14,7 @@ import {type Locale} from '../../type/locale.ts';
 import {ConfirmDelete} from './ConfirmDelete.tsx';
 import {RenameSession} from './RenameSession.tsx';
 
-/** 二级菜单挂在 body 上，位置按视口算。 */
+/** 二级菜单挂载在 body 上，位置按视口算。 */
 function menuPointFor(button: HTMLButtonElement): {top: number; right: number} {
   const rect = button.getBoundingClientRect();
   return {

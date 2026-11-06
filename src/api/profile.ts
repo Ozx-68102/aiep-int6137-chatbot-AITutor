@@ -36,7 +36,7 @@ export async function logout(): Promise<void> {
   await requestEmpty('/api/logout', {method: 'POST'});
 }
 
-/** 修改密码。成功之后服务端会吊销这个账号所有设备的登录，当前设备也会被踢回登录页。 */
+/** 修改密码。成功之后服务端会吊销这个账号所有设备的登录，当前设备也会被强制退回登录页。 */
 export async function changePassword(
   oldPassword: string,
   newPassword: string,
@@ -62,15 +62,15 @@ function parseProfile(value: unknown): Profile {
   ) {
     throw new ApiError(0, null);
   }
-  // 线上字段是 snake_case：ProfileResponse 不像 ChatRequest 那几个请求模型
+  // 生产环境字段是 snake_case：ProfileResponse 不像 ChatRequest 那几个请求模型
   // 带 camelCase 别名，后端发的是 avatar_url。此前这里误读 value.avatarUrl，
-  // 真头像自 2026-11-02 引入起就一直落回默认图（离线头像缓存也因此从未
+  // 真头像自 2026-11-02 引入起就一直退回默认图（离线头像缓存也因此从未
   // 生效），2026-11-06 修正。
   const avatarUrl =
     typeof value.avatar_url === 'string' && value.avatar_url !== ''
       ? value.avatar_url
       : defaultAvatarUrl;
-  // 拿到真头像地址就顺手把图片数据缓存一份到本地，离线启动时不闪默认图。
+  // 拿到真头像地址就顺手把图片数据缓存一份到本地，离线启动时不闪现默认图。
   // 默认头像是前端静态资源，离线也拿得到，不用缓存。缓存失败无所谓：
   // cacheAvatarData 内部静默降级，不挡住资料返回。
   if (avatarUrl !== defaultAvatarUrl) {

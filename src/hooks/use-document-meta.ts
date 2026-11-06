@@ -11,7 +11,7 @@ const maxPageTitleLength = 30;
  *
  * 标题规则（N11）：pageTitle 有值就是「{pageTitle} - H^2 Bot」（过长的
  * 标题先截断）；不传或为空就只是「H^2 Bot」。document.title 是纯文本
- * 赋值，会话标题再离谱也没有注入面。
+ * 赋值，会话标题再离谱也没有注入风险。
  */
 export function useDocumentMeta(locale: Locale, pageTitle?: string | null): void {
   useEffect(() => {

@@ -5,9 +5,9 @@ export const profileCacheKey = 'h2bot-profile';
 // 头像缓存单独一个 key：dataURL 化以后可能有几 MB，混进 h2bot-profile 里
 // 一旦超配额，会连用户名带语言一起写不进去。分开存，一边失败不牵连另一边。
 export const avatarCacheKey = 'h2bot-avatar';
-// 主动登出标记（P7）：登出成功的标签页写入时间戳值，其他标签页听到
+// 主动登出标记（P7）：登出成功的标签页写入时间戳值，其他标签页收到
 // storage 事件立即回登录界面，不等下一次 401。服务器侧吊销（会话过期、
-// 账号停用）不写这个标记，仍由 401 兜底——两者分工不同。
+// 账号停用）不写这个标记，仍由 401 保底处理——两者分工不同。
 export const logoutMarkerKey = 'h2bot-logout';
 
 export type CachedProfile = {username: string; locale: Locale};
@@ -70,18 +70,18 @@ function readAvatarEntry(): CachedAvatar | null {
   }
 }
 
-/** 本地缓存的头像 dataURL，没有就 null。离线启动时先用它顶住「我长什么样」。 */
+/** 本地缓存的头像 dataURL，没有就 null。离线启动时先用它撑住「我长什么样」。 */
 export function readCachedAvatarData(): string | null {
   const entry = readAvatarEntry();
   return entry !== null && entry.dataUrl !== '' ? entry.dataUrl : null;
 }
 
 /**
- * 把真头像抓成 dataURL 存进本地：离线启动时优先显示它，不闪默认图。
+ * 把真头像抓取并转成 dataURL 存进本地：离线启动时优先显示它，不闪现默认图。
  *
  * 头像地址是本仓库接口服务发出的同源相对路径，fetch 默认的 same-origin
- * 凭证模式会带上 login cookie，不算绕开 http.ts 裸调接口。同一个地址已经
- * 缓存过就跳过，不重复抓。超过 5MB（与上传门槛一致）不存：dataURL 编码
+ * 凭证模式会带上 login cookie，不算绕开 http.ts 直接调用接口。同一个地址已经
+ * 缓存过就跳过，不重复抓取。超过 5MB（与上传门槛一致）不存：dataURL 编码
  * 还要再胀大约三分之一，太大写不进配额也没有意义。离线、抓取失败、配额
  * 不够（QuotaExceededError）都静默放弃，界面退回现状（离线启动显示默认
  * 头像），不弹任何提示。
@@ -135,7 +135,7 @@ export function writeLogoutMarker(): void {
 /**
  * 登录后清掉登出标记：事件只认写入瞬间，墓碑不必留着。清除同样会广播
  * 一次 newValue 为 null 的 storage 事件，消费方只认 newValue 非 null 的
- * 写入，不会被误踢。
+ * 写入，不会被误当成强制下线。
  */
 export function clearLogoutMarker(): void {
   try {

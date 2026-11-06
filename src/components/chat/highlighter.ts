@@ -2,7 +2,7 @@
  * 按需加载的语法高亮（react-syntax-highlighter 的 prism-light 路线）。
  *
  * 这个文件只被 MarkdownText.tsx 在第一个「语言命中注册表」的代码块渲染时
- * 动态 import()，Vite 会把它连同高亮库、语言语法和主题打成一个独立
+ * 动态 import()，Vite 会把它连同高亮库、语言语法和主题打包成一个独立
  * chunk：主包体积不涨（docs/improvement-research/frontend-chat.md N4
  * 的注记、docs/TECH.md「代码高亮」条）。
  *

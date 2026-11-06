@@ -7,7 +7,7 @@ import type {Locale} from '../type/locale.ts';
 
 type PasswordChangeDeps = {
   locale: Locale;
-  /** 改密成功：服务端已吊销所有设备的登录，主控要带提示回登录页。 */
+  /** 改密成功：服务端已吊销所有设备的登录，主控制器要带提示回登录页。 */
   onPasswordChanged: () => void;
   onEnterLogin: (detail: string | null) => void;
   onConnectionWarning: () => void;

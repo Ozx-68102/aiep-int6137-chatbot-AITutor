@@ -6,7 +6,7 @@ import {localeFromSystem} from '../../type/locale.ts';
 type PageBoundaryState = {failed: boolean};
 
 /**
- * 整页的错误边界：渲染真崩了也要给一句话加一个刷新按钮，不白屏。
+ * 整页的错误边界：渲染真的崩溃了也要给一句话加一个刷新按钮，不白屏。
  * 语言用本地记着的那份；读不到就按系统语言来。
  */
 export class PageBoundary extends Component<{children: ReactNode}, PageBoundaryState> {

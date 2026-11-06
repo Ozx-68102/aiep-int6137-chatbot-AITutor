@@ -20,7 +20,7 @@ import type {Message} from '../../type/chat.ts';
  * 常驻内容：坏掉的轮次（failed / aborted）的状态提示和重试按钮，始终可见、
  * 不可关闭——坏掉的轮次必须始终留着恢复的入口。
  * hover 区：编辑（只给最后一轮用户提问，第三期）、复制、点赞点踩（第四期，
- * docs/MESSAGE_ACTIONS.md 内容矩阵）。流式输出中的等待气泡（三个点）不挂脚注。
+ * docs/MESSAGE_ACTIONS.md 内容矩阵）。流式输出中的等待气泡（三个点）不加脚注。
  *
  * 点赞点踩的状态是会话内组件级状态，不跨刷新持久：设计文档没要求持久化，
  * 上游也没有「读回我这一轮反馈」的接口给我们，刷新后按钮回到未选的样子
@@ -46,13 +46,13 @@ export function MessageActions({
   onFeedback,
 }: {
   message: Message;
-  /** 失败轮的状态提示文字（i18n replyInterrupted，「消息生成失败」）。 */
+  /** 失败的轮次的状态提示文字（i18n replyInterrupted，「消息生成失败」）。 */
   failedText: string;
-  /** 被停轮的状态提示文字（i18n replyStopped，「对话已停止」）。 */
+  /** 被停的轮次的状态提示文字（i18n replyStopped，「对话已停止」）。 */
   stoppedText: string;
   retryLabel: string;
   entering?: boolean;
-  /** 会话有一轮在飞（pending）：重试按钮一律禁用——服务器同一场会话只跑一轮，再点只会撞 409。 */
+  /** 会话有一轮正在进行（pending）：重试按钮一律禁用——服务器同一场会话只跑一轮，再点只会碰到 409。 */
   retryBusy?: boolean;
   onRetry: (turnId: string) => void;
   onAnimationEnd?: () => void;
@@ -78,11 +78,11 @@ export function MessageActions({
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackValue>(null);
   const copyTimer = useRef<number | null>(null);
-  // 一次只允许一个在飞的反馈请求：请求期间再点忽略，避免回退互相覆盖。
+  // 一次只允许一个进行中的反馈请求：请求期间再点忽略，避免回退互相覆盖。
   const votingRef = useRef(false);
   // 重试按钮的本地加载态（P8）：点击立即转圈/禁用，防止连点被 sendingRef
-  // 静默吞掉、看着像没点上。正常情况下这条气泡马上被重试流程移除，组件
-  // 自然卸载；引擎没接（比如找不到提问原文直接拒绝）时靠下面的兜底还原。
+  // 静默忽略、看着像没点上。正常情况下这条气泡马上被重试流程移除，组件
+  // 自然卸载；引擎没接（比如找不到提问原文直接拒绝）时靠下面的保底还原。
   const [retryClicked, setRetryClicked] = useState(false);
   useEffect(() => {
     if (!retryClicked) {
@@ -105,12 +105,12 @@ export function MessageActions({
   );
   // 复制：用户提问（最后一轮和更早轮都有）复制纯文本，助手正常轮复制
   // message.text 原始 Markdown（不序列化 DOM——复制渲染结果会把表格、
-  // 公式的排版带走）。失败/被停轮不出 hover 区（内容矩阵）。
+  // 公式的排版带走）。失败/被停的轮次不出 hover 区（内容矩阵）。
   const canCopy = message.role === 'user' || (!failed && !stopped);
   // 点赞点踩只在助手气泡、正常轮（failed/aborted 不显示——没答完的东西
   // 没什么可评价）、且 message.turnId 非空时显示：从上游回填的老会话消息
   // 没有我们的轮次编号，映射不到上游的 dataId（responseChatItemId 那条），
-  // 发过去也是打空——干脆不出按钮。
+  // 发过去也不会生效——干脆不出按钮。
   const showFeedback =
     canFeedback &&
     onFeedback !== undefined &&

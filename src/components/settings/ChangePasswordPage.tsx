@@ -11,7 +11,7 @@ import {isWeakPassword} from './password-strength.ts';
  * 或输入法误触带进来的，静默丢掉比弹一句红字友好。
  * 后端 check_password_policy 有同一条硬门槛。
  *
- * 旧密码框也过滤：库里的密码都是经过策略存进去的，不含空格和非 ASCII，
+ * 旧密码框也过滤：数据库里的密码都是经过策略存进去的，不含空格和非 ASCII，
  * 过滤不会把人锁在外面。登录页的密码框才是真不能过滤的那个——它要能
  * 原样对上任何历史密码，所以那边不动。
  */
@@ -54,7 +54,7 @@ function newPasswordRejected(password: string): PasswordRejection | null {
  * （密码框的内容也不进草稿缓存，救不回来）。页面没有背景可误点，
  * 离开只有「取消」按钮这一条显式的路。
  *
- * 组件随页面切换整个卸载重挂，三个输入框天然清空，不用手写清理逻辑。
+ * 组件随页面切换整个卸载后重新挂载，三个输入框天然清空，不用手写清理逻辑。
  */
 export function ChangePasswordPage({
   locale,
@@ -79,7 +79,7 @@ export function ChangePasswordPage({
   const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
   // 门槛错误优先于可能残留的服务端错误：它是最近一次提交尝试的结果。
   const shownError = gateError ?? error;
-  // 门槛错误和连接兜底都是本地三语文案，按界面语言标注；其余的服务端
+  // 门槛错误和连接保底文案都是本地三语文案，按界面语言标注；其余的服务端
   // 消息（detail）固定是简体中文，标 zh-Hans 让浏览器按中文字体渲染。
   const localizedError = shownError === gateError || shownError === text.connectionError;
   const shownErrorLang = localizedError ? htmlLang[locale] : 'zh-Hans';

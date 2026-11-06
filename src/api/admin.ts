@@ -48,7 +48,7 @@ export async function fetchAdminAccounts(): Promise<AdminAccount[]> {
   return accounts;
 }
 
-/** 重置一个账号的密码。这个账号所有设备的登录都会被踢下线。 */
+/** 重置一个账号的密码。这个账号所有设备的登录都会被强制下线。 */
 export async function adminResetPassword(username: string): Promise<ResetPasswordResult> {
   const value = await requestJson('/api/admin/accounts/reset-password', {
     method: 'POST',

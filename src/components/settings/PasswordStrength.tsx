@@ -17,8 +17,8 @@ const labelClasses = ['text-error', 'text-stone-500', 'text-success', 'text-prim
  * 密码强度表：4 格条 + 档位标签，亮起 score + 1 格。
  * 只是建议，不拦提交；密码为空、或字典还在加载时不渲染。
  *
- * zxcvbn 的字典有好几 MB，弹窗一打开就后台拉（组件一挂载就触发），
- * 拉完 setReady 重画。加载完之前不画表，免得先闪一个不准的档位。
+ * zxcvbn 的字典有好几 MB，弹窗一打开就后台拉取（组件一挂载就触发），
+ * 拉取完 setReady 重画。加载完之前不画表，免得先闪现一个不准的档位。
  */
 export function PasswordStrength({
   locale,

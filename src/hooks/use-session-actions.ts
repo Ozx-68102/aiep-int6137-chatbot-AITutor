@@ -22,8 +22,8 @@ type SessionActionsDeps = {
 
 /**
  * 会话列表上的四个动作：改名、删会话、置顶/取消置顶，以及首问自动
- * 命名的保存（saveTitle）。titleSaves 记着在飞的改名请求，新的改名
- * 先等旧的落定，避免乱序互相覆盖。
+ * 命名的保存（saveTitle）。titleSaves 记着正在进行的改名请求，新的改名
+ * 先等旧的完成，避免乱序互相覆盖。
  */
 export function useSessionActions(deps: SessionActionsDeps) {
   const navigate = useNavigate();
@@ -145,7 +145,7 @@ export function useSessionActions(deps: SessionActionsDeps) {
   async function pinOpenSession(id: string, pinned: boolean) {
     const {locale, setSessions, onShowToast, onEnterLogin, onConnectionWarning} = depsRef.current;
     const text = translations[locale];
-    // 先本地生效：pinnedAt 用本地时间顶上，服务端回来再换成权威值。
+    // 先本地生效：pinnedAt 先用本地时间，服务端回来再换成权威值。
     setSessions((current) =>
       current.map((session) =>
         session.id === id

@@ -1,7 +1,7 @@
 // 草稿按会话各存各的（N3）：sessionStorage，键名风格对齐 h2bot-unsent
 // （src/session/unsent.ts）。刷新不丢、切会话不互相清。
 //
-// 草稿和 unsent 是两回事：unsent 管「已提交但没送达」（被踢存回、登录放回，
+// 草稿和 unsent 是两回事：unsent 管「已提交但没送达」（被强制下线存回、登录放回，
 // 恢复时优先于草稿）；草稿只管「输入框里正打着的字」。
 const prefix = 'h2bot-draft:';
 
@@ -39,7 +39,7 @@ export function clearDraft(sessionId: string | null): void {
   }
 }
 
-/** 清空所有会话的草稿：主动退出登录时调用（共用电脑不留半截字）。被踢不清。 */
+/** 清空所有会话的草稿：主动退出登录时调用（共用电脑不留半截字）。被强制下线不清。 */
 export function clearAllDrafts(): void {
   try {
     const doomed: string[] = [];

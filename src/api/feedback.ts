@@ -9,7 +9,7 @@ export type FeedbackValue = 'good' | 'bad' | null;
  * 「点赞与点踩」）：轮次编号就是上游那条回答记录的 dataId。
  *
  * 走 requestEmpty：POST 默认不自动重试——反馈是有副作用的写请求，
- * 断线盲发不值得，失败交给调用方提示。
+ * 断线时盲目重发不值得，失败交给调用方提示。
  */
 export async function sendFeedback(
   sessionId: string,

@@ -5,7 +5,7 @@ import {ApiError, isRecord, requestJson} from './http.ts';
  *
  * 接口只回答这一个问题：这一轮还在写才回 200（status 恒为 streaming），
  * 其余一切情况（写完了/失败/被停/键不存在）都是 404。结局语义不再从
- * 这个接口来：即时结局随流的 done 帧走，永久结局在库的消息上
+ * 这个接口来：即时结局随流的 done 帧走，永久结局在数据库的消息上
  * （/messages 的 failed/aborted 标志）。
  */
 export type PartialReply = {
@@ -21,7 +21,7 @@ export type PartialReply = {
  * 问服务器「还在写吗」的三种结果。
  *
  * 「服务器明确说没在写」（idle，404）和「没问到服务器」（unreachable，
- * 网络错等）必须分开：前者可以安全地以库为准，后者什么都不知道，
+ * 网络错等）必须分开：前者可以安全地以数据库为准，后者什么都不知道，
  * 不能替服务器下结论。
  */
 export type PartialProbe =

@@ -75,7 +75,7 @@ function nodeText(node: ReactNode): string {
 /**
  * 代码块：外面包一层相对定位的容器，右上角一个复制按钮；命中已注册语言
  * 且高亮 chunk 已加载时用 react-syntax-highlighter 渲染，否则原样 <pre>
- * （markdown.css 的深色底样式是兜底）。流式期间未闭合的代码块也会早早
+ * （markdown.css 的深色底样式是多一层保护）。流式期间未闭合的代码块也会早早
  * 出现复制按钮，无害（N4）。
  */
 function CodeBlock({
@@ -112,7 +112,7 @@ function CodeBlock({
         }
       },
       () => {
-        // chunk 加载不出来就保持纯文本：没有高亮总比整段回答崩掉好。
+        // chunk 加载不出来就保持纯文本：没有高亮总比整段回答崩溃好。
       },
     );
     return () => {
@@ -169,7 +169,7 @@ function CodeBlock({
 /**
  * 助手回答里的 Markdown。
  *
- * 库默认不解析原始 HTML（HTML 会当文字显示），链接和图片的地址也只放行
+ * markdown 库默认不解析原始 HTML（HTML 会当文字显示），链接和图片的地址也只放行
  * http、https、mailto 这些协议，所以不用额外做转义。
  *
  * 公式用 remark-math 认出 `$...$` 和 `$$...$$`，再由 rehype-katex 排出来。

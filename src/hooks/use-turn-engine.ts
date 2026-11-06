@@ -24,14 +24,14 @@ type TurnEngineDeps = {
   markEntering: (id: string) => void;
   setNotice: (notice: string | null) => void;
   setDraft: (draft: string) => void;
-  /** 会话类 401 的统一出口：ApiError 透传给 App 层（带 reason 走原地态，不带回退整页登录）。 */
+  /** 会话类 401 的统一出口：ApiError 透传给 App 层（带 reason 进入留在原页面的过期状态，不带回退整页登录）。 */
   onAuthError: (error: ApiError) => void;
   onConnectionWarning: () => void;
 };
 
 /**
  * 流式回答引擎：发送一轮问答、把流式文本应用到气泡、停止、重试、续传，
- * 以及线程加载（切到还没加载历史的会话时拉记录）和在飞状态登记
+ * 以及线程加载（切到还没加载历史的会话时拉取记录）和进行中状态登记
  * （pending 标记、加载标记、aborter/poller 注册表）。
  *
  * 依赖放进 ref、在效果里镜像：流式回答是跨渲染的长异步流程，回调和
@@ -46,10 +46,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   // 会话 id → 上游工作流最新节点名：等待气泡里显示；第一个内容增量到达、
   // 这一轮结束（所有结局）时清掉。
   const [progressBySession, setProgressBySession] = useState<Record<string, string>>({});
-  // 要「打字机放映」的消息 id 集合：本轮流的第一个内容增量到达时登记
-  // （见 sendQuestion 的 onDelta），放映组件放完自己销号；轮次以中止/断流/
-  // 发送失败收场时由引擎销号——放映组件的 present 变 false，立刻全显。
-  // 放映只是视觉层，动画状态不进 sessions。
+  // 要「打字机播放」的消息 id 集合：本轮流的第一个内容增量到达时登记
+  // （见 sendQuestion 的 onDelta），播放组件放完自己把 id 移出登记；轮次以中止/断流/
+  // 发送失败收场时由引擎移出登记——播放组件的 present 变 false，立刻全部显示。
+  // 播放只是视觉层，动画状态不进 sessions。
   const [presentIds, setPresentIds] = useState<Set<string>>(() => new Set());
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [threadRetry, setThreadRetry] = useState(0);
@@ -146,9 +146,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
 
   // 服务器确认够得着 / 页面回到可见：还在等回答的会话可能在断线期间有了
   // 进展，挨个补查一次线程（refreshThread 里带着续传逻辑）。
-  // 断线补查不再直接听浏览器的 online：online 只说明网卡通了，服务器未必
-  // 够得着，那时补查多半白失败一趟，还会和 use-service-status 的主动探测
-  // 形成双份补查。改听探测确认成功后广播的 networkOkEvent（见
+  // 断线补查不再直接监听浏览器的 online：online 只说明网卡通了，服务器未必
+  // 够得着，那时补查多半白白失败一趟，还会和 use-service-status 的主动探测
+  // 形成双份补查。改为监听探测确认成功后广播的 networkOkEvent（见
   // src/session/poll.ts）：补查与横幅撤销发生在同一时刻。
   useEffect(() => {
     function catchUp() {
@@ -214,14 +214,14 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     depsRef.current.updateSession(sessionId, (session) => {
       let index = session.messages.findIndex((message) => message.turnId === turnId);
       if (index === -1 && fallbackKey !== '') {
-        // 按轮次编号找不到气泡：拿消息 id 兜底，只认还在等待中的那条。
+        // 按轮次编号找不到气泡：用消息 id 保底，只认还在等待中的那条。
         index = session.messages.findIndex(
           (message) => message.id === fallbackKey && message.waiting === true,
         );
       }
       if (index === -1) {
         if (turnId === '') {
-          // 没有轮次编号、兜底也没找到：不补气泡，等下一拍。
+          // 没有轮次编号、保底也没找到：不补气泡，等下一个周期。
           return session;
         }
         // 这一轮还没进到页面里（比如刚刷新完），先补一个气泡。
@@ -238,7 +238,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       }
       const message = session.messages[index];
       if (message === undefined) {
-        // index 来自 findIndex 且已排除 -1，元素必然存在，这里只是类型上的兜底
+        // index 来自 findIndex 且已排除 -1，元素必然存在，这里只是类型上的保底处理
         return session;
       }
       if (!partial.text.startsWith(message.text)) {
@@ -271,7 +271,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
 
   /**
    * 把这一轮的回答标成失败/被停：脚注里的常驻状态提示和重试按钮由消息
-   * 自身的标志驱动（docs/MESSAGE_ACTIONS.md），实时流程里就打标，不只靠
+   * 自身的标志驱动（docs/MESSAGE_ACTIONS.md），实时流程里就打上标记，不只靠
    * 刷新后的服务器标志。waiting 一并清掉，零文字的轮次不再显示三个点；
    * 气泡不去掉——没有文字时只渲染脚注。
    */
@@ -298,9 +298,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 服务器会把上一轮在上游留下的记录删掉，历史里不会出现两遍问答。
    *
    * 传了 editedText 就是编辑重发：提问气泡的文字就地换成新的。发送没有成功
-   * （409 繁忙、请求没落地、后端没接下）时按 Gemini 的做法整轮回滚：新文字
+   * （409 繁忙、请求没有生效、后端没接下）时按 Gemini 的做法整轮回滚：新文字
    * 回输入框（busy 路径的 setDraft 负责），提问恢复原文，被去掉的回答连同
-   * 状态提示恢复——动手改界面之前先把这一轮快照下来。请求已经落地的（流
+   * 状态提示恢复——动手改界面之前先把这一轮快照下来。请求已经生效的（流
    * 中途断了）不回滚：服务器那边旧轮已经删了，回滚反而是骗人。
    */
   async function retryTurn(sessionId: string, turnId: string, editedText?: string) {
@@ -400,7 +400,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     );
   }
 
-  /** 放映收尾（组件放完）或取消（停止、断流、发送失败）：id 移出登记。幂等。 */
+  /** 播放收尾（组件放完）或取消（停止、断流、发送失败）：id 移出登记。幂等。 */
   function endPresent(messageId: string) {
     setPresentIds((current) => {
       if (!current.has(messageId)) {
@@ -444,9 +444,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       },
       (error?: ApiError) => {
         // 404（服务器明确说没在写，或会话没了）或 401（会话过期）：轮询
-        // 到此为止，输入框解锁。404 去库里对账——结局标志（failed/aborted）
+        // 到此为止，输入框解锁。404 去数据库核对并修正——结局标志（failed/aborted）
         // 在消息上，脚注照标志渲染；401 交给 App 层的统一出口（带 reason
-        // 进原地的会话失效态，不带的回退整页登录路径）。
+        // 进入留在原页面的过期状态，不带的回退整页登录路径）。
         stopPolling(sessionId);
         clearPending(sessionId);
         if (error !== undefined && error.status === 401) {
@@ -466,7 +466,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     }
     setPendingIds((current) => new Set(current).add(sessionId));
     const turnId = waiting.turnId ?? '';
-    // 等待的气泡上没挂轮次编号（比如是刷新线程带回来的）：拿消息 id 当兜底定位键。
+    // 等待的气泡上没带轮次编号（比如是刷新线程带回来的）：拿消息 id 当保底定位键。
     startPolling(sessionId, turnId, turnId === '' ? waiting.id : '');
   }
 
@@ -474,7 +474,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 流断掉且没收到结局帧：问服务器「还在写吗」这一个问题。
    *
    * 还在写（200）→ 补上半截文字，接着轮询；明确说没在写（404，包括
-   * 「Redis 里追的是别的轮次」）→ 以库为准对账：结局标志（failed/aborted）
+   * 「Redis 里追的是别的轮次」）→ 以数据库为准核对并修正：结局标志（failed/aborted）
    * 已经在消息上，脚注照标志渲染；问不到服务器（网络错）→ 保留现场，
    * 不删已收到的文字，归常驻的连接警示横幅，不替服务器下结论。
    */
@@ -492,7 +492,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       startPolling(sessionId, turnId);
       return;
     }
-    // idle（或 Redis 里追的是别的轮次）：这一轮已经不在写了，以库为准。
+    // idle（或 Redis 里追的是别的轮次）：这一轮已经不在写了，以数据库为准。
     await refreshThread(sessionId);
   }
 
@@ -506,8 +506,8 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
     aborters.current.set(sessionId, {controller, turnId});
-    // 本轮放映有没有登记过：第一个内容增量到达就登记，不等 done 帧——
-    // done 帧到达时全文已经渲染过一帧，晚登记会先闪全文再倒回放映。
+    // 本轮播放有没有登记过：第一个内容增量到达就登记，不等 done 帧——
+    // done 帧到达时全文已经渲染过一帧，晚登记会先闪现全文再退回播放。
     let presentMarked = false;
     try {
       addWaitingMessage(sessionId, assistantId, turnId);
@@ -542,16 +542,16 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         saveUnsent(question);
         setSessionWarning({sessionId, text: textRef.current.roundBusy});
         await refreshThread(sessionId);
-        // 重发（重试/编辑重发）没发出去：把旧轮放回来。refreshThread 一般已经
-        // 从服务器带回旧轮，这里是读线程失败时的兜底；恢复本身是幂等的。
+        // 重发（重试/编辑重发）没发出去：把旧轮次放回来。refreshThread 一般已经
+        // 从服务器带回旧轮次，这里是读线程失败时的保底处理；恢复本身是幂等的。
         onRollback?.();
         return;
       }
       if (outcome === 'aborted') {
-        // 被停的轮次不放映：半截文字立即全显。
+        // 被停的轮次不播放：半截文字立即全部显示。
         endPresent(assistantId);
         // 用户按了停止。停止流程负责收尾：它去问服务器这一轮到底怎么样，
-        // 页面上打的标记要跟服务器一致。
+        // 页面上打上的标记要跟服务器一致。
         const stop = stoppers.current.get(sessionId);
         if (stop) {
           await stop;
@@ -562,22 +562,22 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (outcome === 'interrupted') {
-        // 断流补回的回答一律立即全显，不走放映。
+        // 断流补回的回答一律立即全部显示，不走播放。
         endPresent(assistantId);
         await recoverReply(sessionId, turnId);
         return;
       }
       if (outcome === 'not-started') {
-        // 请求没落地，服务器上没有这一轮。这一轮不能悬空——用户永远要有
+        // 请求没有生效，服务器上没有这一轮。这一轮不能悬空——用户永远要有
         // 下一次机会：连不上照旧归横幅报，轮次级重试入口按场景保住。
         endPresent(assistantId);
         if (onRollback !== undefined) {
-          // 重试/编辑重发没发出去：空的气泡去掉，旧轮放回原样——旧轮的
+          // 重试/编辑重发没发出去：空的气泡去掉，旧轮次放回原样——旧轮次的
           // 状态提示和重试按钮跟着回来。
           removeTurnAnswer(sessionId, turnId);
           onRollback();
         } else {
-          // 首发没落地：空气泡留下并标成 failed——气泡带着 turnId，
+          // 第一次发送没有生效：空气泡留下并标成 failed——气泡带着 turnId，
           // 脚注里就给得出重试按钮（P2）。
           markTurnStatus(sessionId, turnId, 'failed');
         }
@@ -586,7 +586,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     } catch (error) {
       endPresent(assistantId);
       if (error instanceof ApiError && error.status === 401) {
-        // 发送时被踢：发送前草稿已经清了，这句提问存起来，
+        // 发送时被强制下线：发送前草稿已经清了，这句提问存起来，
         // 登录后放回输入框。
         removeTurnAnswer(sessionId, turnId);
         onRollback?.();
@@ -595,13 +595,13 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         return;
       }
       if (onRollback !== undefined) {
-        // 重发没成功：旧轮放回原样（请求几乎可以肯定没落地；万一落了，
+        // 重发没成功：旧轮次放回原样（请求几乎可以肯定没有生效；万一生效了，
         // 下一次读线程会用服务器的版本盖掉）。重试按钮跟着旧轮脚注回来，
-        // 撞上「连不上」这一轮也不悬空（P1）。
+        // 碰到「连不上」这一轮也不悬空（P1）。
         removeTurnAnswer(sessionId, turnId);
         onRollback();
       } else {
-        // 首发没成功：空气泡留下并标成 failed——气泡带着 turnId，
+        // 第一次发送没成功：空气泡留下并标成 failed——气泡带着 turnId，
         // 脚注里给得出重试按钮，这一轮不悬空。
         markTurnStatus(sessionId, turnId, 'failed');
       }
@@ -651,7 +651,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    *
    * 先让服务器记下停止（服务器写停止标记，再取消正在跑的任务），
    * 再问服务器「这一轮还在写吗」这一个问题：还在写就接着等；明确说
-   * 没在写（404）就以库为准对账，停了/写完/失败的标志在消息上，
+   * 没在写（404）就以数据库为准核对并修正，停了/写完/失败的标志在消息上，
    * 气泡下方的脚注照标志渲染。页面不自己宣布停了。
    */
   async function finishStop(sessionId: string, turnId: string, fallbackKey: string = '') {
@@ -679,12 +679,12 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       depsRef.current.onConnectionWarning();
       return;
     }
-    // 明确说没在写（404，包括「Redis 里追的是别的轮次」）：以库为准
-    // 对账，停了/写完/失败的标志在消息上，脚注照标志渲染。
+    // 明确说没在写（404，包括「Redis 里追的是别的轮次」）：以数据库为准
+    // 核对并修正，停了/写完/失败的标志在消息上，脚注照标志渲染。
     await refreshThread(sessionId);
   }
 
-  /** 等待中的气泡没有轮次编号时，拿它的消息 id 当轮询的兜底定位键；否则给空串。 */
+  /** 等待中的气泡没有轮次编号时，拿它的消息 id 当轮询的保底定位键；否则给空串。 */
   function fallbackKeyOf(sessionId: string): string {
     const messages = depsRef.current.sessions.find((item) => item.id === sessionId)?.messages ?? [];
     const waiting = messages.find((message) => message.waiting === true);
@@ -708,7 +708,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     loadedThreads.current.add(sessionId);
   }
 
-  /** 这个会话的线程既没加载过、也没有在飞的加载：由调用方决定要不要触发重载。 */
+  /** 这个会话的线程既没加载过、也没有正在进行的加载：由调用方决定要不要触发重载。 */
   function shouldReloadThread(sessionId: string): boolean {
     return !loadedThreads.current.has(sessionId) && !threadFlight.current.has(sessionId);
   }
@@ -717,7 +717,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     setThreadRetry((current) => current + 1);
   }
 
-  /** 退出登录/被踢回登录页：把在飞的加载、轮询和等待标记一次清干净。 */
+  /** 退出登录/被强制退回登录页：把进行中的加载、轮询和等待标记一次清干净。 */
   function resetForLogin() {
     setPendingIds(new Set());
     setPresentIds(new Set());

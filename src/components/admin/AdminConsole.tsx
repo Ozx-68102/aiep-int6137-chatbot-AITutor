@@ -21,9 +21,9 @@ import {NewPasswordPanel} from './NewPasswordPanel.tsx';
 
 /**
  * 管理员控制台：地址是 /admin 时整页渲染，跟聊天侧完全无关——
- * 不拉 /api/profile、不进聊天视图，登录态是 admin_login cookie 自己的。
+ * 不拉取 /api/profile、不进聊天视图，登录态是 admin_login cookie 自己的。
  *
- * 挂载时先拉一次账号列表：cookie 还有效就直接进列表，401 就显示登录表单。
+ * 挂载时先拉取一次账号列表：cookie 还有效就直接进列表，401 就显示登录表单。
  * 语言照登录页在没有账号信息时的做法：本地记过就用记的，没有就随系统。
  */
 export function AdminConsole() {
@@ -42,7 +42,7 @@ export function AdminConsole() {
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  // lang 和标签页标题走 useDocumentMeta（O8：与 ChatApp 的同款效果消重）；
+  // lang 和标签页标题走 useDocumentMeta（O8：与 ChatApp 的同款效果去重）；
   // 控制台整页独立，标题带上页面名（N11）。
   useDocumentMeta(locale, text.adminConsole);
 
@@ -73,7 +73,7 @@ export function AdminConsole() {
     };
   }, [locale]);
 
-  /** 手动刷新：重拉账号表，出错就显示在表格上方的警示行里。 */
+  /** 手动刷新：重新拉取账号表，出错就显示在表格上方的警示行里。 */
   async function refreshAccounts() {
     if (refreshBusy) {
       return;
@@ -94,8 +94,8 @@ export function AdminConsole() {
     }
   }
 
-  // 轮询的每一拍要读到最新的对话框与手动刷新状态：渲染期间写 ref 被禁止，
-  // 所以放进效果里镜像（和 use-session-actions 的 depsRef 同一套路）。
+  // 轮询的每个周期要读到最新的对话框与手动刷新状态：渲染期间写 ref 被禁止，
+  // 所以放进效果里镜像（和 use-session-actions 的 depsRef 同一做法）。
   const pollSkipRef = useRef({dialogOpen: false, refreshBusy: false});
   useEffect(() => {
     pollSkipRef.current = {
@@ -104,14 +104,14 @@ export function AdminConsole() {
     };
   });
 
-  // 自动轮询：账号列表打开（即已登录）时，每 30 秒静默重拉一次。
-  // 以下情况跳过这一拍，且都不动管理员的本地交互态：
-  // - document.hidden：页面没人看，刷新没有意义；恢复可见后下一拍自然继续；
+  // 自动轮询：账号列表打开（即已登录）时，每 30 秒静默重新拉取一次。
+  // 以下情况跳过这个周期，且都不动管理员的本地交互态：
+  // - document.hidden：页面没人看，刷新没有意义；恢复可见后下一个周期自然继续；
   // - 任何对话框/面板开着（退出确认、重置密码确认、新密码面板）：
   //   别把管理员正在做的事刷掉，等全部关上再说；
-  // - 手动刷新在飞：避免两个请求并发互相覆盖。
+  // - 手动刷新正在进行：避免两个请求并发互相覆盖。
   // 静默合并：成功就整表替换数据，不弹提示；失败（包括 401）什么都不做，
-  // 等下一拍或手动刷新——登录态真过期了，会由管理员下一次显式操作接住。
+  // 等下一个周期或手动刷新——登录态真过期了，会由管理员下一次显式操作接住。
   const accountsOpen = accounts !== null;
   useEffect(() => {
     if (!accountsOpen) {

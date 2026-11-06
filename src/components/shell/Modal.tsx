@@ -5,7 +5,7 @@ const exitMs = 150;
 
 type Phase = 'closed' | 'open' | 'closing';
 
-// 当前打开着的弹窗面板栈：多个弹窗同时开着时（例如会话过期就地重登录叠在
+// 当前打开着的弹窗面板栈：多个弹窗同时开着时（例如会话过期就地重新登录叠在
 // 设置弹窗上），只有栈顶那个响应 Esc 和 Tab 焦点圈定，不互相抢键盘。
 const openPanels: HTMLElement[] = [];
 
@@ -34,9 +34,9 @@ function focusableIn(panel: HTMLElement): HTMLElement[] {
 }
 
 /**
- * 弹窗的外壳：背景淡入淡出，窗子从 95% 放大着淡入淡出。
+ * 弹窗的外壳：背景淡入淡出，面板从 95% 放大着淡入淡出。
  *
- * 关闭时先播完退出动画再卸载 —— 直接卸载就是瞬间消失，看着很生硬。
+ * 关闭时先播放完退出动画再卸载 —— 直接卸载就是瞬间消失，看着很生硬。
  * 各弹窗自己管内容，Esc、点背景关闭、Tab 焦点圈定、背景滚动锁、关闭后
  * 把焦点还给触发元素，都在这里统一处理。
  */
@@ -57,7 +57,7 @@ export function Modal({
   const [wasOpen, setWasOpen] = useState(open);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // open 变了就在渲染里把状态调过来：打开立刻挂上，关闭先播退出动画。
+  // open 变了就在渲染里把状态调过来：打开立刻挂载，关闭先播放退出动画。
   if (open !== wasOpen) {
     setWasOpen(open);
     setPhase(open ? 'open' : 'closing');
@@ -73,15 +73,15 @@ export function Modal({
     return () => window.clearTimeout(timer);
   }, [phase]);
 
-  // 打开时：入栈、把焦点挪进面板、锁背景滚动；关闭时：出栈、解锁、还焦点。
+  // 打开时：入栈、把焦点挪进面板、锁背景滚动；关闭时：出栈、解锁、归还焦点。
   useEffect(() => {
     if (!open) {
       return;
     }
     const panel = panelRef.current;
     // 记录触发元素：此刻焦点还在面板外面才算数。面板里的 autofocus 元素
-    // 先抢走焦点时（比如重登录弹窗的用户名输入框），没有可靠的触发元素
-    // 可记，关闭时就跳过还焦点。触发元素随页面卸载时 isConnected 为
+    // 先抢走焦点时（比如重新登录弹窗的用户名输入框），没有可靠的触发元素
+    // 可记，关闭时就跳过归还焦点。触发元素随页面卸载时 isConnected 为
     // false，同样跳过，focus() 落在已卸载节点上本来就是无效操作。
     const active = document.activeElement;
     const trigger =
@@ -143,7 +143,7 @@ export function Modal({
       const first = items[0];
       const last = items[items.length - 1];
       if (first === undefined || last === undefined) {
-        // 上面刚判过 items 非空，first/last 必然存在，这里只是类型上的兜底
+        // 上面刚判过 items 非空，first/last 必然存在，这里只是类型上的保底处理
         return;
       }
       const current = document.activeElement;

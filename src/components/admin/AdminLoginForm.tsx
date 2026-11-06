@@ -6,7 +6,7 @@ import {htmlLang, type Locale} from '../../type/locale.ts';
 /**
  * 管理员控制台的登录表单，样子照学生端的登录页：整页居中一张卡片，
  * 服务器给的中文错误显示成表单红字。不带语言切换——控制台的语言
- * 进来就定好（本地记过就用记的，没有就随系统），架子上够用。
+ * 进来就定好（本地记过就用记的，没有就随系统），这样就够用。
  */
 export function AdminLoginForm({
   locale,

@@ -7,7 +7,7 @@
  * l33t）估猜测次数，score 0–4，映射到我们的四档（0→太弱、1→弱、2→一般、
  * 3 和 4→强）。不按长度分档：6 位的好密码不该被判弱，长而好记的口令该得高分。
  *
- * 字典有好几 MB，动态 import 懒加载：打开改密弹窗才开始拉，不进首屏包。
+ * 字典有好几 MB，动态 import 懒加载：打开改密弹窗才开始拉取，不进首屏包。
  *
  * 三条显示规则跟后端硬门槛对齐（后端会拒的，提示不能骗人）：
  * 不足 6 位、包含用户名、命中弱口令拒绝名单，直接「太弱」。
@@ -180,7 +180,7 @@ export function passwordStrengthReady(): boolean {
 
 /**
  * 给一个密码打分。字典还没加载完返回 null（组件先不画表，加载完再画）。
- * 用户名同时喂给 zxcvbn 的 userInputs：含用户名的密码猜测数会大降。
+ * 用户名同时传给 zxcvbn 的 userInputs：含用户名的密码猜测数会大降。
  */
 export function passwordStrength(password: string, username: string | null): StrengthScore | null {
   if (password === '') {

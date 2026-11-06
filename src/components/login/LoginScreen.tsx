@@ -22,9 +22,9 @@ export function LoginScreen({
   notice?: string | null;
   offline: boolean;
   submitting: boolean;
-  /** Modal 里的就地重登录：去掉整页外壳和卡片描边，只留内容（同款卡片进弹窗）。 */
+  /** Modal 里的就地重新登录：去掉整页外壳和卡片描边，只留内容（同款卡片进弹窗）。 */
   embedded?: boolean;
-  /** embedded 时给标题挂 id，供 Modal 的 aria-labelledby 指。 */
+  /** embedded 时给标题加 id，供 Modal 的 aria-labelledby 指。 */
   headingId?: string;
   onLocale: (locale: Locale) => void;
   onSubmit: (username: string, password: string) => void;

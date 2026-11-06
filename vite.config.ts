@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import {defineConfig} from 'vite';
 
-// 第三方库分块。把不常变的三方包按家族拆成独立 chunk 的收益：
+// 第三方库分块。把不常变的第三方包按家族拆成独立 chunk 的收益：
 // 改动 src/ 里的业务代码时，只有应用代码那个 chunk 的哈希变化，
 // 用户重新下载的只有它；vendor 分块内容没变，浏览器缓存继续命中。
 //
@@ -117,7 +117,7 @@ function vendorFamilyOf(id: string): string | undefined {
 export default defineConfig({
   plugins: [tailwindcss(), react()],
   build: {
-    // 生成 .map 文件，但产物 JS 里不写 sourceMappingURL 注释：排查线上
+    // 生成 .map 文件，但产物 JS 里不写 sourceMappingURL 注释：排查生产环境
     // 问题时可以拿 map 手动分析，而 dist 万一原样部署出去，浏览器也
     // 不会发现源码定位入口。
     sourcemap: 'hidden',

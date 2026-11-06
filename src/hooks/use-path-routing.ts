@@ -26,14 +26,14 @@ type PathRoutingDeps = {
  * 真实路径路由的整个 URL 层：路径归位、路径驱动的会话切换、登录后的
  * 状态认领（claimPath），以及改密页的进入方式记录（passwordEntry）。
  *
- * 依赖按值传入、在效果里镜像进 ref：本 hook 的效果比主控的 ref 同步
- * 效果先跑，读主控的 ref 会拿到上一帧；读自己的 depsRef 永远是本帧。
+ * 依赖按值传入、在效果里镜像进 ref：本 hook 的效果比主控制器的 ref 同步
+ * 效果先跑，读主控制器的 ref 会拿到上一帧；读自己的 depsRef 永远是本帧。
  */
 export function usePathRouting(deps: PathRoutingDeps) {
   const location = useLocation();
   const navigate = useNavigate();
-  // 改密页是怎么进来的：'push' = 从设置里点进来（压过一条历史，取消等于浏览器后退）；
-  // 'direct' = 刷新、贴地址或前进后退直接打开（没有可退的，取消就地替换路径）；
+  // 改密页是怎么进来的：'push' = 从设置里点进来（压入过一条历史记录，取消等于浏览器后退）；
+  // 'direct' = 刷新、粘贴地址或前进后退直接打开（没有可退的，取消就地替换路径）；
   // null = 当前不在改密页。
   const passwordEntry = useRef<'push' | 'direct' | null>(null);
   // 上一次渲染时的路径：路径同步效果靠它判断「刚离开改密页」。
@@ -70,7 +70,7 @@ export function usePathRouting(deps: PathRoutingDeps) {
     }
     if (pathname === '/password') {
       if (passwordEntry.current === null) {
-        // 浏览器前进后退回到改密页：历史里这一条本来就是压进去的。
+        // 浏览器前进后退回到改密页：历史里这一条本来就是压入的。
         passwordEntry.current = 'push';
       }
       prevPathRef.current = pathname;
@@ -95,7 +95,7 @@ export function usePathRouting(deps: PathRoutingDeps) {
     }
     const found = current.sessions.find((session) => session.id === wanted);
     if (found === undefined) {
-      // 地址里的会话不存在（被删了，或换账号重登）：回根路径重新来过。
+      // 地址里的会话不存在（被删了，或换账号重新登录）：回根路径重新来过。
       current.showNewChat();
       void navigate('/', {replace: true});
       return;
@@ -116,7 +116,7 @@ export function usePathRouting(deps: PathRoutingDeps) {
     const current = depsRef.current;
     if (pathname === '/password') {
       // 直接以 /password 打开、或在改密页上刷新：留在改密页。
-      // 这种进入方式历史里没有我们压的那一条，取消走就地替换的路。
+      // 这种进入方式历史里没有我们压入的那一条，取消走就地替换的路。
       passwordEntry.current = 'direct';
       return;
     }
@@ -146,17 +146,17 @@ export function usePathRouting(deps: PathRoutingDeps) {
     current.setDraft(readDraft(found.id));
   }
 
-  /** 从设置里进改密页：压了一条历史，取消等于浏览器后退。 */
+  /** 从设置里进改密页：压入了一条历史记录，取消等于浏览器后退。 */
   function markPasswordPushed() {
     passwordEntry.current = 'push';
   }
 
-  /** 改密页是不是压过历史进来的：决定取消走后退还是就地替换。 */
+  /** 改密页是不是压入过历史记录进来的：决定取消走后退还是就地替换。 */
   function isPasswordPushed(): boolean {
     return passwordEntry.current === 'push';
   }
 
-  /** 退出登录/被踢回登录页：清掉改密页的进入方式记录。 */
+  /** 退出登录/被强制退回登录页：清掉改密页的进入方式记录。 */
   function resetPasswordEntry() {
     passwordEntry.current = null;
   }

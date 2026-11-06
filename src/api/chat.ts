@@ -7,10 +7,10 @@ export type ReplyOutcome =
   | 'completed'
   /**
    * 真断流（结局帧和 [DONE] 都没收到），或 done 帧说 failed。页面走恢复
-   * 流程问「还在写吗」并对账数据库：失败脚注和重试按钮由消息上的标志驱动。
+   * 流程问「还在写吗」并按数据库核对并修正：失败脚注和重试按钮由消息上的标志驱动。
    */
   | 'interrupted'
-  /** 请求没有落地，服务器那边根本没有这一轮，可以安全重发。 */
+  /** 请求没有生效，服务器那边根本没有这一轮，可以安全重发。 */
   | 'not-started'
   /** 用户按了停止，这一轮就此打住。 */
   | 'aborted'
@@ -40,7 +40,7 @@ export async function streamReply(
   if (outcome !== 'not-started') {
     return outcome;
   }
-  // 服务器说没有这一轮，说明请求没落地，重发一次不会生成两遍。
+  // 服务器说没有这一轮，说明请求没有生效，重发一次不会生成两遍。
   return deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf, onProgress);
 }
 
@@ -93,8 +93,8 @@ async function deliverReply(
     );
     if (result.turnDone !== null) {
       // 收到 done 帧：这一轮的结局随流明说，以它为准（authoritative）。
-      // done 帧是即时判断，服务器的库是最终事实：失败后服务器与上游对账
-      // 可能把存档改成 completed，页面不等待也不回改；刷新以后以库为准
+      // done 帧是即时判断，服务器的数据库是最终事实：失败后服务器与上游核对并修正，
+      // 可能把存档改成 completed，页面不等待也不回改；刷新以后以数据库为准
       // （/messages 消息上的标志）。
       return outcomeFromTurnDone(result.turnDone);
     }
@@ -117,10 +117,10 @@ async function deliverReply(
 
 /**
  * 连接断了的时候问服务器：这一轮还在写吗。
- * 明确说没在写（404）→ 请求没落地，或这一轮已经落定：带同一个 turn_id
- * 重发一次是安全的——服务器按编号幂等（落定过的轮回空流），不会生成
+ * 明确说没在写（404）→ 请求没有生效，或这一轮已经有了最终结果：带同一个 turn_id
+ * 重发一次是安全的——服务器按编号幂等（已有最终结果的轮次返回空流），不会生成
  * 两遍；还在写 / 问不到服务器 → 不知道或没写完，一律不重发，免得生成
- * 两遍，结局交给恢复流程对账数据库。
+ * 两遍，结局交给恢复流程按数据库核对并修正。
  */
 async function outcomeAfterFailure(chatId: string): Promise<ReplyOutcome> {
   const probe = await probePartial(chatId);
@@ -211,7 +211,7 @@ export type TurnDone = {
 /**
  * done 帧 → 页面结局：completed 是写完了；aborted 是用户按了停止；
  * failed 映射成 interrupted，保留页面的「可重试」语义——恢复流程随后
- * 对账数据库，失败脚注和重试按钮由消息上的标志驱动。
+ * 按数据库核对并修正，失败脚注和重试按钮由消息上的标志驱动。
  */
 function outcomeFromTurnDone(turn: TurnDone): ReplyOutcome {
   if (turn.status === 'completed') {

@@ -55,7 +55,7 @@ export async function withConnectionRetry<T>(
       attempt += 1;
       // 非连接错直接抛；连接错重试到次数用尽，最后一个也原样抛出去。
       // 用 for(;;) 是刻意的：循环体每条路径要么 return 要么 throw，不存在
-      // 第三种出口，函数因此不需要循环后的兜底 throw。旧版在这里有一句
+      // 第三种出口，函数因此不需要循环后的保底 throw。旧版在这里有一句
       // 合成 `new ApiError(0, null)`——运行时永远执行不到，只为满足编译
       // 器的终端检查而存在，2026-11-05 外部代码审计判定为死代码后移除；
       // 顺带的好处是耗尽时抛出去的是真实错误对象，不是合成的空壳。
@@ -69,7 +69,7 @@ export async function withConnectionRetry<T>(
 
 /**
  * 只有 GET 默认自动重试：创建、登录、停止、重命名、置顶这些都是非幂等
- * 请求，连接断了再盲发一次可能做出两份。调用方明确知道能重发时，
+ * 请求，连接断了再盲目重发一次可能做出两份。调用方明确知道能重发时，
  * 传 retry: true 打开。
  */
 function autoRetry(init?: {method?: string; retry?: boolean}): boolean {
@@ -126,7 +126,7 @@ async function request(
       method: init?.method ?? 'GET',
       credentials: 'include',
       // FormData 的 Content-Type 由浏览器自己带（里面要带 boundary），
-      // 这里再写死成 json 就坏了。空对象占位与不传一样：浏览器照样自己带
+      // 这里再硬编码成 json 就坏了。空对象占位与不传一样：浏览器照样自己带
       // multipart 头；exactOptionalPropertyTypes 下这里不能写显式 undefined。
       headers:
         init?.body === undefined || init.body instanceof FormData
@@ -134,8 +134,8 @@ async function request(
           : {'Content-Type': 'application/json'},
       // body 可以缺省：fetch 对 null 和 undefined 一视同仁（都不带请求体）
       body: init?.body ?? null,
-      // 超时到点就中止。中止抛的错在下面统一包成 ApiError(0, null)，
-      // 落进 connectionFailure 的判定，表现成网络类失败。
+      // 超时到点就中止。中止抛的错在下面统一包装成 ApiError(0, null)，
+      // 归入 connectionFailure 的判定，表现成网络类失败。
       signal: AbortSignal.timeout(
         init?.body instanceof FormData ? uploadTimeoutMs : requestTimeoutMs,
       ),

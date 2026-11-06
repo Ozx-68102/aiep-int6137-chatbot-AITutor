@@ -11,12 +11,12 @@ export type ToastItem = {id: number; text: string};
  * 成功之后短暂出现的浮层：改完名字、删掉会话这类操作，弹窗自己就关了，
  * 得有个地方告诉用户「成了」。失败不走这里 —— 失败留在输入框上方的框里。
  *
- * 出现和消失都有动画：消失时先播完淡出再卸载。
+ * 出现和消失都有动画：消失时先播放完淡出再卸载。
  *
  * 状态归一（O7）：唯一来源是父级传进来的 toast（{id, text} 或 null），
  * 组件内不再维护第二套计数、也不做渲染期比较。id 变化就是一条新提示：
  * key={toast.id} 让整个节点重建、动画重播，3 秒计时也随之从零开始——
- * 连续两条同文案、不同 id 的提示各播各的。lang 由父级按当前 locale
+ * 连续两条同文案、不同 id 的提示各自播放。lang 由父级按当前 locale
  * 现算传入：显示中途切语言，提示跟着换语言。
  *
  * 样式刻意不用 alert-success：维护者要求任何时候都是白底黑字，
@@ -54,9 +54,9 @@ export function Toast({
     return () => window.clearTimeout(timer);
   }, [id]);
 
-  // 淡出：动画播完再让父级清掉 toast（toast 变 null，节点随之卸载）。
+  // 淡出：动画播放完再让父级清掉 toast（toast 变 null，节点随之卸载）。
   // 两个 setState 在同一个回调里，React 18 自动批处理成一次重渲染，
-  // 不会闪一帧淡入样式。
+  // 不会闪现一帧淡入样式。
   useEffect(() => {
     if (!closing) {
       return;
