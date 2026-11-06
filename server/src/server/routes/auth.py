@@ -1,12 +1,14 @@
 import asyncio
 import logging
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from server import pushbus
 from server.db import LoginToken, db_session
 from server.errors import LOGIN_REQUIRED, NO_LANGUAGE, REASON_EXPIRED
 from server.passwords import (
@@ -183,9 +185,16 @@ async def change_password(
 
     # 写哈希和吊销令牌在同一个事务里（_apply_password_change）：不留
     # 「密码改了、旧令牌还活着」的缝。所有设备都踢，含当前这一台，重新登录。
-    await asyncio.to_thread(
+    revoked_id = await asyncio.to_thread(
         _apply_password_change, login_cookie, admin_cookie, body.new_password
     )
+    # 事务落地后给这个账号的所有页面推一帧「登录态没了」，reason 是
+    # password_changed。刚改完密的这个页面自己也会收到——有意为之：
+    # 服务器不区分「谁触发的」，推给该账号的全部连接；怎么表现（触发页
+    # 明知自己改了密，可以表现得更轻）由前端自己决定。放在 to_thread
+    # 返回之后：事务已提交，且回到事件循环线程（publish 任何线程调都
+    # 安全，见 pushbus.py）。
+    pushbus.publish(revoked_id, {"reason": pushbus.REASON_PASSWORD_CHANGED})
 
     # 只清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的账号在
     # 正常改密，它们的计数不该跟着被清掉。
@@ -216,11 +225,13 @@ def _apply_password_change(
     login_cookie: str | None,
     admin_cookie: str | None,
     new_password: str,
-) -> None:
+) -> UUID:
     """改密最后一步（线程里）：写新哈希、吊销全部令牌，同一个事务。
 
     重新按 cookie 认一遍账号：中途账号被删或令牌被吊销的话，
     password_account 会按会话过期语义报错，不会写到不该写的账号上。
+    返回被踢账号的 id，调用方在事务提交后拿它推送（在事务里推，可能
+    推出去了事务却没落地）。
     """
     with db_session() as session:
         account = password_account(session, login_cookie, admin_cookie)
@@ -228,6 +239,8 @@ def _apply_password_change(
         # 密码已经改成自己的了，「必须改密」的标记就地清掉，同一个事务。
         account.must_change_password = False
         session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
+        # 值在会话里就取好：db_session 退出时提交，ORM 对象随后过期。
+        return account.id
 
 
 def _login_account_row(username: str, password: str) -> tuple[LoginResponse, str]:

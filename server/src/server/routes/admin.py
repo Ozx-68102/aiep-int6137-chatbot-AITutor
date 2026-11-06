@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, HTTPException, status
 from sqlalchemy import delete, select
 
+from server import pushbus
 from server.db import Account, LoginToken, db_session
 from server.passwords import generate_password, hash_password
 from server.security import ADMIN_COOKIE_NAME, admin_from_cookie
@@ -65,7 +66,15 @@ def admin_reset_password(
         account.password_hash = hash_password(password)
         account.must_change_password = True
         session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
-        account_id = str(account.id)
+        # 值在会话里就取好：db_session 退出时提交，ORM 对象随后过期。
+        account_id = account.id
+
+    # 推送放在事务块外面（db_session 退出时才提交）：落地了才告诉目标
+    # 账号的页面「你被重置了」（reason=admin_reset）。本端点是 sync
+    # def、跑在线程池里，而 asyncio.Queue 不是线程安全的——所以
+    # pushbus.publish 是线程安全入口：内部用 call_soon_threadsafe 把
+    # 入队动作丢回事件循环线程执行，发布者不直接碰 Queue，也不阻塞。
+    pushbus.publish(account_id, {"reason": pushbus.REASON_ADMIN_RESET})
 
     logger.info("控制台重置了密码 %s", account_id)
     return AdminPasswordResetResponse(username=body.username, password=password)

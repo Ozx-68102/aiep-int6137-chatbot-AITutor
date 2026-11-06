@@ -23,6 +23,17 @@ async def relay_turn(
     # 表里留着这一轮的提问，页面上不会少一轮。
     await asyncio.to_thread(chat_log.begin_round, chat_id, UUID(turn_id), message)
     try:
+        # 上一轮失败后朝上游补发的叫停，必须赶在调上游之前落地：
+        # v2 的停止是运行态标记，上游每轮开始先删标记，标记晚到的话，
+        # 新开的这一轮会被自己人写的标记掐掉。这个等待原来在
+        # routes/chat.py 返回响应头之前（最长压住响应头 7 秒，页面什么
+        # 都收不到，像死机），现在挪进流任务里：响应头立刻回，提问在
+        # 上面已经登记过，刷新马上看得到。等待期间流上没有帧：上限
+        # 7 秒小于 15 秒的心跳（sse.py），不会触发心跳，页面靠等待
+        # 气泡兜底；摘要行的 first_byte_ms 会把这段等待算进去。
+        # 放在 try 里面：等待期间被停走下面的 CancelledError 分支，
+        # Redis 状态照旧落成 aborted、done 帧照旧发。
+        await stopping.wait_for_stop(chat_id)
         async for event in fastgpt.events(chat_id, message, turn_id):
             if isinstance(event, ProgressEvent):
                 # 进度帧：只转发给页面，不算回答正文——不 append_chunk、

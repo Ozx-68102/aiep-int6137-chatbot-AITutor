@@ -40,15 +40,55 @@ async def _tolerate(operation: str, chat_id: UUID) -> AsyncIterator[None]:
         logger.warning("Redis 写入失败 %s %s", operation, chat_id, exc_info=True)
 
 
-async def begin_reply(chat_id: UUID, turn_id: str, question: str) -> None:
-    """登记一轮：编号、提问、状态。刷新页面以后靠它把这一轮认出来。"""
-    async with _tolerate("begin_reply", chat_id):
-        ttl = load_settings().redis_key_ttl_seconds
-        pipe = get_redis().pipeline(transaction=False)
-        pipe.set(_status_key(chat_id), STREAMING, ex=ttl)
-        pipe.delete(_text_key(chat_id))
-        pipe.set(_turn_key(chat_id), _turn_value(turn_id, question), ex=ttl)
-        await pipe.execute()
+# 「查＋占」合成一步的 Lua 脚本：先看状态键有没有一轮在写，
+# 没有就当场把这一轮登记完（置 streaming、删上一轮的半截文字、
+# 写轮次键）。返回 0 = 另一轮在写，没抢到；返回 1 = 抢到了，
+# 这一轮登记完成。
+#
+# 为什么用脚本而不是一条 SET NX：NX 只能表达「键不在才抢得到」，
+# 而上一轮落定之后状态/轮次键还会活到 TTL 到期——正常接着提问
+# 会永远 NX 失败；NX 失败再退回「先读后覆盖」，就又是
+# check-then-act 有缝的老路：两个并发请求都读到「已落定」、
+# 都去覆盖，同一场会话照样开出两轮。脚本在 Redis 里原子执行，
+# 查和写合成一步。register_script 是 redis 包自带的，不加依赖。
+_CLAIM_ROUND_LUA = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return 0
+end
+redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+redis.call("DEL", KEYS[2])
+redis.call("SET", KEYS[3], ARGV[3], "EX", ARGV[2])
+return 1
+"""
+
+
+async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
+    """原子抢占这一轮：没有别的轮在写时，一步完成登记。
+
+    True = 抢到了，登记已完成：状态置 streaming、半截文字键删掉、
+    轮次键（编号＋提问）写好，TTL 规矩和原来的 begin_reply 一致。
+    False = 这场会话已经有一轮在写，调用方按既有语义回 409。
+
+    Redis 不通时按抢占成功放行——和 round_in_flight「读不到按没有
+    在写」同一套降级哲学：半截回复是可选加固，Redis 挂了聊天照常，
+    大不了失去单轮保护。注意：连接的 Redis 用户 ACL 若没放行脚本
+    命令（EVALSHA/EVAL），NoPermissionError 也会落到这里，降级成
+    放行＋警告日志——原子抢占静默失效，部署新环境时看一眼日志。
+    """
+    ttl = load_settings().redis_key_ttl_seconds
+    try:
+        claimed = await get_redis().register_script(_CLAIM_ROUND_LUA)(
+            keys=[_status_key(chat_id), _text_key(chat_id), _turn_key(chat_id)],
+            args=[STREAMING, ttl, _turn_value(turn_id, question)],
+        )
+    except RedisError:
+        logger.warning(
+            "Redis 没法原子抢占 %s 的轮次，按抢到放行",
+            chat_id,
+            exc_info=True,
+        )
+        return True
+    return bool(claimed)
 
 
 async def discard_reply(chat_id: UUID) -> None:

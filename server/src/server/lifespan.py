@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from redis.exceptions import RedisError
 
-from server import chat_log, reply_store, upstream
+from server import chat_log, pushbus, reply_store, upstream
 from server.fastgpt import open_fastgpt
 from server.security import sweep_expired_tokens_loop
 from server.settings import load_settings
@@ -51,4 +51,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         sweep.cancel()
         with suppress(asyncio.CancelledError):
             await sweep
+        # 推送总线关停：给所有 /api/events 的订阅队列投关闭哨兵，让长连接
+        # 正常收尾结束流（不投的话它们只能等客户端断开或服务硬掐）。
+        pushbus.shutdown()
         await upstream.shutdown()

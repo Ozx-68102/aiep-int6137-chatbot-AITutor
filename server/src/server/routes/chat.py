@@ -18,8 +18,9 @@ from server.fastgpt import ChatRecord, FastGPT, FastGPTError
 from server.history import records_cache, session_records
 from server.log import set_turn_context
 from server.reply_store import (
-    begin_reply,
+    claim_round,
     current_turn_id,
+    discard_reply,
     mark_aborted,
     round_in_flight,
     stop_requested,
@@ -29,7 +30,6 @@ from server.streaming.framing import SSE_HEADERS, done_chunk
 from server.streaming.registry import forget, running
 from server.streaming.relay import Relay
 from server.streaming.sse import empty_sse, sse_stream
-from server.streaming.stopping import wait_for_stop
 from server.streaming.turn import log_turn_summary, record_stopped_round, relay_turn
 from server.turn_status import ABORTED
 from server.types import ChatRequest
@@ -138,15 +138,22 @@ async def chat(
             empty_sse(), media_type="text/event-stream", headers=SSE_HEADERS
         )
 
-    # 同一场会话同时只跑一轮。上一轮还在写的时候再发一次，
-    # FastGPT 那边会多出一轮，Redis 里的半截文字也会被清掉重来，两轮的片段交错着写。
-    if await round_in_flight(body.chat_id):
+    # 同一场会话同时只跑一轮。「查有没有一轮在写＋登记这一轮」合成
+    # claim_round 一个原子动作：原来先 round_in_flight 查、后 begin_reply
+    # 登记，两步之间有缝——两个不同编号的请求同时到，能都通过检查、
+    # 都去登记，同一场会话开出两轮（上游多出一轮、半截文字交错写）。
+    # 抢不到就是有一轮在写，照旧 409。Redis 不通时抢占降级放行
+    # （见 claim_round 的注释）。
+    if not await claim_round(body.chat_id, turn_id, body.message):
         raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
 
     if await stop_requested(body.chat_id, turn_id):
         # 用户在对话请求到达之前就按了停止：这一轮不开。
-        # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」。
-        await begin_reply(body.chat_id, turn_id, body.message)
+        # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」——
+        # 登记已经由 claim_round 做好（它就是原来 begin_reply 的活），
+        # 这里只把状态落成 aborted。先抢占再查停止：忙（409）仍然压过
+        # 停，优先级和原来一致；被停这条路也不再自己写登记，不会把
+        # 并发抢到的新轮登记覆盖掉。
         await mark_aborted(body.chat_id)
         written = await asyncio.to_thread(
             record_stopped_round, body.chat_id, body.turn_id, body.message
@@ -171,16 +178,28 @@ async def chat(
             empty_sse(done), media_type="text/event-stream", headers=SSE_HEADERS
         )
 
-    # 之前叫停上游的那一下要落地：停止标记晚到的话，
-    # 新开的这一轮会被自己人写的标记掐掉。
-    await wait_for_stop(body.chat_id)
-
     # 重发：把上一轮在上游留下的记录删掉，历史里才不会出现两遍问答。
+    #
+    # 顺序变化说明：等叫停落地挪进了 relay_turn（登记提问之后、调上游
+    # 之前），响应头不再被压住。这一步删除因此发生在等待落地之前——
+    # 安全：叫停针对的是上一轮失败的生成，删的是历史记录，删记录碰不
+    # 到停止标记；必须守住的时序（新轮调上游之前叫停已落地）由
+    # relay_turn 里的等待保证。代价是上一轮若还被上游写着，这一删可能
+    # 扑空（悬空提问只在它是最后一条时才删），上游历史里多留一条短
+    # 答案——原代码等待 7 秒超时放行时本来就是同样的并发面，删除本来
+    # 就尽力而为（找不到就不删）。
     if body.retry_of is not None:
-        await _clear_failed_turn(body.chat_id, body.retry_of, body.message, fastgpt)
+        try:
+            await _clear_failed_turn(body.chat_id, body.retry_of, body.message, fastgpt)
+        except BaseException:
+            # 删记录半路炸了（数据库读写在线程里，可能抛）：把刚抢下
+            # 的这一轮退掉，别留下「登记了在写、任务却没建」的假占用，
+            # 不然这场会话要干等轮次键 TTL 到期才能再发问。
+            await discard_reply(body.chat_id)
+            raise
 
-    # 先登记这一轮，页面断流之后才知道请求有没有落地。
-    await begin_reply(body.chat_id, turn_id, body.message)
+    # 这一轮在 claim_round 抢占成功时就登记完了（状态、半截文字、
+    # 轮次键一步写好）：页面断流之后靠它知道请求有没有落地。
     relay = Relay()
     relay.account_id = account_id
     relay.turn_id = turn_id
@@ -189,8 +208,9 @@ async def chat(
     )
     running.setdefault(body.chat_id, set()).add(task)
     task.add_done_callback(lambda finished: forget(body.chat_id, finished))
-    # 先把响应头发出去，页面的等待气泡立刻就转起来。
-    # 上游出问题时流会直接结束（没有 [DONE]），页面据此判断这一轮没写完。
+    # 先把响应头发出去，页面的等待气泡立刻就转起来——等叫停落地在
+    # relay_turn 里做，不压响应头。上游出问题时流会直接结束（没有
+    # [DONE]），页面据此判断这一轮没写完。
     return StreamingResponse(
         sse_stream(relay), media_type="text/event-stream", headers=SSE_HEADERS
     )

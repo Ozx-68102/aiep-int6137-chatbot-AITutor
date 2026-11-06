@@ -22,7 +22,11 @@ _STATUS_PATH = "/api/status"
 # /api/login 豁免是因为登录本来就要重新验密码，账号被标记时登录响应里会说
 # （must_change_password），拦成 403 反而让被标记的用户连重新登录都进不来；
 # /api/profile、/api/status、/api/avatar 是拦截页和页面顶栏要用的资料与心跳，
-# 拦掉会把改密界面自己也弄瞎。其余 /api/ 路径一律 403。
+# 拦掉会把改密界面自己也弄瞎。/api/events 是推送通道（GET，只读、不写任何
+# 数据）：「必须改密」的标记常是控制台重置密码时打上的，而重置本身就要靠
+# 这条通道把「你的登录态没了」推给该账号还开着的页面；拦掉它，被标记账号
+# 的 EventSource 断线重连会吃 403，页面反而永远收不到那一帧。
+# 其余 /api/ 路径一律 403。
 # 非 /api 路径（页面本身、静态资源）不拦：浏览器总得能把拦截页加载出来。
 _MUST_CHANGE_EXEMPT_PATHS = frozenset(
     {
@@ -32,6 +36,7 @@ _MUST_CHANGE_EXEMPT_PATHS = frozenset(
         "/api/profile",
         "/api/status",
         "/api/avatar",
+        "/api/events",
     }
 )
 

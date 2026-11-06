@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, update
 from sqlalchemy.orm import Session
 
 from server.db import Account, LoginToken, db_session
+from server.pushbus import REASON_EXPIRED, publish
 from server.security.cookies import COOKIE_MAX_AGE
 
 logger = logging.getLogger("server.security.tokens")
@@ -98,13 +99,26 @@ def revoke_login_token(session: Session, login_cookie: str | None) -> bool:
     return token_id is not None
 
 
-def _sweep_expired_tokens() -> None:
+def _sweep_expired_tokens() -> set[UUID]:
+    """删掉过期令牌，把命中的账号 id 集合带回来。
+
+    DELETE 加上 RETURNING account_id：仍是单条语句（仍吃
+    ix_login_token_expires_at 索引），循环那边才能给这些账号推
+    「登录态没了」。此前清扫是静默的，页面只能等下一次请求吃 401
+    才发现过期。synchronize_session=False 与 renew_login_token 同理：
+    会话里不挂着 LoginToken 对象，省掉 auto 策略先做的 SELECT。
+    集合天然去重：同一账号一次被扫掉多个令牌，也只推一回。
+    """
     with db_session() as session:
-        session.execute(
-            delete(LoginToken).where(
+        rows = session.execute(
+            delete(LoginToken)
+            .where(
                 LoginToken.expires_at <= datetime.now(UTC),
-            ),
+            )
+            .returning(LoginToken.account_id)
+            .execution_options(synchronize_session=False)
         )
+        return {row[0] for row in rows}
 
 
 async def sweep_expired_tokens_loop() -> None:
@@ -112,10 +126,18 @@ async def sweep_expired_tokens_loop() -> None:
 
     原来这一步挂在请求路径上（每个带令牌的请求都扫一遍全表），现在只在
     这里跑。失败只记一条、不掐循环：数据库恢复以后下一轮会补上。
+    每轮扫完，给命中的账号各推一帧「登录态没了」（reason=expired）：
+    挂着不动的页面不用再等下一次请求吃 401 才发现过期（总线见
+    server/pushbus.py）。
     """
     while True:
         try:
-            await asyncio.to_thread(_sweep_expired_tokens)
+            swept = await asyncio.to_thread(_sweep_expired_tokens)
+            # 推送放在写库事务提交之后（to_thread 返回即已提交），清扫
+            # 失败就不会误推「过期」；这里已在事件循环线程上，publish
+            # 本身任何线程调都安全。
+            for account_id in swept:
+                publish(account_id, {"reason": REASON_EXPIRED})
         except Exception as exc:
             logger.warning("清扫过期令牌失败：%s", exc, exc_info=True)
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
