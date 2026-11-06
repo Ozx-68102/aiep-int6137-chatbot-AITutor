@@ -129,6 +129,8 @@
 
 ### N5. 重置密码面板精修：复制按钮 + 点背景不能关
 
+> **已完成（2026-11-06）**：复制按钮落地（密码行右侧；clipboard 失败静默——面板 `select-all` 仍可手动选中复制；「已复制」2 秒复位，`copy`/`copied` 键复用）。点背景、按 Esc 都不能关——实现没给 Modal 加 `closeOnBackdrop` prop，而是给 Modal 传 no-op `onClose` 占位、面板的显式关闭按钮直调真 `onClose`（Modal 自身行为零改动，其余弹窗不受影响）。功能描述见 docs/ACCOUNT_MANAGEMENT.md「控制台」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/components/admin/NewPasswordPanel.tsx`、`/src/components/shell/Modal.tsx`；ACCOUNT_MANAGEMENT.md「后续批次」已列此待办（「三行大字、右侧复制按钮、点背景不能关」）。
 - **现状**：`Modal.tsx` 背景 `onClick={onClose}` 写死，一次性密码面板点一下背景就没了，而密码「只显示这一次，关掉之后就再也拿不到」——误点背景的代价是必须再重置一次。密码文字有 `select-all` 但没有复制按钮。
 - **影响**：管理员手滑丢密码，得重走一遍重置流程；移动端没有鼠标选择，`select-all` 基本不可用，复制按钮是刚需。
@@ -175,6 +177,8 @@
 
 ### N6. 登录页：忘记密码静态提示 + 用户名自动聚焦
 
+> **已完成（2026-11-06）**：用户名输入框 `autoFocus`；密码栏下方加静态提示「忘记密码？请联系管理员」（`forgotPasswordHint` 键，三语齐）。「记住用户名」预填没做（`h2bot-profile` 退出即清是刻意设计，本节风险段的理由成立）。功能描述见 docs/ACCOUNT_MANAGEMENT.md「忘记密码」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/components/login/LoginScreen.tsx`、`/src/i18n.ts`。
 - **现状**：ACCOUNT_MANAGEMENT.md「忘记密码」一节写了「登录页可以先放一句静态提示（『忘记密码请联系管理员』），不依赖验证通道」，未做。学生忘记密码时界面上没有任何指引。用户名输入框没有 `autoFocus`（改密弹窗的输入框有）。
 - **影响**：目标用户是小三学生，忘记密码只会反复试或放弃；一句提示就把路指到管理员/老师那里，零成本。
@@ -192,6 +196,8 @@
 - **工作量**：S。
 
 ### N7. 全局键盘快捷键
+
+> **维护者拍板不做（2026-11-06）**：本条整体不落地——不做全局快捷键（新建对话、开关侧栏、窄屏浮层 Esc）。弹窗与菜单侧的键盘可达性是另一回事，已随 P6 落地补齐。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/App.tsx`（ChatApp），或抽 `/src/hooks/use-hotkeys.ts`。
 - **现状**：没有任何快捷键。新建对话要移动鼠标点侧栏按钮（窄屏还得先开侧栏）；窄屏侧栏浮层没有 Esc 关闭（只有点背景）。
@@ -278,6 +284,8 @@
 
 ### N9. 头像上传客户端预校验（大小 / 格式）
 
+> **已完成（2026-11-06）**：落地比本节草图更严——大小 ≤5MB；格式认 HEIC/HEIF 全族 MIME（单图 `image/heic`、`image/heif` 与多帧 `-sequence` 变体，IANA 注册口径），`file.type` 为空串退按扩展名判（png/jpg/jpeg/heic/heif），Windows Chrome 的 .heic 不被误拦。拒绝提示是当场一行 `role=alert`（`avatarTooLarge`/`avatarWrongType` 三语）、不发请求；服务端校验仍是权威。功能描述见 docs/ACCOUNT_MANAGEMENT.md「头像」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/components/settings/AvatarPicker.tsx` 或 `/src/hooks/use-profile-actions.ts` 的 `pickAvatar`；`/src/i18n.ts` 加 key。
 - **现状**：`avatarHint` 写着「支持格式：PNG/JPG/JPEG/HEIC，大小不超过5MB」，但选择文件后不做任何本地检查，直接 `POST /api/avatar`，靠服务器拒绝。
 - **影响**：传一个 20MB 的照片要等整个上传走完才吃到错误，移动端流量和时间都白花；错误还是服务器中文 detail（见 P4）。本地能判定的提前拦掉，跟改密页「客户端硬门槛」的既有做法一致。
@@ -305,6 +313,8 @@
 
 ### N10. 断网即时感知：window online/offline 事件接入服务状态
 
+> **已完成（2026-11-06）**：落地比本节草图深一层——`offline` 立即挂既有服务横幅（`connectionRetry` 文案）；`online` 不轻信，主动 `GET /api/status` 确认，失败按 1s/2s/4s…封顶 15s 指数退避，代数号（confirmGeneration）作废旧链防两条确认循环并存，`navigator.onLine` 为假时暂停等下一次 online；确认在飞期间常规 30 秒节拍与可见性补查都让路。确认成功后 30 秒定时器倒计时清零重挂（任何时刻只有一个定时器），并广播 window 事件 `h2bot:network-ok`（poll.ts 导出 networkOkEvent）：500ms 续传轮询立即开新一拍，use-turn-engine 的断线补查也改听它（不再听 raw online，避免双份补查）。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「轮询与断线补查」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/hooks/use-service-status.ts`。
 - **现状**：服务降级靠 30 秒一轮的 `/api/status` 轮询和动作失败时的 `showConnectionWarning()`。浏览器断网（WiFi 掉线）时，如果用户没有触发任何动作，最坏要等 30 秒才看到「无法连接到服务器」；期间点发送要先吃 fetch 失败。
 - **影响**：学校场景 WiFi 不稳很常见，即时告知能少一批「点了没反应」的困惑。
@@ -327,6 +337,8 @@
 - **工作量**：S。
 
 ### N11. 动态 document.title（会话名进标签页）
+
+> **已完成（2026-11-06）**：`useDocumentMeta(locale, pageTitle?)` 落地（src/hooks/use-document-meta.ts）——聊天页「{会话名} - H^2 Bot」（会话名超 30 字符截断加省略号；无标题、新对话、未登录都只是「H^2 Bot」），管理台「管理员控制台 - H^2 Bot」（adminConsole 键）；连接符取半角连字符（本节草图的间隔号未用）。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「标签页标题与 html lang」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/App.tsx` 的 locale 效果、`/src/components/admin/AdminConsole.tsx` 同款效果。
 - **现状**：两处效果都写死 `document.title = 'H^2 Bot'`。开多个会话标签页时（深链 `/chat/:id` 就是为分享和重开设计的）标签页全长一样，无法区分。
@@ -352,6 +364,8 @@
 - **工作量**：S。
 
 ### N12. 多标签页语言/资料同步（storage 事件）
+
+> **已完成（2026-11-06）**：`h2bot-profile` / `h2bot-avatar` 变更当场应用语言、用户名、头像（头像半边超出本节范围，随 P12 的 dataURL 缓存一起落地）。登出同步按 `h2bot-logout` 标记键做（值=时间戳）：signOut 成功写入、openAccount 清除，其他标签页听到 `newValue ≠ null` 走 `enterLoginGuarded`——原地态保持原地、否则整页登录路径，正打的字照旧存 unsent。本节草图的 `loggedOutElsewhere` 提示文案未采用；服务器侧吊销不靠标记，仍走 401 兜底（分工依据注在 profile-cache.ts 注释）。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「多标签页同步」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/App.tsx`（ChatApp），数据源 `/src/session/profile-cache.ts`。
 - **现状**：`h2bot-profile` 只在本页写入。同一浏览器开两个标签页，A 里把语言从简中切到英文，B 不动；A 里退出登录（清掉缓存），B 的界面照常是登录态直到下一次 401（N1 的通道能治本，这条是零后端依赖的过渡）。
@@ -385,6 +399,8 @@
 
 ### N13. 深色主题
 
+> **维护者拍板不做（2026-11-06）**：维持亮色单主题（index.css 只注册 aiep 亮色主题、刻意不带 dark），深色主题不排期。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/index.css`；可选在设置弹窗加切换项（`SettingsModal.tsx` + 后端 profile 字段）。
 - **现状**：`index.css` 明确只注册 `aiep` 亮色主题，并且刻意不带 daisyUI 内置 dark（注释写了原因：dark 会在系统深色模式下盖掉 aiep 变量）。全站无深色。
 - **影响**：晚间使用刺眼；对「系统深色 + 网页亮色」的不一致观感有用户会提。这是产品决定级的事项，不是纯技术缺口——现有注释表明亮色单主题是有意为之。
@@ -411,6 +427,8 @@
 - **工作量**：L。
 
 ### O2. 路由级代码拆分：/admin 懒加载 + vendor 分块
+
+> **已完成（2026-11-06）**：两半都落地。`/admin` 改 `React.lazy` ＋ `Suspense`（fallback 是控制台 checking 占位同款的空白 div `h-full bg-base-200`，不引入新文案），独立分块 `AdminConsole-*.js` 10.86 KB（gzip 2.98 KB），主块 124 KB；vendor 分块走 `build.rolldownOptions.output.codeSplitting.groups`（Vite 8 是 rolldown 内核，本节 `manualChunks` 草图已废弃）——`vendor-react` 254.74 KB、`vendor-markdown` 413.63 KB，与高亮树共享的 14 个包显式排除在分组外保按需块自包含，highlighter 45.6 KB 按需块不变。分块加载失败（发布骑跨）另有兜底：`vite:preloadError` 由 PageBoundary 之外的 ChunkFailureToast 监听，弹「有新版本了，刷新页面即可」（newVersionRefresh 三语），模块级标志一次页面会话只弹一条；lazy 的 rejection 由 PageBoundary 兜底。功能描述见 docs/TECH.md「前端」与 docs/CHAT_PAGE_BEHAVIOR.md「错误边界与降级」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/App.tsx`、`/vite.config.ts`。
 - **现状**：`AdminConsole` 及其五个子组件被 `App.tsx` 静态 import，`dist/assets` 里只有单个 `index-*.js`：每个学生、每次访问登录页，都下载了管理员控制台、聊天 Markdown/KaTeX 渲染管线的全部代码。zxcvbn 字典已经懒加载了（做得对），但组件层没有拆。
@@ -540,6 +558,8 @@
 
 ### O7. Toast 状态统一：删掉组件内的第二套计数
 
+> **已完成（2026-11-06）**：Toast props 改 `{toast: {id, text} | null, lang, onDismiss}`，组件内第二套计数与渲染期 `wasMessage` 比较删除；id 唯一来源是 App 的 `toastCount`，`closing` 由 `closingId` 派生、`key={toast.id}` 驱动节点重建与动画重播——连续同文案不同 id 的提示各播各的、3 秒计时从零重计。`lang` 由父级按当前 locale 现算传入。多条堆叠没做（本节结论一致：单条替换维持现状）。机制见 src/components/toast/Toast.tsx 注释与 App.tsx 的 `showToast`。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/App.tsx`（`toast` state + `toastCount` ref + `showToast`）、`/src/components/toast/Toast.tsx`（内部 `counter` state + `wasMessage` 渲染期比较）。
 - **现状**：同一条 toast 有两套 id 机制：App 里 `toastCount.current += 1` 生成 `{id, text, lang}`，Toast 组件内部又维护 `counter`，靠渲染期比较 `message !== wasMessage` 决定重播动画。Toast 的 props 却只接 `message: string | null`——App 生成的 id 根本没传进去，两条连续的同文案 toast（比如连删两个会话都弹「已删除」）会因为 `message` 字符串没变而不重播动画，甚至第二条被 `wasMessage` 比较吞掉。
 - **影响**：连续同文案提示的动画/计时不重播是小 bug；双份状态是维护负担。
@@ -566,6 +586,8 @@
 
 ### O8. 抽 `useDocumentMeta`，消除两处重复的 lang/title 效果
 
+> **已完成（2026-11-06）**：与 N11 同批落地——`useDocumentMeta(locale, pageTitle?)` 统管 html lang 与 title 两件事，ChatApp 与 AdminConsole 的两处重复效果已删除、各换成一行调用。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「标签页标题与 html lang」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/App.tsx` 与 `/src/components/admin/AdminConsole.tsx` 各有一个一模一样的 `useEffect(() => { document.documentElement.lang = ...; document.title = ... }, [locale])`。
 - **现状**：重复代码；且 title 写死（见 N11）。
 - **影响**：小，但 N11 要做动态标题时必然要抽，先抽好等于给 N11 铺路。
@@ -575,6 +597,8 @@
 - **工作量**：S。
 
 ### O9. 窄屏断点常量集中一处
+
+> **已完成（2026-11-06）**：`use-narrow-screen.ts` 导出 `narrowQuery` 与 `narrowScreenNow()`，App 的初始 `sidebarOpen` 改 `useState(() => !narrowScreenNow())`——TS 侧 767px 字面量只剩 hook 一处。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/hooks/use-narrow-screen.ts`（`const narrowQuery = '(max-width: 767px)'`）、`/src/App.tsx`（`useState(() => !window.matchMedia('(max-width: 767px)').matches)` 手写同一断点）、`/src/components/sidebar/class.ts` 与 `shell/frame-class.ts`（CSS 侧的窄屏样式）。
 - **现状**：`767px` 这个值在 TS 里出现两次字面量；`ChatApp` 初始 `sidebarOpen` 没有复用 hook 里的查询串。改断点时容易只改一处，出现「hook 认为窄屏、初始状态认为宽屏」的裂缝。
@@ -618,6 +642,8 @@
 - **工作量**：S。
 
 ### O11. 置顶动作改乐观更新
+
+> **已完成（2026-11-06）**：点击立即生效（pinnedAt 用本地时间顶上）→ 成功换服务端权威值 → 失败回滚。本节指出的「回滚 pinnedAt 不精确」简化被采纳（恢复成 null、不快照原值，罕见回滚场景只影响置顶组内先后，文档认可）。失败反馈从 `setNotice` 改为错误 toast（菜单点完就关，警示框容易被漏看）；401 走登录界面不弹 toast，连接类失败照旧挂全局服务横幅，成功不提示。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「侧栏置顶乐观更新」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/hooks/use-session-actions.ts` 的 `pinOpenSession`。
 - **现状**：`await pinSession(...)` 成功回来才 `setSessions` 更新 UI。网络一般时，点「置顶」到列表重排之间有可感知的延迟，且期间没有任何 pending 指示（菜单已经关了）。改名和删除同样是等服务端，但那两个有弹窗 pending 态兜着；置顶是菜单点完即关，延迟直接裸露。
@@ -768,6 +794,8 @@
 
 ### P6. 焦点管理缺口：Modal 无焦点圈定/滚动锁，两处 role="menu" 无键盘导航
 
+> **已完成（2026-11-06）**：Modal 三段补齐——模块级 `openPanels` 栈（叠开只有栈顶响应 Esc/Tab）、Tab 首尾循环（焦点落面板外拉回第一个）、计数式背景滚动锁（最后一个弹窗关闭才恢复；移动端 Safari `overflow: hidden` 不保留滚动位置的已知小瑕疵先接受，`position: fixed` 方案未采）、关闭还焦点给触发元素（打开时焦点在面板外才记录、`isConnected` 守卫）；`focusableIn` 过滤 `inert` 子树与 `display: none`。两处 `role="menu"`（LanguageMenu、SessionRow）补方向键循环＋Home/End＋打开即聚焦＋关闭还焦点，同款写法各自实现（未抽共用 hook）。`@ariakit/react` 未引入。`opacity-100 scale-100` 动效类未动。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「焦点管理」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/components/shell/Modal.tsx`（全部弹窗共用）、`/src/components/sidebar/SessionRow.tsx` 与 `/src/components/language/LanguageMenu.tsx` 的浮层菜单。
 - **现状**：① Modal 打开时焦点不进面板、Tab 会跑到背景内容上、关闭后焦点不回到触发按钮、背景可以照常滚动（移动端弹窗后面跟着滚）；② 两个菜单都有 `role="menu"`/`menuitem`/`menuitemradio` 和 Esc、外点关闭，但没有方向键移动、没有打开即聚焦、关闭后焦点也不回按钮——ARIA 语义宣告了键盘行为却没实现，读屏用户预期落空。做得好的部分也要记录：`aria-hidden` + `inert` 在关闭态都有，`role="alert"`/`role="status"` 用得对，侧栏关闭时整棵 `inert`。
 - **影响**：键盘/读屏用户操作弹窗和菜单困难；这是无障碍合规层面的实际缺口，目标用户是小学生，学校设备可能开着系统级辅助功能。
@@ -777,6 +805,8 @@
 - **工作量**：M。
 
 ### P7. 多标签页登出/吊销不同步（N1 落地前的过渡缺口）
+
+> **部分完成（2026-11-06）**：主动登出已同步——signOut 成功写 `h2bot-logout` 标记（值=时间戳）、openAccount 清除；其他标签页 storage 监听听到 `newValue ≠ null` 走 `enterLoginGuarded`（原地态保持原地、否则整页登录路径，正打的字照旧存 unsent），不再等下一次 401。**没做的一半**：服务器侧吊销（改密、停用、管理员重置）不写任何本地标记，仍靠本页请求吃 401 兜底，治本等 `/api/events` 推送通道（backlog）。分工依据注在 src/session/profile-cache.ts 注释。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「多标签页同步」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/App.tsx`（`signOut`、`enterLogin`）。
 - **现状**：标签页 A 退出登录（`POST /api/logout` 清 cookie），标签页 B 的界面毫无变化，继续以登录态渲染，直到 B 的下一次 API 请求吃 401——而 30 秒的 `/api/status` 轮询是无鉴权端点（ACCOUNT_MANAGEMENT.md 自己标注「要改成带鉴权」），不会触发 401，所以 B 可以无限期假装在线。ACCOUNT_MANAGEMENT.md「会话状态通道」一节把这条列为动机之一（「在一个标签页退出，另一个现在要等下一次请求才发现掉线」）。
@@ -836,6 +866,8 @@
 
 ### P10. AdminConsole 账号表：空态缺失、无手动刷新、无分页预期
 
+> **已完成（2026-11-06）**：空态行（`noAccounts` 三语、跨三列居中）与手动刷新按钮（`refreshAccounts` 键、lucide `RotateCw`、busy 时 `aria-busy` ＋转圈；401 回登录表单、其余错误表格上方 `role=alert` 警示行）落地；另加了本节方案没有的 30 秒静默轮询（仅列表视图；`document.hidden`、任何对话框开着、手动刷新在飞都跳过这一拍；失败静默、401 交下一次显式操作）。分页仍未做，代码注释记「账号数上百再考虑后端分页」。功能描述见 docs/ACCOUNT_MANAGEMENT.md「控制台」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/components/admin/AdminConsole.tsx`。
 - **现状**：`accounts` 为空数组时渲染一个只有表头的空表，没有任何「暂无账号」说明；列表只在挂载和登录成功时拉一次，没有刷新按钮，管理员在别处建了号（init.py 预设/数据操作）后这个页面看不到；账号直接全量平铺，`fetchAdminAccounts` 也无分页参数。
 - **影响**：现阶段全校账号量小，分页不急；但空表无提示会被当成加载失败，无刷新按钮会逼人整页 F5。都是架子期该补的小件。
@@ -845,6 +877,8 @@
 - **工作量**：S。
 
 ### P11. 登录/管理员登录按钮无进行中指示
+
+> **已完成（2026-11-06）**：学生登录按钮与管理员登录按钮都在提交中 `aria-busy` ＋ `loading spinner`（管理员登录按钮同款后补），零新文案，与本节草图一致。功能描述见 docs/ACCOUNT_MANAGEMENT.md「忘记密码」一节的落地注记。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/components/login/LoginScreen.tsx`、`/src/components/admin/AdminLoginForm.tsx`。
 - **现状**：提交期间两个表单都只把按钮 `disabled`（`blocked` 含 `submitting`/`busy`），没有 spinner 或文案变化；对照 RenameSession、ConfirmDelete、ConfirmResetPassword 都有 `loading loading-spinner` + `aria-busy`，登录反而是全应用唯一「点了没动静」的异步按钮。P2 的 15 秒超时若落地，弱网下这个静默期会更长。
@@ -863,6 +897,8 @@
 - **工作量**：S。
 
 ### P12. `h2bot-profile` 缓存不含头像，离线启动时头像闪回默认图
+
+> **已完成（2026-11-06）**：落地形态与本节草图不同——不把 URL 塞进 `h2bot-profile`，而是独立键 `h2bot-avatar` 存 `{url, dataUrl}`（dataURL 化后可能几 MB，混存会因超配额连用户名带语言一起写不进）：`parseProfile` 拿到非默认头像 URL 即 fire-and-forget 抓取转 dataURL（>5MB 跳过、配额超限静默降级），App 的 `avatarUrl` 惰性初始化读缓存，**离线启动侧栏与设置弹窗显示本人头像**、不闪默认图；退出登录随 `h2bot-profile` 一起清。同批修复 wire 字段错位：后端 `ProfileResponse` 发 `avatar_url`（无 camelCase 别名），前端 `parseProfile` 自 2026-11-02 引入起误读 `value.avatarUrl`——真头像永远落默认图、离线缓存从未生效，2026-11-06 修正（src/api/profile.ts，注释记原委；其余解析器核对无第二处错位）。功能描述见 docs/ACCOUNT_MANAGEMENT.md「头像」一节。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/session/profile-cache.ts`（`CachedProfile = {username, locale}`）、`/src/App.tsx`（启动时 `avatarUrl` 初始为 null，靠 `readProfile` 回来才设置）。
 - **现状**：缓存的设计目的写在注释里——「接口服务连不上的时候，页面上还是知道『我是谁、我用哪种语言』」。但「我是谁」漏了头像：离线启动时侧栏和设置弹窗里显示默认头像，服务器回来才换成真头像。username 和 locale 都从缓存拿了，头像独缺。

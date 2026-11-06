@@ -43,6 +43,8 @@
 
 ### N3. 草稿按会话分开存，刷新不丢
 
+> **已完成（2026-11-06）**：按 `src/session/drafts.ts` 落地，与本节方案有两处出入——存储用 sessionStorage（不是 localStorage）、按键即写且刻意不防抖（同步写开销可忽略，省掉「切会话/卸载时何时 flush」的时序坑，依据注在代码注释里）。键名照本节：`h2bot-draft:{sessionId}`、新对话 `h2bot-draft:new`。恢复落点：切会话 showSession、开新对话 showNewChat、刷新/深链后 claimPath 的三个落点各读各的键；unsent 恢复优先于草稿。发送成功清对应键；主动退出 clearAllDrafts() 全清、被踢不清。旧 rememberDraft 单槽机制已删除。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「未发送内容缓存与按会话草稿」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/App.tsx` L82（全局单一 `draft` state）、L395 `rememberDraft`、L402 `showSession`（`setDraft('')`）、L411 `showNewChat`（`setDraft(readUnsent())`）；`/src/session/unsent.ts`（sessionStorage 单槽 `h2bot-unsent`）。
 - **现状**：草稿是全局一份。切换会话时当前输入被存进 `h2bot-unsent` 单槽，但**切回的会话不恢复自己的草稿**（`showSession` 直接 `setDraft('')`），只有「新对话」会读回那个槽。两个会话各打一半的字，后存的覆盖先存的。整页刷新则全丢（`draft` 是内存 state，`unsent` 只在被踢/切换时写）。
 - **影响**：学生写一半的长提问，切个会话或不小心刷新就没了；单槽覆盖会让「新对话」里出现别的会话的半截草稿，属于数据串味。
@@ -94,6 +96,8 @@
 
 ### N9. 流式期间允许继续打字
 
+> **已完成（2026-11-06）**：流式期间输入框不再禁用（inputLocked 只算「新会话建立中」与会话过期原地态），发送仍锁到本轮结束（sendLocked）。落地比本节方案更细：pending 且输入为空显示停止按钮，有字（trim 后）换成禁用的发送按钮＋外壳悬停浮层「请等待 AI 回答完毕」（waitForReply 键三语；disabled 按钮不吃鼠标事件，浮层挂外壳、按钮 pointer-events-none；触屏点外壳弹同款 toast）；pending 期间 Enter 不发送、给同款提示；清空输入停止按钮回来。流式期间打的字随按随落进该会话草稿（N3）。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「输入」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/App.tsx` L152（`inputLocked = sendingNew || activePending`）→ `ChatMain.tsx` L165 input `disabled={inputLocked}`。
 - **现状**：回答流式期间输入框整个禁用，学生想到追问只能干等。其实发送通路已经能优雅处理早发：服务器回 409 `busy`，前端把问题放回输入框并提示 `roundBusy`（use-turn-engine.ts L432-441）。
 - **影响**：等待感放大；对「想到就赶紧记下来」的学习场景不友好。
@@ -112,6 +116,8 @@
 
 ### N10. 移动端输入细节：字号防缩放、safe-area、气泡宽度
 
+> **已完成（2026-11-06）**：三处都落地——底部输入条 `pb-[max(1rem,env(safe-area-inset-bottom))]` ＋ index.html viewport meta 带 `viewport-fit=cover`；气泡窄屏 `max-w-[85%]`、md 断点起维持 600px 上限（message-class.ts）；输入框 `text-base`（16px，防 iOS 聚焦缩放）随 N2 多行输入落地时已带上。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「输入」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/components/chat/ChatMain.tsx` L157-186（输入条 `px-4 pt-3 pb-4`）、L161 input；`/src/components/chat/message-class.ts`（气泡 `max-w-[600px]` 固定值）。
 - **现状**：输入框用 daisyUI `input` 默认字号（0.875rem，小于 16px）；底部输入条没有 `env(safe-area-inset-bottom)` 处理；气泡最大宽是固定 600px 而不是随容器百分比。
 - **影响**：iOS Safari 对字号 <16px 的输入框聚焦时会自动放大整页（需要核实 daisyUI 5 当前主题的实际字号，若确为 14px 则必现）；iPhone 横屏/刘海屏下发送按钮贴到圆角里；窄屏上 600px 上限虽不会被超过，但和容器 padding 叠加后气泡几乎贴满，观感可以更好。
@@ -126,7 +132,7 @@
 
 ### O1. 流式 chunk 节流合批（rAF），消掉 O(n²) 的 Markdown 重解析
 
-> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。**2026-11-05 补记**：DSL 分析确认上游无法逐字（审查管线使然，见 docs/FASTGPT_API.md「流式行为」），「上游支持逐字」这个条件永远不会满足；前端「打字机」放映已立项（待开工）——放映按块吐＋节流，若不够用再捡起本条。
+> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。**2026-11-05 补记**：DSL 分析确认上游无法逐字（审查管线使然，见 docs/FASTGPT_API.md「流式行为」），「上游支持逐字」这个条件永远不会满足；前端「打字机」放映已按块吐＋节流落地（2026-11-06，见 docs/CHAT_PAGE_BEHAVIOR.md「打字机放映」）——本条继续不捡。
 
 - **位置**：`/src/hooks/use-turn-engine.ts` L420-428（`streamReply` 的 onDelta 每 chunk 直接 `applyStreamText`）→ L149（每 chunk 一次 `updateSession`，全量 map messages）；`/src/components/chat/MarkdownText.tsx` L49（memo 只救「没变的消息」，流式那条每个 chunk 都全量重解析整段 Markdown + KaTeX）。
 - **现状**：一个 chunk 一次 setState、一次全树渲染、一次对**当前全部已收文本**的 remark→rehype→KaTeX 管线。回答长 5000 字、chunk 平均 20 字时，约 250 次渲染 × 平均半程长度 ≈ 60 万字规模的重复解析，中低端设备（学生用平板）会明显掉帧。
@@ -163,7 +169,7 @@
 
 ### O2. 消息条目级 memo + 流式文本与 sessions state 解耦
 
-> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。**2026-11-05 补记**：DSL 分析确认上游无法逐字（审查管线使然，见 docs/FASTGPT_API.md「流式行为」），「上游支持逐字」这个条件永远不会满足；前端「打字机」放映已立项（待开工）——放映按块吐＋节流，若不够用再捡起本条。
+> **2026-11-05 维护者拍板：搁置至上游支持逐字输出**。上游永远整块返回（见 docs/CHAT_STREAM_PROTOCOL.md「上游整块返回答案」），渲染合批优化只在 30~40 帧齐发的十几毫秒里省几十次重渲染，其余时间空转。**2026-11-05 补记**：DSL 分析确认上游无法逐字（审查管线使然，见 docs/FASTGPT_API.md「流式行为」），「上游支持逐字」这个条件永远不会满足；前端「打字机」放映已按块吐＋节流落地（2026-11-06，见 docs/CHAT_PAGE_BEHAVIOR.md「打字机放映」）——本条继续不捡。
 
 - **位置**：`/src/App.tsx` L82（`sessions` 是顶层 state）、L149 `updateSession`；`/src/components/chat/ChatMain.tsx` L68-146（每渲染 map 全部消息，气泡无 memo）；grep 确认全仓库只有 `MarkdownText` 一个 memo，Sidebar/SessionRow 都没有。
 - **现状**：`applyStreamText` 改的是顶层 `sessions`，于是**每个 chunk 重渲染整个 ChatApp**：Sidebar 的几十行会话、SettingsModal、Toast 全部陪跑；ChatMain 里每条历史消息的 wrap/bubble DOM 结构也重建（MarkdownText 因 text 未变会跳过重解析，但 React 调和本身照做）。
@@ -215,11 +221,15 @@
 
 > 功能现状描述见 docs/MESSAGE_ACTIONS.md；调研原文以 LayerFS 历史为准。
 
+> **已完成（2026-11-06），取代上方 2026-11-04 注记**：重试死胡同已堵——首发失败不再删空气泡只归横幅，改为气泡留下、标 failed 且带 turnId，脚注给状态提示＋重试按钮（零文字也渲染脚注，落在用户提问下方）。重试失败（连不上、没落地、繁忙）走 onRollback 恢复旧轮脚注；401 分支维持原样。上方注记里「首发『连不上』按新设计统一归横幅报，不提供轮次级重试入口」一句由此取代（维护者 2026-11-06 拍板：任何失败形态都要留重试路）。功能描述见 docs/MESSAGE_ACTIONS.md「行为规范」一节的 2026-11-06 补充。调研原文以 LayerFS 历史为准。
+
 ### P2. `not-started` 的错误气泡不带 turnId，明明可以重试却给不出按钮
 
 > **已随 MESSAGE_ACTIONS.md 第一期解决（2026-11-04）**：错误气泡这一形态已不存在——`not-started` 现在走 `removeTurnAnswer` + 横幅提示 + 重试场景 `onRollback` 恢复旧轮的脚注重试入口（`use-turn-engine.ts` L490-496），`FailedReply.tsx` 已删除。本条的一行修复随架构更新失去意义，保留作调研记录。
 
 > 功能现状描述见 docs/MESSAGE_ACTIONS.md；调研原文以 LayerFS 历史为准。
+
+> **已完成（2026-11-06），取代上方 2026-11-04 注记**：`not-started`（请求没落地）不再走「删空气泡、只归横幅」——首发时空气泡留下并标 failed（气泡带着 turnId，脚注给得出重试按钮）；重试/编辑重发没落地时去掉新空气泡、onRollback 把旧轮原位放回（状态提示和重试按钮跟着回来）；401 分支维持原样。功能描述见 docs/MESSAGE_ACTIONS.md「行为规范」一节的 2026-11-06 补充。调研原文以 LayerFS 历史为准。
 
 ### P3. `recoverReply` 问不到服务器时，把已经收到的半截回答删了
 
@@ -263,6 +273,8 @@
 
 ### P7. 首问自动命名失败时静默回退，用户不知道标题没存上
 
+> **已关闭（2026-11-06，维护者裁决）**：不加提示、不改行为——标题存不上时列表本就回退显示当前语言的「新对话」，这就是预期表现；下次发消息补写标题的自愈路径保留。本节两个方案（Toast 提示 / 保留乐观标题）都不采纳。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/src/App.tsx` `submitMessage` 内 `missingTitle` 分支（L570 附近）：`saveTitle` 失败 → `updateSession` 把 title 设回 null，无任何提示。
 - **现状**：FINDINGS.md「会话标题」条目记录了这个设计：标题为 NULL 的会话下次发消息会再补写一次。所以有自愈路径，但当下用户看着侧栏标题从「首问原文」跳回「新对话」，没有任何解释。
 - **影响**：轻微困惑；标题反复写不上时（比如后端 500）用户完全无从知晓。自愈机制降低了严重度。
@@ -272,6 +284,8 @@
 - **工作量**：S。
 
 ### P8. 重试按钮无加载态，慢网络下像没点上
+
+> **已完成（2026-11-06）**：按 MessageActions 脚注的本地加载态落地——被点的重试按钮立即转圈（loading spinner）并禁用，防连点被 sendingRef 防重闸静默吞掉；引擎没接下（如找不到提问原文直接拒绝）时 2 秒兜底还原。另加一条本节没提的：会话有轮次在飞（pending）时全部重试按钮一律禁用（retryBusy——服务器同一场会话只跑一轮，再点只会撞 409）。FailedReply.tsx 已随第一期退役，本节位置行是历史快照。功能描述见 docs/MESSAGE_ACTIONS.md「行为规范」一节的 2026-11-06 补充。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/components/chat/FailedReply.tsx` L28-31（按钮无 disabled/loading）；`/src/hooks/use-turn-engine.ts` `retryTurn` L227（`sendingRef` 挡重复，但 UI 无反馈）。
 - **现状**：点重试后旧气泡立刻消失（removeTurnAnswer/removeFailedNotice），新 waiting 气泡出现——正常情况有「正在思考」当反馈。但如果 `sendQuestion` 的 fetch 卡在连接阶段（弱网），waiting 气泡其实已经加了（L417 在 streamReply 之前），所以严格说有反馈；真正的空窗是「连点两次」：第二次被 sendingRef 静默吞掉，用户不知道第一次已生效。

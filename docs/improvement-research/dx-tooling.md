@@ -19,6 +19,8 @@
 
 ### 1. 主 JS 是单个 768 KB chunk，没有 vendor 拆分
 
+> **已完成（2026-11-06）**：拆分按 `build.rolldownOptions.output.codeSplitting.groups` 落地（Vite 8 是 rolldown 内核，本节 `advancedChunks` 草图与旧 `manualChunks` 写法都不适用）——实测 `vendor-react` 254.74 KB、`vendor-markdown` 413.63 KB（与高亮树共享的 14 个包显式排除在分组外，保高亮按需块自包含），主块降到 124 KB；`/admin` 懒加载另出 10.86 KB（gzip 2.98 KB）独立分块，highlighter 45.6 KB 按需块不变。>500 KB 构建警告不再来自主块，现存于按需懒加载子块——按本条实测体积，超限的是 zxcvbn 语言字典包（language-en 约 1.2 MB，打开改密弹窗才下载），不进首屏。现状见 docs/TECH.md「前端」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：/vite.config.ts（只有 plugins 和 dev proxy，无 build 段）；产物 dist/assets/index-DdK49yAy.js 实测 768,004 字节（gzip 约 220 KB，FINDINGS 2026-11-03 有历次实测：引入 markdown 前 278 kB → 441 kB → katex 后 716 kB → zxcvbn 后 727 kB）。
 - **现状**：react、react-dom、react-router、katex、react-markdown/remark/rehype、lucide-react 和全部业务代码打进同一个 chunk。zxcvbn 字典已经通过动态 import 天然分出 4 个懒加载 chunk（实测 core 33 KB、zh 427 KB、common 435 KB、en 1.2 MB，只在打开改密弹窗时下载）——这部分做得对，不用动。构建输出长期带 >500 kB 的 chunk 警告。
 - **影响**：任何一处业务改动都会改写整个 768 KB 文件的 hash，回访用户全量重新下载，缓存命中率差；弱网首屏慢；警告常态化会稀释对真实问题的敏感度。
@@ -51,6 +53,8 @@ export default defineConfig({
 
 ### 2. 生产构建无 sourcemap，线上排障无从下手
 
+> **已完成（2026-11-06）**：`build.sourcemap: 'hidden'` 已配（vite.config.ts）——生成 `.map` 但产物 JS 不写 `sourceMappingURL` 注释，浏览器不会自动加载；部署约定按本节执行：`.map` 不发布、留构建机，排障时手动加载。Sentry 未引入（本节建议只到 hidden 为止）。现状见 docs/TECH.md「前端」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：/vite.config.ts（未设 `build.sourcemap`，默认 false）；`fs glob main 'dist/**/*.map'` 实测为空。
 - **现状**：产物只有 minified JS。部署环境是真实用户的 nginx（NGINX_SPA_DEPLOYMENT_GUIDE），线上报错只能对压缩代码猜。
 - **影响**：项目没有错误监控服务，sourcemap 价值打折；但人工排障场景（用户报「公式显示乱了」）没有任何定位手段。
@@ -60,6 +64,8 @@ export default defineConfig({
 - **工作量**：S。
 
 ### 3. tsconfig 严格度可再上两档
+
+> **已完成（2026-11-06）**：两档都开，按本节要求分两步两个提交——`noUncheckedIndexedAccess` 报 20 处（收窄/默认值修 9 处解决 19 错，带不变量注释的 `!` 仅 1 处）；`exactOptionalPropertyTypes` 报 7+1 处（类型标注加宽 7 处、补默认值 3 处）。全程零真实越界 bug，运行行为零变化。`vite.config.ts` 的两处索引访问经主代理特别授权做了最小修复（`??` 兜底＋不变量注释），include 覆盖未丢失。现状见 docs/TECH.md「前端」一节。调研原文以 LayerFS 历史为准。
 
 - **位置**：/tsconfig.json。
 - **现状**：已经相当严格：`strict`、`noUnusedLocals`、`noUnusedParameters`、`noFallthroughCasesInSwitch`、`verbatimModuleSyntax`、`moduleDetection: force` 全开。未开的高价值项：`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`。
@@ -271,6 +277,8 @@ dev = ["ruff>=0.17.2"]
 
 ### 15. package.json 缺 packageManager 与 engines 字段
 
+> **部分完成（2026-11-06）**：`packageManager` 已钉 `pnpm@12.16.1`（package.json）；**`engines` 未加**——Node 版本仍只有 `.nvmrc` 约定、无硬约束，`engine-strict` 也无从谈起，这半仍是 backlog。现状见 docs/TECH.md「包管理」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：/package.json；/.nvmrc（`lts/jod` = Node 22，与 TECH.md 表格的 22.23.2 一致）。
 - **现状**：pnpm 版本完全靠各环境碰巧装了什么。FINDINGS 2026-11-03 实测：维护者机器上有两份 pnpm（12.16.1 与 nvm 下 npm 装的 12.15.0），LayerFS 沙箱镜像自带 11.28.5。lockfileVersion 9.0 目前两者都认，但没有机制保证将来如此。Node 版本只有 .nvmrc 约定，无 engines 硬约束。
 - **影响**：环境漂移只能事后发现；pnpm 大版本间安装行为与锁文件格式可能变化。
@@ -422,6 +430,8 @@ store-dir=node_modules/.pnpm-store
 
 ### 27. 死资产线索：avatar-default.png 零引用；favicon.ico 属惯例保留
 
+> **已完成（2026-11-06）**：`public/avatar-default.png` 已删除（前后端默认头像统一走 `/avatar-default.svg`）；`favicon.ico` 按惯例保留（浏览器默认请求，无显式引用）。调研原文以 LayerFS 历史为准。
+
 - **位置**：/public/avatar-default.png、/public/favicon.ico。
 - **现状**（实测 grep）：avatar-default.png 在 src、server/src、index.html 中零引用——前后端默认头像统一用 `/avatar-default.svg`（src/api/profile.ts:5 与 server/src/server/app.py:119 双确认），png 是死文件，且每次构建都被拷进 dist。favicon.ico 无 `<link>` 引用，但浏览器存在默认请求 `/favicon.ico` 的惯例行为（老浏览器、地址栏、爬虫），**不算死文件**，属惯例保留。public 其余文件均有引用（favicon.svg、favicon-32.png、apple-touch-icon.png 在 index.html；矢量 logo 走 src/assets）。
 - **影响**：冗余资产体量小，但「是没在用还是我没找到用法」对后人是个悬案。
@@ -431,6 +441,8 @@ store-dir=node_modules/.pnpm-store
 - **工作量**：S。
 
 ### 28. `pnpm test` 占位文案与项目决策不符
+
+> **已完成（2026-11-06）**：文案已改为如实说明（「本项目不使用测试框架，见 AGENTS.md」）；退出码取 exit 0——与本节「保留 exit 1 响亮失败」的建议不同，以如实说明代替假失败。现状见 docs/TECH.md「前端」一节。调研原文以 LayerFS 历史为准。
 
 - **位置**：/package.json `"test": "echo \"Error: no test specified\" && exit 1"`。
 - **现状**：npm init 模板残留文案。「no test specified」暗示「该有测试而没写」，但本项目的实际情况是维护者明确决定不引入测试框架（AGENTS.md：「本仓库没有自动化测试，不要引入测试框架」）。
