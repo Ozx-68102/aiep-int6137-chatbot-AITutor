@@ -108,6 +108,8 @@
 
 ### N5. 会话状态通道 `GET /api/events`（文档已设计、后端未实现）
 
+> **部分完成（2026-11-06）**：后端已实现——`GET /api/events` 落地（进程内总线 `pushbus.py` ＋ `routes/events.py`；触发点三个：定时清扫→`expired`、改密→`password_changed`、控制台重置→`admin_reset`；`state` 命名事件、`{valid,reason,message}` 信封、连上先发状态、推完 valid:false 关流）。前端 EventSource 未接，接上才算整条闭环。契约与部署边界见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「推送通道」一节；与设计稿的出入记录在 docs/ACCOUNT_MANAGEMENT.md「会话状态通道」注记。调研原文以 LayerFS 历史为准。
+
 - **位置**：新端点；设计全文在 `docs/ACCOUNT_MANAGEMENT.md`「会话状态通道」一节（协议、三个触发点、心跳、`revoke_tokens` 统一函数都已定）；吊销令牌现在散在三处：`change_password`（`app.py:450-451`）、`admin_reset_password`（`app.py:334-335`）、`logout`/`admin_logout`。
 - **现状**：账号被踢/密码被重置后，客户端要等下一次请求吃 401 才知道；多标签页退出互不知晓。ACCOUNT_MANAGEMENT 已把方案定到「进程内事件总线，不用 Redis pub/sub」（单进程假设成立，CHAT_STREAM 第 12 条）。
 - **影响**：「改密码或被禁用之后客户端要立刻知道」这条核心需求没有服务端支撑；前端只能靠 30 秒 `/api/status` 轮询兜底，而 status 还不带鉴权语义。
@@ -259,6 +261,8 @@
 
 ### O3. Redis 同步客户端在事件循环里：故障时放大成全服务卡顿（新增，与 CHAT_STREAM 第 12 条相邻但不同）
 
+> **已完成（2026-11-06）**：客户端换成 `redis.asyncio`（`infra/redis_client.py` 共享单例，连接参数、双 2 秒短超时、不重试逐项保留），全部调用点改 await（限流、半截存取、停止标记、状态探针），原同步端点里碰 Redis 的按异步端点重排、DB 侧的 to_thread 原样保留；「Redis 不通就放行/降级」哲学与键前缀规矩逐处保持。慢 Redis 从此只卡 await 它的那一个协程，不再阻塞事件循环。真机冒烟：整轮对话、1 秒急停、双发 409、限流计数、改密全路径通过。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「降级与超时」。调研原文以 LayerFS 历史为准。
+
 - **位置**：`reply_store.py:208-227`（同步 `Redis`，`socket_timeout=2.0`、`retry=Retry(NoBackoff(), 0)`）、`ratelimit.py` 同款；调用点在 async 协程里：`app.py:866-900`（`chat` 里 `current_turn_id`/`round_in_flight`/`stop_requested`/`begin_reply` 连发 4-5 次）、`app.py:912-970`（`_relay` 里每个内容块一次 `append_chunk`）、`app.py:592-625`（`abort` 里 `request_stop`/`current_turn_id`）。
 - **现状**：FINDINGS 2026-10-31 实测 Redis 正常时一次写入中位 0.09ms，「留在事件循环里没问题」——这个结论在 Redis 健康时成立。但客户端配了 `socket_timeout=2.0`：Redis 一旦变慢（网络抖动、RDB fork、ACL 拒绝后连接重建），**每次调用最多堵事件循环 2 秒**，`chat` 一个请求要调 4-5 次，最坏 8-10 秒内整个进程的所有流式输出、所有请求全部冻结。降级逻辑（`_tolerate` 只记警告）保住了「Redis 挂了聊天照常」，但保不住「Redis 挂了别的功能不卡」——挂的方式如果是超时而不是拒连，卡的就是事件循环本身。
 - **影响**：单点依赖的故障被放大成全站不可用；而且现象（所有流同时停住）极难排查——正是 FINDINGS 里「同步调用卡事件循环」教训的 Redis 版。
@@ -276,6 +280,8 @@
 - **工作量**：M。
 
 ### O4. 单轮占用检查是 check-then-act，不原子（新增）
+
+> **已完成（2026-11-06）**：「查＋占」合成 `reply_store.claim_round` 一个原子动作——`SET … GET` 单命令（写状态键同时原子拿回旧值，旧值 streaming 即没抢到、回 409；抢到当场完成原 begin_reply 的三键登记）。没按本节设想的 Lua 脚本做：现网 ACL 不放行 evalsha（docs/FINDINGS.md 2026-11-06 条目），脚本一降级守卫整个蒸发；`SET NX` 也不行（落定轮的状态键活到 TTL，NX 永远失败）。同轮次幂等预检、被停路径优先级（忙压过停）、Redis 降级放行全部保持。真机冒烟：进行中双发不同轮 409、同轮重发 409、落定后下一轮不误拦。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「同一场会话同时只跑一轮」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`app.py:877`（`round_in_flight` 读）→ `app.py:900`（`begin_reply` 写）；`reply_store.py:44-58`（`begin_reply` 用 pipeline 但无条件 SET）。
 - **现状**：「同一场会话同时只跑一轮」靠先读 status 再写 status 实现，两步之间没有原子性。两个并发 `POST /api/chat`（不同 turn_id、同一 chat_id——比如两个标签页同时发、或前端重发时序错开）可以都通过 `round_in_flight` 检查，然后双双 `begin_reply`：后写的把先写的 turn 键覆盖，两轮的片段交错写进同一个 text 键——正是原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）「同一场会话同时只跑一轮」一节描述要防的事故，现在的防线在并发下有缝。turn_id 幂等检查（`app.py:866-873`）只防「同一请求来两次」，防不了「两个不同请求」。
@@ -424,6 +430,8 @@
 
 ### P3. `ChatRequest.locale` 是死字段（新增）
 
+> **已完成（2026-11-06）**：字段已删。前端仍在发它也无碍：pydantic v2 默认忽略多余字段，不会 422。报错文案的三语化由前端按状态码映射负责（已成事实），后端不需要请求级语言字段。调研原文以 LayerFS 历史为准。
+
 - **位置**：`types/api.py:131`（`locale: str | None = None`）；grep 全 `app.py`，`locale` 只出现在 profile 相关代码（`app.py:401/1231/1313-1319`），chat/`_relay`/`fastgpt.events` 都不读它。
 - **现状**：前端每条消息都带 locale，后端收下就扔。也没有校验（任意字符串都过）。
 - **影响**：接口契约里有一个字段在说谎——读代码的人会以为上游按 locale 回答；将来真要做多语言回答时，会误以为通路已经在。
@@ -433,6 +441,8 @@
 - **工作量**：S。
 
 ### P4. `delete_session` 的部分失败与并发竞态（新增）
+
+> **已完成（2026-11-06）**：删除顺序改为维护者拍板的「先本地后上游」——本地删成功或本来就不存在（重复删除/上次尝试死在中间）都继续删上游（上游删除幂等，404 当成功），上游失败照样回 204 只记 warning；本地因数据库错误失败回 503、上游一点不动、会话完好可重试。最坏窗口从「上游没了、本地挂着僵尸会话（用户可见）」变成「本地没了、上游残留（不可见、可续删）」。真机对上游实测 204。已知边界如实记录：中间态重试会先被鉴权的 404 挡住（存在性检查在 security/accounts.py，拿掉会开越权口子），但该状态下会话已从列表消失、用户无感知。调研原文以 LayerFS 历史为准。
 
 - **位置**：`app.py:570-589`。
 - **现状**：顺序是「上游 `delHistory` → 删库（message 行 + session 行）→ `discard_reply`」，三个已核实的问题：
@@ -468,6 +478,8 @@
 
 ### P6. 数据库不可用时 `/messages` 返回 200 + 空历史（新增）
 
+> **已完成（2026-11-06）**：`chat_log.read_messages` 的数据库错误如实上抛（不再吞成空列表），GET messages 与会话列表两个读端点接住回 503（detail 一句中文人话）；「真的没记录」和「读不出来」从此分得清。流式轮次进行中写库失败的故意吞异常（归档降级）原样保留，读写两个方向的语义差异写进了 docstring。调研原文以 LayerFS 历史为准。
+
 - **位置**：`chat_log.py:122-145`（`read_messages` 把 `SQLAlchemyError` 吞成 `[]`，注释写明「读不出来就当没有，让上游那份顶上」）、`app.py:645-663`（`read_session_messages` 拿 `[]` 当「老会话」走 `_backfill_session`）、`chat_log.py:147-181`（`backfill` 的 `_write` 同样吞错）。
 - **现状**：DB 挂了时的完整链路：`read_messages` → `[]` → 被当成「没有记录的老会话」→ 问上游要全量历史（成功的话）→ `backfill` 写库静默失败 → 再 `read_messages` 又是 `[]` → **200 + 空 messages**。页面看到的是「这场会话一条消息都没有」。若上游也恰好失败，则 502——同一个故障两种表现。
 - **影响**：「数据库不可用」被伪装成「会话是空的」。用户以为历史丢了；前端若有「空会话自动删除/重建」之类的逻辑会被误触发；排障时 200 响应完全不指向真实故障。
@@ -490,6 +502,8 @@
 - **工作量**：S。
 
 ### P7. 上游错误一刀切：`FastGPTError` 不带任何信息，端点错误码口径不一（新增）
+
+> **已完成（2026-11-06）**：`FastGPTError(step, *, upstream_status=None, snippet=None)`——带上哪一步、上游状态码、非 200 响应正文开头（截断 200 字符；成功正文与请求头绝不入内，学生数据和 API key 都不会带出），str() 是一句能直接落日志的人话；全部 raise 点补齐。非流式端点的上游失败统一 502（删会话原来的 500 消失）；流式侧维持「流结束＋done 帧如实报」不变。调研原文以 LayerFS 历史为准。
 
 - **位置**：`fastgpt.py:17-18`（异常类零字段）、`fastgpt.py:79-84`（非 200 时读了正文、记了日志，然后 `raise FastGPTError` 把状态码丢了）、`app.py:578-584`（delete_session 把上游失败报 **500**）vs `app.py:669-673`（backfill 把上游失败报 **502**）。
 - **现状**：上游 401（API key 错）、400（appId 错、「工作流版本过低」，FASTGPT_API 记录过这个拒绝）、429、5xx、超时，到了端点全变成同一句「暂时问不到上游」或「服务器错误」。配置错误（我们自己的 .env 写错）和上游故障（他们挂了）在响应和告警面上无法区分。
@@ -521,6 +535,8 @@
 - **工作量**：S。
 
 ### P8. 按停止后立刻发新消息：响应头被 `_wait_for_stop` 压住最长 7 秒（新增）
+
+> **已完成（2026-11-06）**：等叫停落地从响应头之前挪进流任务（`relay_turn`：登记提问之后、调上游之前）——响应头立刻回，页面等待气泡马上出现，最长 7 秒的等待不再表现为「死机」。等待期间被停走既有取消清理；7 秒小于 15 秒心跳，等待期不发心跳。场景澄清（比本条标题窄）：这个等待只发生在「上一轮失败、后端补发过叫停」之后的立即重发；用户按停止那条路本来就不等。附带口径变化：turn_summary 的 duration/first_byte 现在含这段等待（见 docs/TURN_LOGGING_AND_DIAGNOSTICS.md）。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「停止」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`app.py:893-895`（`chat` 在返回 StreamingResponse **之前** `await _wait_for_stop(body.chat_id)`）、`app.py:1115-1124`（`_STOP_WAIT_SECONDS = 7.0`）、`fastgpt.py:124-153`（stop 调用本身，配合 O5 的超时收紧）。
 - **现状**：等停止落地的机制是对的（FASTGPT_API：上游每轮开始会删停止标记，标记晚到会掐掉新一轮），但它放在响应头发出之前。用户「按停止 → 马上改口重发」是高频动作，此时新请求要干等上一轮的 `_stop_upstream` 落地（正常几百毫秒，上游卡时到 7 秒上限）才拿到响应头。docs/CHAT_STREAM_PROTOCOL.md（原 INTERRUPTED_REPLY，已退役）专门记过「响应头要立刻回」（0.013 秒实测），这条路径把那个修复又局部推翻了。
@@ -588,6 +604,8 @@
 
 ### P12. `/api/avatar` 发了 ETag 但不处理条件请求（新增）
 
+> **已完成（2026-11-06）**：GET /api/avatar 认条件请求了——If-None-Match 与当前 ETag 等值（处理引号、W/ 前缀、* 通配、逗号多值）回 304 不带 body、保留 ETag 头，浏览器用本地缓存；不匹配走原逻辑。调研原文以 LayerFS 历史为准。
+
 - **位置**：`app.py:478-497`（`read_avatar` 返回 `ETag` 和 `Cache-Control: private, max-age=86400`，但不看 `If-None-Match`）。
 - **现状**：ETag 只用来给 `_avatar_url` 拼版本参数（`app.py:1324-1333`，换图换 URL 破缓存），响应头的 ETag 本身没有兑现——浏览器过期后带 `If-None-Match` 再验证时，服务器仍回 200 + 整张 PNG。Starlette 不会自动做 304。
 - **影响**：小带宽浪费；「发了 ETag 却不 honoring」是接口层的言而无信，将来上 CDN/代理时行为更迷惑。
@@ -647,6 +665,8 @@
 - **工作量**：S。
 
 ### P16. 启动对账不清 Redis 轮次键：崩溃后 `/partial` 最长 600 秒仍答 200（新增，小项）
+
+> **已完成（2026-11-06）**：启动对账补上 Redis 这半边——lifespan 里 `reply_store.clear_orphan_round_keys` 用 SCAN 清掉 `h2botapp-chat:` 前缀下 `:status`/`:text`/`:turn`/`:stop` 四种孤儿键，无论清了几个都记一行 info，Redis 失败只警告不阻止启动。安全依据与数据库侧同一条：单进程前提下进程刚启动时不可能真有轮次在写。真机验证：种 3 个孤儿键重启，日志如实报 3 个、零残留。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「轮次键 TTL 与崩溃窗口」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`app.py` lifespan 的启动对账（只调 `chat_log.fail_stuck_rounds` 清库）；`reply_store.py` 的 `:status` / `:turn` / `:text` 键等 `REDIS_KEY_TTL_SECONDS`（现 600 秒）自然过期。
 - **现状**：进程崩溃重启后，库里 streaming 行被标成 failed，但 Redis 里的状态键还活着——`/partial` 仍答「还在写」，页面会对死轮继续轮询/续传，直到键 TTL 到期才走 404 → 读时兜底收敛（docs/CHAT_STREAM_PROTOCOL.md「轮次键 TTL 与崩溃窗口」）。

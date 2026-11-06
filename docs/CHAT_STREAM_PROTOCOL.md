@@ -18,7 +18,7 @@
 
 结局帧的载荷是 `TurnDoneEvent`（[server/src/server/types/api.py](../server/src/server/types/api.py)）：`status` 三选一（`completed` 写完了 / `aborted` 用户按了停止 / `failed` 失败）；`reason` 词汇固定（`stop` 用户按停 / `upstream` 上游失败 / `internal` 我们这边出错），正常写完为 null；`bytes_sent` 是这一轮发给页面的正文字节数。
 
-进度帧的 `name`/`status` 是上游 `flowNodeStatus` 事件的两个字段，**原样转发、不做映射文案**（2026-11-05 维护者拍板：受众是香港本地小三学生，繁体节点名对他们本就合适；节点名好不好懂归工作流搭建方负责）。进度帧只进 SSE 队列，不进 Redis 半截文字、不算进 `bytes_sent`、不影响「发过内容没有」的失败语义（`_relay` 里对 `ProgressEvent` 的分支）。
+进度帧的 `name`/`status` 是上游 `flowNodeStatus` 事件的两个字段，**原样转发、不做映射文案**（2026-11-05 维护者拍板：受众是香港本地小三学生，繁体节点名对他们本就合适；节点名好不好懂归工作流搭建方负责）。进度帧只进 SSE 队列，不进 Redis 半截文字、不算进 `bytes_sent`、不影响「发过内容没有」的失败语义（`streaming/turn.py` 的 `relay_turn` 里对 `ProgressEvent` 的分支）。
 
 ## done 帧是即时判断，数据库是最终事实
 
@@ -32,9 +32,9 @@
 
 ## 心跳与响应头
 
-- **心跳**：流上 15 秒没有动静就发一帧 SSE 注释帧 `: ping`（`_HEARTBEAT_SECONDS`，`_sse` 里 `asyncio.wait_for` 超时的分支）。前端解析器只认 `data:`/`event:` 行，注释帧天然被忽略；作用是让中间代理和页面知道流还活着。
-- **响应头**：SSE 响应带 `Cache-Control: no-store`（任何一层都别缓存这条流）和 `X-Accel-Buffering: no`（叫 nginx 这类反向代理别攒响应正文——攒住的话帧要等缓冲满才发得出去，静默期里页面连心跳都收不到）。两处统一走 `_SSE_HEADERS`。
-- **响应头立刻回**：`/api/chat` 先登记这一轮、起后台任务，马上把响应头发回去（实测 0.013 秒），不等上游第一个字节。上游的失败一律表现为「流提前结束」。
+- **心跳**：流上 15 秒没有动静就发一帧 SSE 注释帧 `: ping`（`streaming/sse.py` 的 `HEARTBEAT_SECONDS`，`sse_stream` 里 `asyncio.wait_for` 超时的分支）。前端解析器只认 `data:`/`event:` 行，注释帧天然被忽略；作用是让中间代理和页面知道流还活着。
+- **响应头**：SSE 响应带 `Cache-Control: no-store`（任何一层都别缓存这条流）和 `X-Accel-Buffering: no`（叫 nginx 这类反向代理别攒响应正文——攒住的话帧要等缓冲满才发得出去，静默期里页面连心跳都收不到）。两处统一走 `streaming/framing.py` 的 `SSE_HEADERS`（`/api/events` 推送通道复用同一份，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道」一节）。
+- **响应头立刻回**：`/api/chat` 先原子抢占登记这一轮（`claim_round`，见「同一场会话同时只跑一轮」）、起后台任务，马上把响应头发回去（实测 0.013 秒），不等上游第一个字节——等叫停落地也在流任务里做，不压响应头（见「停止」）。上游的失败一律表现为「流提前结束」。
 
 ## 上游整块返回答案
 
@@ -63,9 +63,9 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 
 ## 同一场会话同时只跑一轮
 
-`POST /api/chat` 检查这场会话是不是已经有一轮在写（`round_in_flight`），是的话回 409，不开新一轮。以前可以同时开两轮：上游多出一轮对话，Redis 里的半截文字被清掉重来，两轮的片段交错着写在一起。页面收到 409 的处理（问题放回输入框、提示、重读线程）见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)。
+`POST /api/chat` 把「查有没有一轮在写＋登记这一轮」做成一个原子动作（`reply_store.claim_round`，2026-11-06 起）：一条 `SET … GET` 命令在写状态键的同时原子拿回旧值——旧值是 `streaming` 就是没抢到，回 409；否则抢到，当场完成登记（状态置 streaming、写轮次键、删上一轮的半截文字键，TTL 规矩不变）。以前是先查（`round_in_flight`）后登记（`begin_reply`）两步，两步之间有缝：两个不同编号的请求同时到，能都通过检查、都去登记，同一场会话开出两轮（上游多出一轮对话、半截文字交错着写）。同轮次编号的幂等预检不变（`current_turn_id`＋`round_in_flight`：这一轮已在跑回 409，已落定回空流）。Redis 不通时抢占降级放行，与「读不到按没在写」同一哲学，代价是暂时失去单轮保护。页面收到 409 的处理（问题放回输入框、提示、重读线程）见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)。
 
-重发时 Redis 里那半截旧文字的清理不用另外做：`begin_reply` 本来就会把文本键删掉重来。
+为什么不用 Lua 脚本做原子抢占：现网 Redis 用户的 ACL 不放行脚本命令（`evalsha` 实测吃 `NoPermissionError`，见 [FINDINGS.md](FINDINGS.md) 2026-11-06 那条），脚本一降级守卫就整个蒸发；`SET … GET` 是普通单命令，在既有放行范围内（要求 Redis 服务器 ≥ 6.2，现网 8.10.2）。为什么不用 `SET NX`：上一轮落定后状态键活到 TTL 才消失，NX 会永远失败，正常追问开不了轮。
 
 ## 停止
 
@@ -77,17 +77,17 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 
 1. 先写停止标记（Redis `:stop` 键，值是轮次编号，60 秒过期），再取消正在跑的任务。写标记在前，是为了让「停止请求先到」也生效。
 2. 同时调上游 `POST {访问地址}/v2/chat/stop` 主动叫停，不等它返回（它自己最多等五秒让工作流收尾）。
-3. 取消任务后等这一轮真的收尾（最多两秒），页面随后读到的就是最终状态。任务被取消时 `_relay` 把状态记成 `aborted`、done 帧带 `reason: stop`，已经写出来的半截文字留在 Redis 里。
+3. 取消任务后等这一轮真的收尾（最多两秒），页面随后读到的就是最终状态。任务被取消时中继（`streaming/turn.py` 的 `relay_turn`）把状态记成 `aborted`、done 帧带 `reason: stop`，已经写出来的半截文字留在 Redis 里。
 
 **为什么要有停止标记**：停止请求和对话请求是两条 HTTP 请求，按到达顺序处理。停止请求先到时，那一轮还没登记、没有任务可取消——光靠「取消任务」停止就白按了。实测过这种次序（对话请求走新连接、停止请求走空闲连接时，十次里有十次停不掉）。有了标记就不管谁先到：停止请求把编号记下来，后到的对话请求看到编号对得上，自己就不开这一轮（`stop_requested`）。标记按编号认，只对那一轮有效，下一轮照常。
 
-**开轮前被停**的路径也有明确结局：对话请求到达时发现停止标记对得上，这一轮不开，但提问照样登记（刷新以后还能看到「问了什么、这一轮被停了」），库里记成 `aborted`，空流里带一个 done 帧（`status: aborted, reason: stop, bytes_sent: 0`）。
+**开轮前被停**的路径也有明确结局：对话请求到达时发现停止标记对得上，这一轮不开，但提问照样登记（刷新以后还能看到「问了什么、这一轮被停了」），库里记成 `aborted`，空流里带一个 done 帧（`status: aborted, reason: stop, bytes_sent: 0`）。次序是先原子抢占登记（`claim_round`）、再看停止标记：忙（409）仍然压过停，与旧优先级一致；被停路径不再自己写登记，不会覆盖并发新轮。
 
 **页面断开不算停止**：刷新页面、关掉标签页也会断开这条流，服务器不取消那一轮，照旧写完、写进 Redis，页面回来还能接上。「停止」必须由页面明确说一声。
 
-**v2 的停止机制**：我们现在走上游 v2 接口，v2 的工作流只看 Redis 里的运行态停止标记、不看连接断没断——光断连接停不住上游（实测：不叫停，问 22 字答 684 字；叫停后答 1 字）。停止标记在每轮开始时会被上游调度器先删掉，所以主动叫停之后、开新一轮之前要等叫停那一下落地（`_wait_for_stop`，最多 7 秒）——标记晚到的话，新开的那一轮会被自己人写的标记掐掉。机制、源码依据和完整实测见 [FASTGPT_API.md](FASTGPT_API.md)「停止机制」。
+**v2 的停止机制**：我们现在走上游 v2 接口，v2 的工作流只看 Redis 里的运行态停止标记、不看连接断没断——光断连接停不住上游（实测：不叫停，问 22 字答 684 字；叫停后答 1 字）。停止标记在每轮开始时会被上游调度器先删掉，所以「失败后由后端补发叫停」的会话，下一轮开轮前要等叫停那一下落地（`stopping.wait_for_stop`，最多 7 秒；用户按停止那条路不等——那时上游还好好着，标记写得很快）——标记晚到的话，新开的那一轮会被自己人写的标记掐掉。2026-11-06 起这段等待从响应头之前挪进了流任务（`relay_turn`：登记提问之后、调上游之前）：响应头不再被压住最长 7 秒，页面等待气泡立刻出现；等待期间被停也走既有的取消清理（aborted＋done 帧）。7 秒上限小于 15 秒心跳，等待期间不发心跳。机制、源码依据和完整实测见 [FASTGPT_API.md](FASTGPT_API.md)「停止机制」。
 
-**失败以后也去叫上游收手**（`_relay` 的 finally，`wait=True`）：一轮失败后上游照旧会把答案写完——token 白花，那条记录还会晚到历史里。叫停放在结束流之后发：页面不用等这一下。
+**失败以后也去叫上游收手**（`relay_turn` 里，`wait=True`）：一轮失败后上游照旧会把答案写完——token 白花，那条记录还会晚到历史里。叫停放在结束流之后发：页面不用等这一下。
 
 ## 重试与编辑重发（协议面）
 
@@ -99,13 +99,15 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 - 工作流没跑完时上游只留下提问那条记录（「悬空提问」）：只有当它就是最后一条记录时才删。指认它拿**我们自己 `message` 表里读出的这一轮提问原文**去比对（`chat_log.read_question`）——编辑重发时请求体里带的是新文字，拿请求体比对永远比不中（MESSAGE_ACTIONS.md 的方案①）。
 - 找不到就不删：宁可让历史里多一遍问答，也不要删掉别人那一轮。找记录要删的时候不能读缓存（缓存里可能是这一轮之前的那份）。
 
+删旧轮的时机在「等叫停落地」之前（等待已挪进流任务）：上一轮若还被上游写着，这一删可能扑空（答案记录还没生成，只删得掉悬空提问），上游随后写完会多留一条短答案记录——与原「等 7 秒超时放行」时是同一并发面，尽力而为的语义不变，影响只限上游最近几轮上下文，不影响我们的表和页面显示。
+
 **连接断了要不要重发**（前端 `streamReply` 的规则）：只有服务器明确说「没在写」（`/partial` 回 404，含「没有这一轮」）才带同一个编号重发一次——重发是安全的，服务器按编号幂等，落定过的轮回空流；还在写（200）或问不到服务器（网络错）一律不重发，免得生成两遍，结局交给恢复流程对账数据库。`not-started`（请求没落地）由 `streamReply` 自动重发一次。
 
 **上下文拼接归 FastGPT，不归我们**：请求体里只有当前这一句（`messages` 只带这条用户消息）加 `chatId`，上游自己取这场会话的历史、把最后一条当用户问题。模型能读多少轮由上游 AI 对话节点的 `history` 决定（默认 6 轮），我们这边改不了。依据和源码出处见 [FASTGPT_API.md](FASTGPT_API.md)「历史与上下文」。
 
 ## 刷新续传与断流恢复
 
-**服务器这边**：进行中的文字住在 Redis 里（`:text` 键，每转发一块就追加），页面断开不影响服务器写完这一轮。`GET /api/sessions/{id}/messages` 返回整场会话的线程：我们自己 `message` 表的历史，加上 Redis 里当前这一轮（`_merge_current_turn` 按编号拼接——历史里已经有这个编号的回答就不再补；提问历史里已经有了也不重复添；表里没有这一轮时按老办法把 Redis 这轮接在后面，提问 + 一个「正在写」的回答）。
+**服务器这边**：进行中的文字住在 Redis 里（`:text` 键，每转发一块就追加），页面断开不影响服务器写完这一轮。`GET /api/sessions/{id}/messages` 返回整场会话的线程：我们自己 `message` 表的历史，加上 Redis 里当前这一轮（`history.merge_current_turn` 按轮次编号对号——表里这一轮已落定就以表为准；编号对得上且还在写，用 Redis 里的半截文字补上；编号对不上就如实降级为 failed，不按文本比对兜底）。
 
 **`/partial` 只回答一个问题——这一轮还在写吗**（`read_session_partial`）：
 
@@ -121,22 +123,22 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 
 我们自己存了一份：`message` 表（[server/src/server/db/models.py](../server/src/server/db/models.py) 的 `ChatMessage`），一行一条消息（提问、回答、轮次编号、状态、顺序号）。
 
-- 模型看到的上下文还是 FastGPT 拼的（我们传 chatId，最近 6 轮由上游节点设置决定）；页面显示的历史从我们这张表来。FastGPT 清库、上游挂掉，页面照样看得见。
-- 写库不在流里面：进行中的文字住 Redis，一轮落定以后才写表（`_settle_round` 起单独任务——这一轮的任务可能正被取消，在它里面写库会写不成）。时机和量：一轮开始写两行（提问、回答的位置，`begin_round`，状态 streaming），一个事务；落定改这两行（文字和状态，`finish_round`），一个事务。本机 PostgreSQL 实测一次查询中位 0.30 毫秒。
-- 老会话第一次读到的时候，把上游那一份抄一份过来（`_backfill_session`），之后以我们这份为准。想把没人再打开过的老会话一次搬完：在 `server/` 里执行 `uv run python -m server.db.backfill`。回填的老消息没有轮次编号（上游记录映射不到），页面对此有兜底（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md) 的「轮询与断线补查」和 [MESSAGE_ACTIONS.md](MESSAGE_ACTIONS.md) 的点赞点踩边界）。
+- 模型看到的上下文还是 FastGPT 拼的（我们传 chatId，最近 6 轮由上游节点设置决定）；页面显示的历史从我们这张表来。FastGPT 清库、上游挂掉，页面照样看得见。数据库自己读不到时如实回 503（2026-11-06 起），不再拿「200＋空历史」把故障伪装成空会话。
+- 写库不在流里面：进行中的文字住 Redis，一轮落定以后才写表（`streaming/turn.py` 的 `settle_round` 起单独任务——这一轮的任务可能正被取消，在它里面写库会写不成）。时机和量：一轮开始写两行（提问、回答的位置，`begin_round`，状态 streaming），一个事务；落定改这两行（文字和状态，`finish_round`），一个事务。本机 PostgreSQL 实测一次查询中位 0.30 毫秒。
+- 老会话第一次读到的时候，把上游那一份抄一份过来（`history.backfill_session`），之后以我们这份为准。想把没人再打开过的老会话一次搬完：在 `server/` 里执行 `uv run python -m server.db.backfill`。回填的老消息没有轮次编号（上游记录映射不到），页面对此有兜底（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md) 的「轮询与断线补查」和 [MESSAGE_ACTIONS.md](MESSAGE_ACTIONS.md) 的点赞点踩边界）。
 
 ## 卡死行对账
 
 进程死在半路时，表里会留下状态是 streaming 的行（`begin_round` 的设计意图就是「进程中途死了，表里留着这一轮的提问」），Redis 键过期后没人再来落定它。两层对账：
 
-- **读时兜底**（`_merge_current_turn`）：表里 streaming 的行，Redis 的 partial 为空或编号对不上，说明这一轮其实已经不在写了——展示层降级为 failed（不写库），页面因此出现「消息生成失败 + 重试」而不是永远的等待气泡。编号对得上的行不降级：Redis 里那份状态更新，照实合并。
+- **读时兜底**（`history.merge_current_turn`）：表里 streaming 的行，Redis 的 partial 为空或编号对不上，说明这一轮其实已经不在写了——展示层降级为 failed（不写库），页面因此出现「消息生成失败 + 重试」而不是永远的等待气泡。编号对得上的行不降级：Redis 里那份状态更新，照实合并。
 - **启动对账**（lifespan 里的 `chat_log.fail_stuck_rounds`）：单进程前提下，进程重启时不可能有「还在写」的轮次，表里所有 streaming 行必是死轮，一条 UPDATE 全标成 failed。
 
 ### 轮次键 TTL 与崩溃窗口
 
 - `:status` / `:turn` / `:text` 三个轮次键的 TTL 是 `REDIS_KEY_TTL_SECONDS`（env 注入，现网 600 秒）：内容块到达（`append_chunk`）和轮次落定（`mark_finished`）会刷新；**进度帧不碰 Redis**（进度不算正文）。停止标记 `:stop` 是另一个 60 秒的短 TTL。
-- 理论边界：一轮直到 TTL 都没有任何内容块（只有进度帧或纯静默超过 600 秒），键会提前过期——单轮 409 守卫和同轮次编号幂等失效，同编号重发会走 `begin_round` 的删旧行路径重生成。实测上游最长静默约 23 秒（FastGPT 整块输出），600 秒远大于任何实测值；记录为结构边界，不是现网 bug。
-- 崩溃窗口：启动对账只清数据库、不清 Redis——崩溃后最长 600 秒内 `/partial` 仍答 200（streaming），页面会对着一轮死轮继续轮询，TTL 到期后走 404 → 读时兜底自然收敛。backlog：启动对账时顺带清 Redis 轮次键（improvement-research backend-api P16）。
+- 理论边界：一轮直到 TTL 都没有任何内容块（只有进度帧或纯静默超过 600 秒），键会提前过期——单轮 409 守卫（`claim_round`）和同轮次编号幂等失效，同编号重发会走 `begin_round` 的删旧行路径重生成。实测上游最长静默约 23 秒（FastGPT 整块输出），600 秒远大于任何实测值；记录为结构边界，不是现网 bug。
+- 崩溃窗口：2026-11-06 起堵上。原来启动对账只清数据库、不清 Redis——崩溃后最长 600 秒内 `/partial` 仍答 200，页面对着死轮继续轮询。现在启动对账（lifespan）顺带清 Redis 的轮次键（`reply_store.clear_orphan_round_keys`：SCAN `h2botapp-chat:` 前缀下 `:status`/`:text`/`:turn`/`:stop` 四种后缀批量删；无论清了几个都记一行 info，Redis 失败只警告、不阻止启动）。安全依据与数据库侧启动对账同一条：单进程前提下，进程刚启动时不可能真有轮次在写，那些键必是孤儿。
 
 ## 状态词表：一个模块拥有四个词
 
@@ -148,14 +150,14 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 
 ## 降级与超时
 
-- **Redis 不通时降级**：半截回复是可选的，Redis 写失败只记警告，聊天照常走（`_tolerate`）；页面上会出现一条常驻横幅「半截回答功能不可用」。Redis 客户端连接不通要马上知道（2 秒超时、不重试——默认的连接重试会让一次失败的写入等 3.7 秒，把整个服务卡住）。
+- **Redis 不通时降级**：半截回复是可选的，Redis 写失败只记警告，聊天照常走（`reply_store` 的 `_tolerate`）；页面上会出现一条常驻横幅「半截回答功能不可用」。Redis 客户端连接不通要马上知道（连接、读写都是 2 秒超时，不重试——默认的连接重试会让一次失败的写入等 3.7 秒）。2026-11-06 起客户端换成 `redis.asyncio`：慢 Redis 卡的只是 await 它的那一个协程，不再阻塞事件循环（同步客户端时代一次慢调用会放大成全站卡顿）。
 - **状态接口**：`GET /api/status` 报 `{"database": "ok"|"unavailable", "reply_store": "ok"|"unavailable"}`。不需要登录，只带 cookie 也不刷新登录有效期（它是心跳）。页面每 30 秒查一次、标签页重新可见时补查（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)）。
-- **上游记录的 5 秒缓存**（`_records_cache`）：刷新多少次，上游就只被问一次。以前每刷新一次就问一次上游要整段历史，连着刷新十来次能把上游打到连不上（[FINDINGS.md](FINDINGS.md) 2026-10-30 那条）。
+- **上游记录的 5 秒缓存：已退役**。页面历史改为从我们自己的 `message` 表来之后（见「这一轮的历史从哪儿来」），刷新根本不碰上游，当初防「刷新风暴打垮上游」的进程内缓存（[FINDINGS.md](FINDINGS.md) 2026-10-30 那条）失去存在理由，2026-11-05 结构整理时删除。老会话回填一次落库，同样不会重复问上游。
 - **对上游的三个超时**（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py)）：连接 10 秒；读 30 秒（等第一个字节、两块字之间都是它，`.env` 里 `FASTGPT_READ_TIMEOUT_SECONDS` 可调）。原来 `read=None` 无限等，上游接了连接一直不吭声时这一轮会永远挂着。上游没有「这一轮还在不在跑」的查询接口，读超时是我们唯一的本地手段。
 
 ## 单进程前提
 
-`_running`、`_stop_tasks`、`_settle_tasks`、`_pending_stops`、`_records_cache` 都在模块全局。多 worker 的话，对话请求和停止请求可能落在不同进程，「停止」就找不到那个任务；启动对账和令牌清扫的定时任务也按单进程设计（不需要分布式锁）。这是前提不是 bug——别以后有人顺手加 `--workers 4`。
+在飞任务登记簿（`streaming/registry.py` 的 `running`、`settle_tasks`）、停止相关的任务与等待（`streaming/stopping.py` 的 `stop_tasks`、`pending_stops`）、推送总线（`pushbus.py` 的订阅表）都是进程内状态。多 worker 的话，对话请求和停止请求可能落在不同进程，「停止」就找不到那个任务，推送也只覆盖本进程的订阅者；启动对账（含 Redis 孤儿轮次键清理）和令牌清扫的定时任务也按单进程设计（不需要分布式锁）。这是前提不是 bug——别以后有人顺手加 `--workers 4`（server/AGENTS.md「边界」有同一条规矩）。
 
 ## 设计原则
 

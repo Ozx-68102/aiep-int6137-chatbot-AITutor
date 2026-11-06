@@ -36,7 +36,7 @@ turn_summary turn_id=… chat_id=… account_id=… outcome=… duration_ms=… 
 | `progress_events` | 这一轮转发给页面的进度帧数 |
 | `done_status` | 流里 done 帧告知页面的结局（即时判断） |
 
-`done_status` 和 `outcome` 可能不同：失败之后服务器还会与上游做归档核对，核对上了就把库改成 completed，而 done 帧已经说过的 failed 不回改（分工见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「done 帧是即时判断，数据库是最终事实」）。两个字段并排放在摘要行里，就是为了让这种不一致一眼可见。
+`done_status` 和 `outcome` 可能不同：失败之后服务器还会与上游做归档核对，核对上了就把库改成 completed，而 done 帧已经说过的 failed 不回改（分工见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「done 帧是即时判断，数据库是最终事实」）。两个字段并排放在摘要行里，就是为了让这种不一致一眼可见。另一个口径小变化（2026-11-06）：等叫停落地（`wait_for_stop`，最多 7 秒）挪进了流任务，`duration_ms` 和 `first_byte_ms` 现在把这段等待算进去——「失败后立刻重发」的场景数字最多比原来大 7 秒，不是变慢了。
 
 ## debug 开关与全文日志
 
@@ -83,4 +83,4 @@ grep "<轮次编号>" logs/server.log
 
 ## 日志轮转现状
 
-`logs/server.log` 超过 5MB 轮转归档（`log.py` 的 `_SizeLogFile`，归档文件按时间戳命名 `server-<时间戳>.log`）。归档只增不减、没有保留策略——这一条是未实现的 backlog，见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 22 条。AGENTS.md 和 TECH.md 里关于日志文件位置、「不要贴进公开渠道」的规矩不变，这里不搬家。
+`logs/server.log` 超过 5MB 轮转归档（`log.py` 的 `_SizeLogFile`，归档文件按时间戳命名 `server-<时间戳>.log`）。**归档保留已拍板（2026-11-05）：不做自动删除**，归档的保留与清理归运维部署机的人负责；程序只提醒——每次轮转后统计归档的个数与总大小，超过阈值（默认 20 个或 500MB，`log.py` 里两个常量，要调改常量）就在日志里写一行 warning，提示人工处理。决定记录见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 22 条注记。AGENTS.md 和 TECH.md 里关于日志文件位置、「不要贴进公开渠道」的规矩不变，这里不搬家。

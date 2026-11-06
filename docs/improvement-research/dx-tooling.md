@@ -149,6 +149,8 @@ unicorn 与 react-perf 规则面宽、风格类噪音多，本项目规模下收
 
 ### 9. 前后端检查没有统一入口
 
+> **已完成（2026-11-06）**：`scripts/check-all.sh`——前端规范（oxlint）、前端格式（oxfmt --check）、前端类型（tsc --noEmit）、后端两件套（复用 scripts/check-server.sh）四步连跑，失败点名是哪一步并给复验命令，开头检查 pnpm/uv 在不在。是 CI 的本地等价物（CI 只多一次构建）。真机实测四步全绿、总共约 4 秒。
+
 - **位置**：/scripts/check-server.sh（后端 ruff check + format --check）、package.json `check`（前端）。
 - **现状**：完整验收要记住两个入口：前端在根目录 `pnpm check`（+第 8 条后的 tsc），后端 `bash scripts/check-server.sh`。没有一键全查。
 - **影响**：跨栈改动（API 字段调整这类两边都动的事）容易漏查另一边；AGENTS.md 验收一节的指令分散在两处。
@@ -174,6 +176,8 @@ check-server.sh 已有 uv 缺失时的友好报错，无需改。
 - **工作量**：S。
 
 ### 10. Git 钩子只管「格式」，没有 pre-commit 代码检查
+
+> **已完成（2026-11-06）**：先更正本节前提——仓库原来根本没有查代码的钩子（只有 commit-msg 查提交信息、pre-push 查分支名，「只管格式」指的是提交信息格式）。新建 `.githooks/pre-commit`：跑 check-all.sh 全套（含 tsc——文档证据加实测都是秒级，四项共约 4 秒），失败给中文提示与 `--no-verify` 逃生门（并警告 CI 还会跑同一套）。`setup-hooks.sh` 现有逻辑自动启用，安装脚本未改。落地当天就在真实提交上拦下过一次格式不齐，实战验证。
 
 - **位置**：/.githooks/（commit-msg 管提交信息、pre-push 管分支名）。
 - **现状**：两个钩子都是元数据检查，代码质量没有任何自动执行点。FINDINGS 2026-11-03 有现成教训：oxfmt 版本变动导致 `password-strength.ts` 格式失配，main 上 `pnpm check` 红了一段时间才被发现——当时若有 pre-commit 就不会落地。
@@ -201,6 +205,8 @@ setup-hooks.sh 已经给 .githooks/ 下所有文件 chmod +x，零改动兼容�
 - **工作量**：S。
 
 ### 11. 没有 CI：GitHub Actions 可行且正好覆盖现有盲区（建议）
+
+> **已完成（2026-11-06）**：`.github/workflows/ci.yml`——push main 与全部 PR 触发；前端作业（pnpm 12.16.1 显式钉住与 packageManager 字段对齐、Node 读 .nvmrc、冻结安装、`pnpm check`、构建并确认产物），后端作业（setup-uv、Python 3.13、冻结同步、ruff 两件套）。CI 不跑迁移不起服务（runner 无 PG/Redis），文件头注释写明。**注**：尚未在 GitHub 实跑——push 权在维护者，首次 push 时第一次触发；action 标签均经 API 核实存在、YAML 经解析器验证。
 
 - **位置**：仓库根（/.github 实测不存在）；仓库推送 GitHub（Ozx-68102/aiep-int6137-chatbot-AITutor，package.json 已配 repository/bugs URL）。
 - **现状**：所有检查只发生在本地。远端已开分支名 ruleset（AGENTS.md），但没有任何 check 类 ruleset。尤其关键：LayerFS 合并走 `git commit-tree` 复刻落地，**复刻提交不触发任何本地钩子**（AGENTS.md 自己写明 commit-msg 要手动逐条预检）——这条最主要的落地路径目前完全绕过自动检查，CI 是唯一能兜住它的位置。

@@ -49,7 +49,7 @@ npm install -g pnpm
 - 语言：Python 3.13。包管理：uv 0.12.13
 - Web：FastAPI 0.162.0，进程用 uvicorn 0.54.0 拉起，只听本机 3001。访问 FastGPT 只用 httpx2 2.16.0 的异步客户端。地址用 furl 2.1.4 拼接
 - 数据库：PostgreSQL 18.6（Homebrew）。驱动 psycopg 3.3.6，ORM SQLAlchemy 2.1.6
-- 迁移：alembic 1.20.1（2026-11-05 装上；迁移目录还没建，计划基线 = stamp 现有表结构、首个迁移 = login_token.expires_at 索引）
+- 迁移：alembic 1.20.1（2026-11-05 装上；脚本在 `server/migrations/`，现有 0001 = login_token.expires_at 索引、0002 = account.must_change_password 列。表结构变更一律写迁移文件，规矩见 [server/AGENTS.md](../server/AGENTS.md)「迁移」节）
 - 配置：Pydantic 2.14.1，pydantic-settings 2.16.1
 - 密码：argon2-cffi 25.1.0（Argon2id）
 - 半截回答：Redis 服务器 8.10.2（Homebrew）。Python 库 redis 8.1.0
@@ -58,7 +58,7 @@ npm install -g pnpm
 
 `uv run server` 是 pyproject 里登记的命令，等价于起一个 uvicorn 进程听 127.0.0.1:3001。
 
-接口清单看 `server/src/server/app.py`，字段和校验看 `server/src/server/types/api.py`。
+接口清单看 `server/src/server/routes/`（按域拆分的路由包；`app.py` 只做装配），字段和校验看 `server/src/server/types/api.py`。
 
 ## 本地启动
 
@@ -99,3 +99,9 @@ bash scripts/setup-hooks.sh
 ```
 
 该脚本会把本仓库的 `core.hooksPath` 设为 `.githooks`，并给钩子加上执行权限。
+
+2026-11-06 起检查多了三层：
+
+- **提交前钩子**（`.githooks/pre-commit`，`setup-hooks.sh` 自动启用）：提交前跑一遍前后端的格式与代码规范检查（调 `scripts/check-all.sh`，含前端类型检查，实测总共约 4 秒）。失败会点名哪一步不过、给复验命令；紧急可以 `git commit --no-verify` 跳过，但 CI 还会跑同一套，跳过不解决问题。
+- **统一检查入口**：仓库根 `bash scripts/check-all.sh`——前端规范（oxlint）、前端格式（oxfmt --check）、前端类型（tsc --noEmit）、后端两件套（复用 `scripts/check-server.sh`）四步连跑，是 CI 的本地等价物。
+- **持续集成**：`.github/workflows/ci.yml`，push 到 main 和所有 pull request 自动跑：前端作业（pnpm 冻结安装 → `pnpm check` → 构建并确认产物）、后端作业（uv 冻结同步 → ruff 两件套）。CI 不跑迁移、不起服务（runner 没有 PostgreSQL/Redis）。**尚未在 GitHub 实跑过**——push 权在维护者，首次 push 时才会第一次触发。

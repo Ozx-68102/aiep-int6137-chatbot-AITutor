@@ -41,7 +41,7 @@
 - [ ] `POST /api/register`：用户名 + 密码 + 再输一次密码。
 - [ ] 后端收 `password` 和 `password_confirm` 两个字段，自己比一次。
 - [ ] 密码规则：长度按角色分——chat（学生）账号 6–128，admin 账号 8–128（后端 `min_length_for_role`）；不能包含空格（密码只能是连续字符）；只收英文键盘上的字符（不含空格的可打印 ASCII：设密码的输入框静默过滤，不报错，后端同一条门槛）；极弱口令拒绝（`passwords.py` 的静态名单，`123456`、`qwerty` 这类）；不能包含用户名。
-- [ ] 系统预设的初始口令豁免这些规则（`admin`/`admin`、`test01`/`test01`，控制台 `generate_password` 生成的重置密码也算）。
+- [ ] 系统预设的初始口令豁免这些规则（`admin`/`admin`、`test01`/`test01`，控制台 `generate_password` 生成的重置密码也算）。（2026-11-06 补充：豁免不变，但这些「别人知道/别人给」的密码从此都带「必须改密」标记——预设账号建号时打标、控制台重置对目标账号打标，下次登录只有改密路径放行，改完清除。机制见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」节。）
 - [ ] 注册成功直接签发登录 cookie，自动进聊天页。
 - [ ] 界面：登录页加「注册」入口，前端实时校验两次密码一致 + 强度检测器。
 
@@ -148,7 +148,9 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 
 「改密码或被禁用之后，客户端要立刻知道并刷新状态，不能等用户输入、发送之后才发现。」这是这块最核心的一条，做法是给客户端一条常驻的通道。
 
-> **2026-11-05：最小 HTTP 版已实现**（本节的推送通道仍未做）：会话类 401 的响应体在 `detail` 之外多带一个 `reason` 字段，词表 `expired`（带了 cookie 但令牌不认识/已过期/被吊销，无法也无需细分）/ `disabled`（账号被停用——`account.disabled` 列还没建，后端暂时发不出这个值，前端已按词表接好）。没带 cookie 的匿名请求不算会话类，401 维持现状（不带 reason）。前端收到带 reason 的 401 时聊天页原地保留：会话、消息、草稿、profile 缓存都不动，输入区禁用、输入区上方挂常驻警示条；`expired` 给「重新登录」按钮，就地弹 Modal 里的 LoginScreen，成功后走 `openAccount` 原地恢复；`disabled` 不给登录按钮。没有 reason 的 401（老后端）回退旧的整页登录路径。下面的 `/api/events` 推送通道、轮询兜底和发送前预检都仍未做。
+> **2026-11-05：最小 HTTP 版已实现**（本节的推送通道仍未做）：会话类 401 的响应体在 `detail` 之外多带一个 `reason` 字段，词表 `expired`（带了 cookie 但令牌不认识/已过期/被吊销，无法也无需细分）/ `disabled`（账号被停用——`account.disabled` 列还没建，后端暂时发不出这个值，前端已按词表接好）。没带 cookie 的匿名请求不算会话类，401 维持现状（不带 reason）。前端收到带 reason 的 401 时聊天页原地保留：会话、消息、草稿、profile 缓存都不动，输入区禁用、输入区上方挂常驻警示条；`expired` 给「重新登录」按钮，就地弹 Modal 里的 LoginScreen，成功后走 `openAccount` 原地恢复；`disabled` 不给登录按钮。没有 reason 的 401（老后端）回退旧的整页登录路径。下面的轮询兜底和发送前预检仍未做。
+
+> **2026-11-06：后端推送通道已实现**（`GET /api/events`；进程内总线 `pushbus.py` ＋ 三个触发点：定时清扫扫掉过期令牌→`expired`、改密吊销→`password_changed`、控制台重置吊销→`admin_reset`）。协议按本节设计稿：`state` 命名事件、`{valid, reason, message}` 信封、连上先发一次状态、断线重连自然补齐。与设计稿的出入：reason 由单一 `revoked` 细化成上面三个词（`expired` 与会话类 401 的 reason 同词，前端可当一套词表用）；`disabled` 仍发不出（列没建，缺口同前）；**退出登录改为不推送**（用户自己的动作；跨标签退出感知已由前端 localStorage 标记承担，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「已知限制」）；推完 `valid:false` 服务器主动关流，客户端重新登录后新建连接而不依赖自动重连。**前端 EventSource 未接**；完整对接契约在 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道 `/api/events`」一节。
 
 三层，各管一段：
 
@@ -188,8 +190,8 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 
 ### 服务器这边
 
-- [ ] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」一节），进程内总线够用，不用 Redis pub/sub。
-- [ ] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。
+- [x] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」一节），进程内总线够用，不用 Redis pub/sub。（2026-11-06 后端已实现：`server/src/server/pushbus.py`，订阅队列有界 32、关停哨兵必达）
+- [x] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。（2026-11-06 后端已实现：`server/src/server/routes/events.py`；前端 EventSource 未接）
 - [ ] 每 15 秒发一个心跳注释帧（`: ping`），免得连接被中间的代理当空闲掐掉。
 - [ ] 吊销令牌的地方统一走一个函数 `revoke_tokens(account_id, reason)`：删/标记令牌 + 推事件。现在吊销散在改密码、控制台重置、退出登录三处；统一之后以后加新的踢人方式不会漏掉推送。
 
@@ -227,7 +229,7 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 ## 改名
 
 - [x] `UPDATE account SET username = 'test01' WHERE username = 'admin';` —— 2026-11-03 执行（维护者确认过）：密码同时重设为 `test01`；账号 id 不变，历史会话原样跟着走；另插入控制台账号 `admin`/`admin`（role=admin，带 zh-CN 语言设置）。
-- [x] [server/src/server/db/init.py](../server/src/server/db/init.py) 里的 `_INITIAL_USERNAME` / `_INITIAL_PASSWORD` 改成 `test01` / `test01`；另加 `_ensure_console_admin`：库里没有任何 admin 角色账号时幂等创建 `admin`/`admin`。
+- [x] [server/src/server/db/init.py](../server/src/server/db/init.py) 里的 `_INITIAL_USERNAME` / `_INITIAL_PASSWORD` 改成 `test01` / `test01`；另加 `_ensure_console_admin`：库里没有任何 admin 角色账号时幂等创建 `admin`/`admin`。（2026-11-06 起两个预设账号创建时都带「必须改密」标记，首登强制换密；已存在的账号不追溯。）
 - [x] [README.md](../README.md) 里「初始账号」那句改成两个预设账号的说明。
 
 ## 验收

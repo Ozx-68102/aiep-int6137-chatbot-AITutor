@@ -58,6 +58,8 @@
 
 ### 5. 初始口令 admin/admin、test01/test01 写死在 init.py，且豁免密码策略
 
+> **已完成（2026-11-06）**：按「强制首次改密」方案落地——`account.must_change_password` 列（迁移 0002，存量行默认假、不追溯），初始化脚本创建预设账号（test01、控制台 admin）时打标，控制台重置密码对目标账号同事务打标；本人改密成功清标。服务端强制：续期单语句顺带带回标记（不加查库），中间件对标记账号回 403 `{code: must_change_password}`，豁免集只有登录/改密/退出/资料/状态/头像/推送七个路径。预设口令本身保留（成了入场券，进场即被强制换掉），口令豁免政策不变。已知缺口如实成文：控制台侧（/api/admin/*）不强制——控制台还没有改自己密码的入口，强制会锁死管理员。真机全路径冒烟通过（403 拦截、改密清标、旧 cookie 吊销、重登放行）。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」一节。调研原文以 LayerFS 历史为准。
+
 - **位置**：`/server/src/server/db/init.py`（`_INITIAL_USERNAME/_INITIAL_PASSWORD`、`_CONSOLE_USERNAME/_CONSOLE_PASSWORD`）
 - **现状**：跑一遍 `uv run python -m server.db.init` 就建出两个密码人尽皆知的账号；`docs/PARENT_PORTAL_PRIVACY.md` 把 `must_change_password`（首次登录强制改密）列为「远期、未排期」。
 - **影响**：部署后只要没人手动改密，控制台等于不设防；叠加第 1 条（登录无限速），这是全仓库最现实的入侵路径。admin 账号能列全部账号、给任何人重置密码。
@@ -78,6 +80,8 @@
 
 ### 7. 日志记录用户提问全文与上游原文，且归档无限期保留（PII / PDPO）
 
+> **已完成（2026-11-06，两半各自落地）**：日志内容那半——全文只随 DEBUG 开关、平时只元数据、敏感事件（flowNodeResponse/updateVariables）任何级别不落（backend-api O7 批次落地，见 docs/TURN_LOGGING_AND_DIAGNOSTICS.md）；归档保留那半——拍板不自动删、保留归运维、程序超阈值写警告（见第 22 条注记）。调研原文以 LayerFS 历史为准。
+
 - **位置**：`app.py` 的 `chat()`（`logger.info("对话请求 %s", body.model_dump_json(...))`）、`_relay()`（`"发给页面 %s"` 逐块记）、`fastgpt.py`（`"FastGPT 请求 %s"` 全 payload、`"FastGPT 上游 %s"` 每行 SSE）；`log.py`（归档只增不删）
 - **现状**：这几处代码注释自己写着「排查流式输出用，确认后再收窄」——排查用的日志成了常驻。`logs/server.log` 和所有 `server-<时间戳>.log` 归档合起来就是全部学生提问和 AI 回答的明文副本，没有任何保留期限。`docs/PARENT_PORTAL_PRIVACY.md` 远期清单也承认「现在 chat_message 表和 logs/server.log 是无限期留的」。
 - **影响**：PDPO 第 2 项保障原则要求「不超过必要期间」；资料当事人是未成年人，标准更高。日志文件一旦外泄（备份、误拷、服务器被入），等于泄露全部聊天记录，而且这份副本不在任何「删除会话」逻辑的覆盖范围内——用户在页面上删了会话，日志里还在。
@@ -97,6 +101,8 @@
 - **工作量**：S
 
 ### 9. 响应没有任何安全头（CSP、nosniff、防嵌入）
+
+> **部分完成（2026-11-06）**：应用侧三条已发——所有响应带 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: same-origin`（`security/headers.py` 纯 ASGI 中间件，app.py 注册在最外层；真机确认在响应上）。CSP、HSTS 等与加密/部署形态相关的头留给 nginx（部署日批次，见第 26 条）。调研原文以 LayerFS 历史为准。
 
 - **位置**：`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md` 全部配置；`app.py`（也没有注入安全头的中间件）
 - **现状**：两层都没设 `Content-Security-Policy`、`X-Content-Type-Options`、`X-Frame-Options`/`frame-ancestors`、`Referrer-Policy`。前端用 react-markdown + KaTeX 渲染 AI 输出（`package.json` 可见依赖）。
@@ -147,6 +153,8 @@
 > **已实现（2026-11-05）**：alembic 落地：server/alembic.ini + migrations/（env.py 复用应用自己的 get_engine()，密钥不进配置），引导仍走 create_all，首个迁移 0001 = login_token.expires_at 索引；此后表结构变更一律写迁移文件。功能描述见 server/AGENTS.md「迁移」一节和 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 ### 14. 连接池全默认、没有 pre_ping：数据库重启后第一批请求报错，高峰期线程抢连接
+
+> **已完成（2026-11-06）**：`create_engine` 加 `pool_pre_ping=True`（取连接前探活，数据库重启后坏连接自动重建，第一批请求不再报错），池大小显式写出（pool_size=5、max_overflow=10，恰为 SQLAlchemy 默认值，写明是为可读可调）。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/server/src/server/db/session.py` 的 `get_engine()`
 - **现状**：`create_engine(URL.create(...), connect_args={"connect_timeout": 5})`，其余全默认：QueuePool `pool_size=5`、`max_overflow=10`，无 `pool_pre_ping`、无 `pool_recycle`。同时 `app.py` 里大量端点是同步 `def`，FastAPI 把它们扔进 anyio 线程池（默认 40 线程），每个线程里的 `db_session()` 都要从池里拿连接。
@@ -288,7 +296,7 @@
 
 ### 22. 日志归档只增不减：轮转有了，保留策略没有
 
-> **拍板（2026-11-05）：不做自动删除**。归档的保留与清理归运维负责，程序不代劳。程序侧只补一个提醒：轮转时统计归档文件数与总大小，超过阈值（数值待维护者定）在日志里写一行警告，提示人工处理。警告的实现随后续批次落地，落地后更新 docs/TURN_LOGGING_AND_DIAGNOSTICS.md。
+> **拍板（2026-11-05）：不做自动删除**。归档的保留与清理归运维负责，程序不代劳。程序侧只补一个提醒：轮转时统计归档文件数与总大小，超过阈值（数值待维护者定）在日志里写一行警告，提示人工处理。警告已实现（2026-11-06）：阈值默认 20 个文件或 500MB，`log.py` 里两个常量（`_ARCHIVE_WARN_COUNT`/`_ARCHIVE_WARN_BYTES`）可改，维护者未另定数值、先用默认；docs/TURN_LOGGING_AND_DIAGNOSTICS.md 已同步。
 
 - **位置**：`log.py` 的 `_SizeLogFile._rotate()` / `_archive_path()`；`/logs/` 目录
 - **现状**：满 5MB 把 `server.log` 改名成 `server-<YYYYmmdd-HHMMSS-ffffff>.log`，然后新开文件。归档永不删除、不压缩。轮转实现本身是稳的（`emit` 前查大小、rename 后重开、异常吞掉走 `logging.raiseExceptions`）。

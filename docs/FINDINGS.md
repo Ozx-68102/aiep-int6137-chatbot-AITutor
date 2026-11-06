@@ -276,3 +276,11 @@ default-workspace 侧做了只读深查（SQLite 直读 + 源码对照），上�
 - **增量安装不补平台包**：在既有 darwin 树上直接 `pnpm install --frozen-lockfile`，5.9 秒报 Done，但 Linux 平台包依然缺——pnpm 认为树是最新的，跳过了平台可选依赖。必须 `rm -rf node_modules` 全量重建（重建只要 3.9 秒，镜像里有热缓存）。
 - **npm 不能在 pnpm 树里跑**：npm 11 在项目根 `npm i` 会报 `EUNSUPPORTEDPROTOCOL "catalog:"`——它扫描现有 node_modules 树时读到了 pnpm 的 `catalog:` 协议残留，`--no-save` 也躲不开。要用 npm 就在隔离目录装（`/tmp` 下 `npm init -y` + `npm i`，再把包目录 `cp -R` 回来），或者干脆用 pnpm。
 - **沙箱生命周期**：最后一个 workspace 卸载 2 分钟后沙箱自动关闭，再调用报 `NoSuchSandbox`，重新 `sandbox create` 即可；镜像里自带 pnpm 11.28.5（本机是 12.16.1），lockfileVersion 9.0 两者都认；沙箱有外网（npm registry 可达，实测 4 个包 1 秒装完）。
+
+## 2026-11-06 现网 Redis 的 ACL 不放行脚本命令，原子抢占改用 SET … GET
+
+要把「单轮抢占」做成一个原子动作，先按常规用了 Lua 脚本（redis 包的 `register_script`，走 EVALSHA）。真机一跑：`NoPermissionError: User h2bot_app has no permissions to run the 'evalsha' command`——现网 ACL 只放行了键前缀 `h2botapp-chat:` 和业务用得到的那批命令，脚本命令不在内（连 `info` 都不放行，版本号都问不出来）。更糟的是按「Redis 不通就放行」的降级设计，脚本失败会静默降级：单轮守卫整个蒸发，冒烟实测同一场会话双发两轮全部放行、上游真的生成了两遍。
+
+修法：抢占改成 `SET 状态键 streaming EX ttl GET` 单命令——写入新值的同时原子拿回旧值，旧值是 `streaming` 就是没抢到；`set`/`get`/`del`/`scan`/`expire`/`append` 都在 ACL 放行范围内（现有代码一直在用，逐个是真机验证过的）。`SET … GET` 要求 Redis 服务器 ≥ 6.2（现网 8.10.2 实测可用）。
+
+教训：**在这个项目里用任何没先用过的 Redis 命令，先拿真实用户试一发**——ACL 的命令白名单应用侧看不到（`info`、`acl` 都被拒），只有试了才知道；而且「失败即放行」的降级设计会把这类错误藏成静默的功能消失，冒烟必须盯日志里的降级警告。相关代码：`server/src/server/reply_store.py` 的 `claim_round`。

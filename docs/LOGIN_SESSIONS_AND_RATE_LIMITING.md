@@ -17,16 +17,16 @@
 `login_token` 表（[server/src/server/db/models.py](../server/src/server/db/models.py) 的 `LoginToken`）：`account_id`、`token_hash`（唯一）、`created_at`、`expires_at`。
 
 - **`expires_at` 有索引**（`ix_login_token_expires_at`）：清扫的 `DELETE ... WHERE expires_at <= now()` 和续期的 `WHERE expires_at > now()` 都吃它。索引在两处声明且保持一致：模型 metadata（`create_all` 引导的新库建出来）和迁移 0001（`CREATE INDEX IF NOT EXISTS`，老库跑迁移建出来），谁先跑都不冲突。
-- **清扫不再挂在请求路径上**：原来每个带令牌的请求都全表扫一遍 `DELETE`；现在是 lifespan 里的定时任务（`sweep_expired_tokens_loop`）——启动立刻跑一次，之后每 600 秒一次。失败只记一条警告、不掐循环，数据库恢复后下一轮补上。单进程前提（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」），不需要分布式锁。
+- **清扫不再挂在请求路径上**：原来每个带令牌的请求都全表扫一遍 `DELETE`；现在是 lifespan 里的定时任务（`sweep_expired_tokens_loop`）——启动立刻跑一次，之后每 600 秒一次。失败只记一条警告、不掐循环，数据库恢复后下一轮补上。单进程前提（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」），不需要分布式锁。2026-11-06 起清扫语句带 `RETURNING account_id`：被扫掉令牌的账号会收到 `/api/events` 推送（reason `expired`，见「推送通道」一节）。
 - **迁移路径**：alembic 已落地——`server/alembic.ini` + `server/migrations/`，`migrations/env.py` 复用应用自己的 `get_engine()` 拿数据库 URL（不在 alembic.ini 里另配密钥）；建表引导仍走 `create_all`（`uv run python -m server.db.init`）。**此后表结构变更（加列、加索引、改约束）一律写新的迁移文件**，不再往 init.py 里加手写字段补丁。规矩全文见 [server/AGENTS.md](../server/AGENTS.md)「迁移」一节。
 
 ## 每请求的成本：一条语句 + 请求态复用
 
 带 cookie 的请求（`/api/status` 除外）经过中间件 `RefreshLoginCookie`（[server/src/server/middleware.py](../server/src/server/middleware.py)）：
 
-1. **校验 + 续期合成单条 SQL**（`renew_login_token`，[server/src/server/security/tokens.py](../server/src/server/security/tokens.py)）：`UPDATE login_token SET expires_at = 新期限 WHERE token_hash = ... AND expires_at > now() RETURNING account_id`——命中即有效且已续期，一次往返替代原来的 SELECT + UPDATE 两趟。`synchronize_session=False`：会话里不挂着 LoginToken 对象，省掉 auto 策略先做的那次 SELECT。令牌不存在或已过期都返回 None，401 的语义留在调用方。
+1. **校验 + 续期合成单条 SQL**（`renew_login_token`，[server/src/server/security/tokens.py](../server/src/server/security/tokens.py)）：`UPDATE login_token SET expires_at = 新期限 WHERE token_hash = ... AND expires_at > now() AND account_id = account.id RETURNING account_id, must_change_password`——命中即有效且已续期，2026-11-06 起还顺带带回账号的「必须改密」标记（PostgreSQL 渲染成 UPDATE … FROM account，仍是一次往返），一次往返替代原来的 SELECT + UPDATE 两趟。`synchronize_session=False`：会话里不挂着 LoginToken 对象，省掉 auto 策略先做的那次 SELECT。令牌不存在或已过期都返回 None，401 的语义留在调用方。
 2. **同步查库放线程里**：中间件是 async 的，psycopg 是同步的，这一步走 `asyncio.to_thread`，不堵事件循环（FINDINGS 2026-10-31「异步接口里的同步数据库调用会卡住事件循环」那条，中间件这半边当时漏了，现在补上了）。
-3. **查询结果经请求态复用**：中间件把验好的账号 id（连同 cookie 原文用于比对）放进 contextvar（`REQUEST_ACCOUNT`，[server/src/server/security/context.py](../server/src/server/security/context.py)），每个请求入口先重置再写，绝不串上一个请求。端点侧的 `account_from_cookie`（[server/src/server/security/accounts.py](../server/src/server/security/accounts.py)）先看这份缓存（`_cached_account`，仍是模块内私有），命中就只做一次按主键的取行拿活 ORM 对象——每个带 cookie 的请求从两轮查库减到一轮。`asyncio.to_thread` 和端点线程池都会拷贝上下文，同步、异步端点都读得到。
+3. **查询结果经请求态复用**：中间件把验好的账号（cookie 原文用于比对、账号 id、必须改密标记，三元组；2026-11-06 起）放进 contextvar（`REQUEST_ACCOUNT`，[server/src/server/security/context.py](../server/src/server/security/context.py)），每个请求入口先重置再写，绝不串上一个请求。端点侧的 `account_from_cookie`（[server/src/server/security/accounts.py](../server/src/server/security/accounts.py)）先看这份缓存（`_cached_account`，仍是模块内私有），命中就只做一次按主键的取行拿活 ORM 对象——每个带 cookie 的请求从两轮查库减到一轮。`asyncio.to_thread` 和端点线程池都会拷贝上下文，同步、异步端点都读得到。
 - **头像大字段不跟着跑**：`Account.avatar`（几十 KB 的 bytea）是列级延迟加载（`deferred`，[server/src/server/db/models.py](../server/src/server/db/models.py)），认证和列表请求不背着它；真正读头像的端点才多一次按主键的 SELECT。
 
 本机实测的历史数据（2026-11-02，改造前）：每请求查令牌 + 续期中位 0.53 毫秒、清扫中位 0.31 毫秒——代价本来不大，改造防的是令牌表行数涨上去之后的线性变坏和事件循环卡顿。
@@ -61,9 +61,34 @@
 
 三条路都会让令牌失效，页面在下一次请求时收到带 `reason: expired` 的 401，进会话过期原地态（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)）：
 
-- **改密码**（`/api/password`）：写新哈希和吊销令牌在同一个事务里（`DELETE` 该账号全部 `login_token`），不留「密码改了、旧令牌还活着」的缝；所有设备都踢，含当前这一台；两个 cookie 都清掉。
-- **控制台重置**（`/api/admin/accounts/reset-password`）：同样一个事务里改哈希 + 删该账号全部令牌，对任何账号可用（含管理员自己）。
-- **退出登录**：一条 `DELETE ... RETURNING` 删掉当前这个还没过期的令牌（过期的行交给定时清扫）。
+- **改密码**（`/api/password`）：写新哈希和吊销令牌在同一个事务里（`DELETE` 该账号全部 `login_token`），不留「密码改了、旧令牌还活着」的缝；所有设备都踢，含当前这一台；两个 cookie 都清掉。同时给该账号所有在线页面推 `password_changed`（见「推送通道」一节），并清掉「必须改密」标记（见下一节）。
+- **控制台重置**（`/api/admin/accounts/reset-password`）：同样一个事务里改哈希 + 删该账号全部令牌，对任何账号可用（含管理员自己）；同时给目标账号打上「必须改密」标记（见下一节）并推 `admin_reset`（见「推送通道」一节）。
+- **退出登录**：一条 `DELETE ... RETURNING` 删掉当前这个还没过期的令牌（过期的行交给定时清扫）。退出不走推送：用户自己的动作，发起页自己知道；跨标签页的退出感知由前端的 localStorage 标记负责（见「已知限制」）。
+
+## 必须改密标记
+
+密码来自别人手的账号，首次登录必须自己设一个。`account.must_change_password` 布尔列（迁移 0002，存量行默认假、不追溯）做标记，三个地方动它：
+
+- 初始化脚本创建的预设账号（`test01`、控制台预设 `admin`）建号时打标——预设口令只是入场券，进场就得换。预设口令本身豁免密码政策（[ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md) 记录的既有决定），标记把它的暴露窗口压到首次改密之前。
+- 控制台「重置密码」对目标账号打标：与写哈希、吊销令牌同一个事务（重置密码是 10 位随机字母数字、同样豁免政策，管理员看过，必须由本人换掉）。
+- 本人在 `/api/password` 改密成功时清标（同事务）。
+
+**服务端强制**：cookie 校验的续期语句顺带带回标记（见「每请求的成本」一节，不加查库），中间件（`middleware.py`）对标记账号请求 `/api/` 且不在豁免集的路径直接回 403：`{"detail": "请先修改密码，然后才能继续使用", "code": "must_change_password"}`，不进端点。豁免集：`/api/login`（重新登录不拦，响应里带标记）、`/api/password`（改密本身）、`/api/logout`、`/api/profile`、`/api/status`、`/api/avatar`、`/api/events`（推送通道，只读）。非 `/api` 路径（静态资源）不受影响。
+
+**契约**：`LoginResponse` 和 `ProfileResponse` 都带 `must_change_password` 布尔字段（snake_case，与两个模型的既有字段同约定，无别名）。前端应做而**尚未做**（2026-11-06，后端先行）：登录见到 true 就强制进改密页、不改完不放行。当前被标记账号进页面的实际表现：业务请求吃 403（页面按状态码映射的报错会显示出来），只有豁免的改密/退出/资料路径可用。
+
+**已知缺口**：控制台（`/api/admin/*`）一侧不强制执行——控制台还没有「改自己密码」的入口（前端待办），强制会把管理员锁死在控制台外。控制台重置打的标在聊天侧生效；等控制台有了自助改密入口再收口。代码里有对应注释。
+
+## 推送通道 `/api/events`
+
+服务器侧的登录态失效，原来页面要等下一次请求吃 401 才知道；现在直接推给该账号所有开着的页面。2026-11-06 后端落地（进程内总线 `pushbus.py` ＋ `routes/events.py`），**前端尚未接**（EventSource 的挂接与处理是前端待办，设计脉络见 [ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」）。
+
+- **建连**：登录后 `new EventSource("/api/events")`，同源自动带 cookie，不需要也不能另设请求头。每个标签页各挂一条。未登录 401；控制台的 admin cookie 不认这条通道（也是 401）；admin 角色走聊天侧登录态来连回 403。本端点在「必须改密」豁免集里。
+- **帧**：命名事件 `state`。连上第一帧必达 `data: {"valid":true,"account":"<用户名>"}`——断线重连成功后也先收到它，状态天然补齐，前端不用另写补状态逻辑。登录态失效时推 `data: {"valid":false,"reason":"…","message":"…"}`，随后服务器主动结束这条流。心跳是 15 秒一帧的 `: ping` 注释帧（EventSource 自动忽略）。帧风格与聊天流一致（紧凑分隔符、不转义非 ASCII），响应头同一份（no-store ＋ X-Accel-Buffering: no）。
+- **reason 词表**：`expired`（定时清扫扫掉过期令牌）／`password_changed`（本账号改密，全设备下线）／`admin_reset`（控制台重置了密码）。与会话类 401 的 reason 同词源（`expired` 同词），两套词表可当一套用；不认识的 reason 也按失效处理。`disabled` 暂不在词表（`account.disabled` 列没建，与 401 侧同一缺口）。
+- **收到 valid:false 之后**：前端应进「会话过期原地态」（与吃带 reason 的 401 同一套行为：会话、消息、草稿原地保留，输入区禁用、挂常驻警示条；文案可用帧里的 `message`，或按 reason 自配）。EventSource 随后自动重连会吃 401（cookie 已死）并彻底停止重试——这是预期，**重新登录成功后新建一条连接**，不要依赖旧连接重连，也不要手动无限重连。
+- **多标签页**：改密/重置推给该账号全部连接，触发操作的那个标签页也会收到（服务器不区分发起者，触发页表现可以从轻）。退出登录不推送（见「吊销路径」）。
+- **部署边界**：总线是进程内存（账号 → 订阅队列组），依赖单 worker 铁律（server/AGENTS.md「边界」）；多进程部署前必须先换成跨进程通道。队列有界（32），满了丢帧记 debug；关停哨兵必达。
 
 ## 已知限制
 
@@ -71,5 +96,5 @@
 - **`login_token` 没有 `revoked_at` 列**：服务器分不清「令牌不认识 / 被撤销 / 账号被停用」，会话类 401 一律 `expired`。列是 ACCOUNT_MANAGEMENT 的待办。
 - **IP 桶与改密路径共用**：学校 NAT 出口一批人共用一个 IP，互相牵连锁定（见「限流」一节，维护者知情）。
 - **cookie 无绝对上限**：被窃的 cookie 只要持续使用就一直续期；补救靠吊销路径，部署日必须配 HTTPS + Secure cookie。
-- **多标签页登录态不同步**：一个标签页退出/改密，另一个要等下一次请求吃 401 才知道。等 `/api/events` 推送通道（backlog）。前端侧「主动退出」已于 2026-11-06 补上跨标签页联动：`signOut` 成功写 localStorage 标记 `h2bot-logout`，其他标签页听到 storage 事件立即回登录界面，不再等 401；改密/停用这类服务器侧吊销不写标记，仍走本条前半句的老路。机制见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「多标签页同步」。
+- **多标签页登录态不同步**：一个标签页退出/改密，另一个要等下一次请求吃 401 才知道。`/api/events` 推送通道的后端已于 2026-11-06 落地（见「推送通道」一节），改密/重置/令牌过期这类服务器侧失效从此有得推；前端接上 EventSource 后本条关闭。前端侧「主动退出」已于 2026-11-06 补上跨标签页联动：`signOut` 成功写 localStorage 标记 `h2bot-logout`，其他标签页听到 storage 事件立即回登录界面，不再等 401；改密/停用这类服务器侧吊销不写标记，仍走本条前半句的老路。机制见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「多标签页同步」。
 - **`/password` 页提交吃到 401 时没有可见反馈**：会话过期原地态的提示到不了那个独立页面（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「已知限制」）。
