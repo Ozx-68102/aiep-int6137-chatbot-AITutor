@@ -12,6 +12,7 @@ import {MessageActions} from './MessageActions.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
 import {TypewriterText} from './TypewriterText.tsx';
 import {WarningBox, type WarningItem} from './WarningBox.tsx';
+import {WELCOME_TEXT} from './welcome-text.ts';
 
 /** 正在编辑的那条提问：气泡 id、轮次编号、框里当前的文字。 */
 type EditingState = {messageId: string; turnId: string; text: string};
@@ -156,6 +157,12 @@ export function ChatMain({
     onEditResend(editing.turnId, editing.text);
     setEditing(null);
   }
+
+  // 欢迎语气泡只在「还没有任何消息」的会话视图出现：!active 是新对话落地视图，
+  // messagesKnown 且为空是新建后确认无历史的空会话。历史加载中（messagesKnown
+  // 为假）不显示，免得加载完成时被旧消息顶掉、闪一下。
+  const showWelcome = !active || (active.messagesKnown && active.messages.length === 0);
+  const welcomeClass = bubbleClass('assistant', false);
 
   return (
     <main className="flex min-h-0 min-w-0 flex-col bg-white">
@@ -373,8 +380,17 @@ export function ChatMain({
                 );
               })
             : null}
-          {!active || (active.messagesKnown && active.messages.length === 0) ? (
-            <p className="m-0 text-stone-500">{text.empty}</p>
+          {/* 欢迎语是合成气泡：只存在于无任何消息的会话视图（新会话开始），
+              首条消息落地即退场，有历史的旧会话不追溯。不进消息表、不进请求
+              上下文、不带操作行（2026-11-06 决定）；文案固定繁中，出处见
+              welcome-text.ts。纯文本无 markdown 解析风险，不套 BubbleBoundary；
+              也不是真消息，不登记 enteringIds 进场动画。 */}
+          {showWelcome ? (
+            <div className={welcomeClass.wrap}>
+              <p lang={htmlLang['zh-TW']} className={welcomeClass.bubble}>
+                {WELCOME_TEXT}
+              </p>
+            </div>
           ) : null}
         </div>
         {!atBottom ? (
