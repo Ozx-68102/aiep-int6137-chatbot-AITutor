@@ -51,7 +51,7 @@ def main(argv: list[str]) -> int:
 
 
 def _dump_reply_store(session_id: UUID) -> None:
-    """Redis 里的半截回复：正在写（或刚落定）那一轮的现场。"""
+    """Redis 里的半截回复：正在写（或刚结束）那一轮的现场。"""
     print(f"== Redis 半截回复（会话 {session_id}）==")
     try:
         # read_partial 换成了异步（redis.asyncio）。本工具是同步 CLI，
@@ -79,7 +79,7 @@ def _dump_messages(session_id: UUID, turn_id: UUID | None) -> None:
     print(f"== 数据库 message 表（会话 {session_id}）==")
     rows = chat_log.read_messages(session_id)
     if not rows:
-        print("（没有记录：会话不存在、读库失败，或者这张表里还没写过）")
+        print("（没有记录：会话不存在、读数据库失败，或者这张表里还没写过）")
         return
     if turn_id is not None:
         print(f"要找的轮次：{turn_id}，匹配的行用 >> 标出")
@@ -94,11 +94,13 @@ def _dump_messages(session_id: UUID, turn_id: UUID | None) -> None:
             f"status={row.status} chars={len(row.text)}"
         )
     if turn_id is not None and matched == 0:
-        print(">> 注意：这一轮在 message 表里没有行（写库失败过，或被重试删掉了）")
+        print(
+            ">> 注意：这一轮在 message 表里没有行（写进数据库失败过，或被重试删掉了）"
+        )
 
 
 def _preview(text: str) -> str:
-    """首尾各 40 字；本来就短的整个打出来。"""
+    """首尾各 40 字；本来就短的整个输出。"""
     if text == "":
         return "（空）"
     if len(text) <= _PREVIEW_CHARS * 2:

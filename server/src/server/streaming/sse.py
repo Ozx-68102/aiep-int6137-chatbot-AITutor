@@ -15,13 +15,13 @@ async def sse_stream(relay: Relay) -> AsyncIterator[str]:
     取消语义都不变：wait_for 超时会把 queue.get 原样取消重挂，
     asyncio.Queue 的唤醒不直接交接条目，超时不会吞掉已入队的帧。
 
-    收尾先发结局帧再发 [DONE]：relay 带着结局信息（done_status 落定）
+    收尾先发结局帧再发 [DONE]：relay 带着结局信息（done_status 确定）
     时，在 yield "data: [DONE]" 之前先 yield event: done 帧；失败/被停
     的路径没有 [DONE]，哨兵到达时补发 done 帧再结束流。
 
-    **done 帧是即时判断，库是最终事实**（2026-11-05 维护者拍板）：
-    _write_round_end 事后与上游对账，可能把 failed 改成 completed；
-    done 帧不等待那次对账，也不回改。页面的即时语义以 done 帧为准，
+    **done 帧是即时判断，库是最终事实**（2026-11-05 维护者决定）：
+    _write_round_end 事后与上游核对并修正，可能把 failed 改成 completed；
+    done 帧不等待那次核对，也不回改。页面的即时语义以 done 帧为准，
     刷新以后的语义以库（/messages 消息上的标志）为准。
     """
     done_sent = False
@@ -32,7 +32,7 @@ async def sse_stream(relay: Relay) -> AsyncIterator[str]:
             yield ": ping\n\n"
             continue
         if item is None:
-            # 中继落定：失败/被停的路径没有 [DONE]，结局帧在这里补发。
+            # 中继结束：失败/被停的路径没有 [DONE]，结局帧在这里补发。
             outcome = relay.done_status
             if not done_sent and outcome is not None:
                 yield framing.done_chunk(
@@ -52,9 +52,9 @@ async def sse_stream(relay: Relay) -> AsyncIterator[str]:
 async def empty_sse(done: str | None = None) -> AsyncIterator[str]:
     """没有正文可写的流：直接结束，没有 [DONE]。
 
-    「开轮前被停」的路径带着结局帧（status=aborted, reason=stop,
+    「轮次开始前被停」的路径带着结局帧（status=aborted, reason=stop,
     bytes_sent=0）：结局随流明说，页面不靠「流怎么断的」反推。
-    重复请求的路径（这一轮已经登记/落定，页面读库对账）维持空流。
+    重复请求的路径（这一轮已经登记/结束，页面读数据库核对）维持空流。
     """
     if done is not None:
         yield done

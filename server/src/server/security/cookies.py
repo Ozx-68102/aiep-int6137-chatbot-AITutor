@@ -1,4 +1,4 @@
-"""登录 cookie 的常量与种/清辅助。"""
+"""登录 cookie 的常量与设置/清除辅助。"""
 
 from fastapi import Response
 

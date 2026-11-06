@@ -23,7 +23,7 @@ _ADMIN_ACCOUNT_NOT_FOUND = "找不到这个账号"
 
 # 已知缺口：/api/admin/* 这一侧不强制执行 must_change_password——控制台
 # 还没有「改自己密码」的入口，强制会把管理员锁死在控制台外。标记照样打：
-# 重置出来的密码拿到聊天侧会被中间件拦成 403，等控制台有了改密界面再
+# 重置出来的密码拿到聊天侧会被中间件拦成 403，等控制台有了修改密码界面再
 # 补上控制台这半边。
 
 
@@ -47,8 +47,8 @@ def admin_reset_password(
     body: AdminPasswordResetRequest,
     admin_cookie: Annotated[str | None, Cookie(alias=ADMIN_COOKIE_NAME)] = None,
 ) -> AdminPasswordResetResponse:
-    """控制台重置某个账号的密码：生成新密码、踢掉全部登录、打上
-    「必须改密」标记——本人改掉之前，聊天侧的接口都进不去。
+    """控制台重置某个账号的密码：生成新密码、强制下线全部登录、打上
+    「必须修改密码」标记——本人改掉之前，聊天侧的接口都进不去。
 
     对任何账号都能重置，包括管理员自己。新密码只在这一次响应里回显，
     日志只记账号 id。
@@ -61,7 +61,7 @@ def admin_reset_password(
         if not isinstance(account, Account):
             raise HTTPException(status.HTTP_404_NOT_FOUND, _ADMIN_ACCOUNT_NOT_FOUND)
         password = generate_password(10)
-        # 写哈希、打「必须改密」标记和吊销令牌在同一个事务里：不留
+        # 写哈希、打「必须修改密码」标记和吊销令牌在同一个事务里：不留
         # 「密码换了、旧令牌还活着」的缝，标记也不会落后半步。
         account.password_hash = hash_password(password)
         account.must_change_password = True
@@ -69,7 +69,7 @@ def admin_reset_password(
         # 值在会话里就取好：db_session 退出时提交，ORM 对象随后过期。
         account_id = account.id
 
-    # 推送放在事务块外面（db_session 退出时才提交）：落地了才告诉目标
+    # 推送放在事务块外面（db_session 退出时才提交）：提交了才告诉目标
     # 账号的页面「你被重置了」（reason=admin_reset）。本端点是 sync
     # def、跑在线程池里，而 asyncio.Queue 不是线程安全的——所以
     # pushbus.publish 是线程安全入口：内部用 call_soon_threadsafe 把

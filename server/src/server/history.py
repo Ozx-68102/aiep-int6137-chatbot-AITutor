@@ -86,7 +86,7 @@ def merge_current_turn(
 ) -> list[HistoryMessageResponse]:
     """把 Redis 里当前这一轮接在历史后面。
 
-    历史来自我们自己存的表：写完的轮次都在里面。正在写的那一轮还没落定，
+    历史来自我们自己存的表：写完的轮次都在里面。正在写的那一轮还没结束，
     Redis 里那份更新（有半截文字），用它把表里那一条补上。
     """
     # 轮次结局（还在写/失败/被停）只挂在回答行上：提问和回答共用一个
@@ -105,9 +105,9 @@ def merge_current_turn(
 
     messages: list[HistoryMessageResponse] = []
     for item in stored:
-        # 读时兜底：表里 streaming 的行，Redis 的 partial 为空（turn_id 是
+        # 读时保底修正：表里 streaming 的行，Redis 的 partial 为空（turn_id 是
         # None）或对不上这一行，说明这一轮其实已经不在写了（进程死在半路、
-        # 键过期）——展示层降级为 failed，不写库；启动对账
+        # 键过期）——展示层降级为 failed，不写进数据库；启动核对
         # （chat_log.fail_stuck_rounds）会把它们一次标掉。编号对得上的行
         # 不降级：Redis 里那份状态更新，由下面的合并逻辑照实处理。
         stuck = item.status == STREAMING and partial.turn_id != item.turn_id
@@ -130,7 +130,7 @@ def merge_current_turn(
         if item.turn_id != partial.turn_id or item.role != "assistant":
             continue
         if not item.waiting:
-            # 这一轮在我们自己的表里已经落定了：表里的是最终状态。
+            # 这一轮在我们自己的表里已经结束了：表里的是最终状态。
             return messages
         # 这一轮还在写：Redis 里的半截文字比表里的空位新。
         messages[index] = item.model_copy(
@@ -143,7 +143,7 @@ def merge_current_turn(
         )
         return messages
 
-    # 表里没有这一轮（写库失败，或者这一轮比这张表还早）：
+    # 表里没有这一轮（写进数据库失败，或者这一轮比这张表还早）：
     # 按老办法把 Redis 里这一轮接在后面。
     last = messages[-1] if messages else None
     if partial.question is not None and not (

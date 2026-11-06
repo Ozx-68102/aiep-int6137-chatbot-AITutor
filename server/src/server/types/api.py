@@ -55,8 +55,8 @@ class SessionPin(BaseModel):
 class LoginResponse(BaseModel):
     locale: str
     sessions: list[SessionItem]
-    # 这个账号是不是被标了「必须改密」（预设账号、被控制台重置过密码的
-    # 账号）。前端拿它决定要不要先把用户按到改密界面去。命名跟响应模型
+    # 这个账号是不是被标了「必须修改密码」（预设账号、被控制台重置过密码的
+    # 账号）。前端拿它决定要不要先把用户按到修改密码界面去。命名跟响应模型
     # 的现有约定走：snake_case、不带 alias（同 avatar_url、pinned_at）。
     must_change_password: bool
 
@@ -129,9 +129,9 @@ class TurnDoneEvent(BaseModel):
     reason 词汇固定：stop（用户按停）、upstream（上游失败）、
     internal（我们这边出错）；正常写完为 null。
 
-    done 帧是即时判断，库是最终事实：_write_round_end 事后与上游对账
+    done 帧是即时判断，库是最终事实：_write_round_end 事后与上游核对并修正
     可能把 failed 改成 completed，done 帧不等待、也不回改
-    （2026-11-05 维护者拍板）。
+    （2026-11-05 维护者决定）。
     """
 
     turn_id: str

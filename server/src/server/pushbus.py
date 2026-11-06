@@ -1,7 +1,7 @@
 """进程内推送总线：账号 id → /api/events 的订阅队列集合。
 
-为什么进程内存就够：本项目成文铁律是单 worker 运行（server/AGENTS.md
-「边界」一节），停止轮次、启动对账、过期令牌清扫都按单进程假设跑——
+为什么进程内存就够：本项目成文的硬性规定是单 worker 运行（server/AGENTS.md
+「边界」一节），停止轮次、启动核对、过期令牌清扫都按单进程假设跑——
 这个总线同理：发布者（三个吊销触发点）和订阅者（SSE 长连接）必然
 在同一个进程里。**多进程部署时这个总线不成立**：推送只到得了本进程
 的订阅者，落在别的 worker 上的页面照样蒙在鼓里，而且不报错。要改
@@ -12,15 +12,15 @@
 
 - asyncio.Queue 不是线程安全的，put_nowait 必须在事件循环线程上调；
 - 但触发点有两个跑在线程池里：routes/admin.py 的控制台重置是
-  sync def 端点，routes/auth.py 的改密事务和 security/tokens.py 的
-  清扫写库都走 asyncio.to_thread；
+  sync def 端点，routes/auth.py 的修改密码事务和 security/tokens.py 的
+  清扫、写进数据库都走 asyncio.to_thread；
 - 所以 publish() 做成线程安全入口：subscribe 时记下主循环（单
   worker，事件循环只有一个），publish 用 loop.call_soon_threadsafe
   把「入队」这个动作丢回主循环线程执行。任何线程（包括主循环
   自己）调 publish 都安全，而且永不阻塞发布者。
 
-取舍（本批拍板）：主动退出登录不推送。退出是用户自己的动作，发起
-退出的页面自己知道；其它标签页仍旧靠下一次请求吃 401 发现。设计稿
+取舍（本批决定）：主动退出登录不推送。退出是用户自己的动作，发起
+退出的页面自己知道；其它标签页仍旧靠下一次请求收到 401 发现。设计稿
 （docs/ACCOUNT_MANAGEMENT.md「会话状态通道」）原打算退出也推一帧，
 跨标签页互知的需求留给后续批次再议。
 """
@@ -43,7 +43,7 @@ REASON_PASSWORD_CHANGED = "password_changed"
 REASON_ADMIN_RESET = "admin_reset"
 
 # 订阅队列的容量上限。满了丢新帧并记 debug（N5 设计稿骨架同款取舍）：
-# 这个通道传的是状态，丢一帧不致命——页面下一次请求吃 401 仍是兜底。
+# 这个通道传的是状态，丢一帧不致命——页面下一次请求收到 401 仍多一层保护。
 _QUEUE_MAXSIZE = 32
 
 # 关闭哨兵：shutdown() 给所有队列投它，SSE 生成器收到就正常收尾。
@@ -101,7 +101,7 @@ def publish(account_id: UUID, event: dict) -> None:
     try:
         loop.call_soon_threadsafe(_deliver, account_id, event)
     except RuntimeError:
-        # 循环已关闭：publish 撞上了关停窗口。丢掉这一帧——服务正在
+        # 循环已关闭：publish 碰到了关停窗口。丢掉这一帧——服务正在
         # 下线，订阅者已经收到（或马上会收到）关闭哨兵。
         logger.debug("推送总线已停止，丢弃 %s 的事件", account_id)
 

@@ -102,9 +102,9 @@ def revoke_login_token(session: Session, login_cookie: str | None) -> bool:
 def _sweep_expired_tokens() -> set[UUID]:
     """删掉过期令牌，把命中的账号 id 集合带回来。
 
-    DELETE 加上 RETURNING account_id：仍是单条语句（仍吃
+    DELETE 加上 RETURNING account_id：仍是单条语句（仍用
     ix_login_token_expires_at 索引），循环那边才能给这些账号推
-    「登录态没了」。此前清扫是静默的，页面只能等下一次请求吃 401
+    「登录态没了」。此前清扫是静默的，页面只能等下一次请求收到 401
     才发现过期。synchronize_session=False 与 renew_login_token 同理：
     会话里不挂着 LoginToken 对象，省掉 auto 策略先做的 SELECT。
     集合天然去重：同一账号一次被扫掉多个令牌，也只推一回。
@@ -125,15 +125,15 @@ async def sweep_expired_tokens_loop() -> None:
     """周期清扫：启动立刻跑一次，之后每 SWEEP_INTERVAL_SECONDS 一次。
 
     原来这一步挂在请求路径上（每个带令牌的请求都扫一遍全表），现在只在
-    这里跑。失败只记一条、不掐循环：数据库恢复以后下一轮会补上。
+    这里跑。失败只记一条、不中止循环：数据库恢复以后下一轮会补上。
     每轮扫完，给命中的账号各推一帧「登录态没了」（reason=expired）：
-    挂着不动的页面不用再等下一次请求吃 401 才发现过期（总线见
+    挂着不动的页面不用再等下一次请求收到 401 才发现过期（总线见
     server/pushbus.py）。
     """
     while True:
         try:
             swept = await asyncio.to_thread(_sweep_expired_tokens)
-            # 推送放在写库事务提交之后（to_thread 返回即已提交），清扫
+            # 推送放在写进数据库事务提交之后（to_thread 返回即已提交），清扫
             # 失败就不会误推「过期」；这里已在事件循环线程上，publish
             # 本身任何线程调都安全。
             for account_id in swept:

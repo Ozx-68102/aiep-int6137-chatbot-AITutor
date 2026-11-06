@@ -4,7 +4,7 @@
 docs/improvement-research/backend-api.md N5 引用同一份设计稿）：
 SSE 命名事件 state，传的是状态不是一次性事件——连上就先推一次当前
 状态，断线期间错过推送的客户端重连时天然补齐。总线住在
-server/pushbus.py：进程内存实现，依赖单 worker 铁律。
+server/pushbus.py：进程内存实现，依赖单 worker 硬性规定。
 """
 
 import asyncio
@@ -24,7 +24,7 @@ from server.streaming.framing import SSE_HEADERS
 router = APIRouter()
 
 # 心跳照聊天流同款规矩（streaming/sse.py 的 HEARTBEAT_SECONDS）：15 秒
-# 没有动静就发一帧 SSE 注释帧 ": ping"，防中间代理掐空闲连接。数值在
+# 没有动静就发一帧 SSE 注释帧 ": ping"，防中间代理切断空闲连接。数值在
 # 本模块自持、不从 streaming 域 import：那边是聊天中继的模块，一条
 # 只发心跳的通道不该跟它跨域耦合。
 _HEARTBEAT_SECONDS = 15.0
@@ -62,21 +62,21 @@ async def account_events(
 
     前端契约（前端实现另线跟进，契约以此为准）：
 
-    - 建连：页面进入「已登录」态后 ``new EventSource("/api/events")``，
+    - 建立连接：页面进入「已登录」态后 ``new EventSource("/api/events")``，
       同源请求自动带 cookie，不用也不能另设请求头。
     - 连上后的第一帧必是 ``event: state`` + ``data: {"valid":true,
-      "account":用户名}``，收到即建连成功。
+      "account":用户名}``，收到即建立连接成功。
     - 要动作的是 ``event: state`` + ``data: {"valid":false,"reason":…,
-      "message":…}``：收到就进「会话过期原地态」——与吃带 reason 的
-      401 进的原地态同一套行为（会话、消息、草稿原地保留，输入区
-      禁用、挂常驻警示条，见 docs/CHAT_PAGE_BEHAVIOR.md）。reason
+      "message":…}``：收到就进入「留在原页面的过期状态」——与收到带 reason 的
+      401 时同一套行为（会话、消息、草稿原地保留，输入区禁用、挂常驻
+      警示条，见 docs/CHAT_PAGE_BEHAVIOR.md）。reason
       词表：expired（令牌过期被清扫）/ password_changed（本账号改了
       密码）/ admin_reset（控制台重置了密码）；message 是建议文案，
-      不认识的 reason 也按失效处理（拿 message 或自己的兜底文案）。
+      不认识的 reason 也按失效处理（拿 message 或自己的保底文案）。
     - 推完 valid:false 服务器会主动结束这条流（一次登录态只坏一回）。
-      EventSource 随后自动重连——cookie 已死，重连会吃到 401，
+      EventSource 随后自动重连——cookie 已死，重连会收到 401，
       EventSource 对 401 不再重试、彻底关闭，这是预期行为，前端不用
-      兜它，也不要手动无限重连；重新登录成功后新建一个 EventSource。
+      管它，也不要手动无限重连；重新登录成功后新建一个 EventSource。
     - 断网/服务器重启：EventSource 自动重连，重连成功先收到
       {"valid":true}，天然完成状态补齐，前端不需要额外补状态。
     - 心跳：15 秒无动静有一帧 SSE 注释帧 ``: ping``，EventSource
@@ -98,7 +98,7 @@ def _account_snapshot(login_cookie: str | None) -> tuple[UUID, str]:
     """鉴权的线程那半：cookie 换账号，把 id 和用户名带出来。
 
     值在会话里就取好：db_session 退出时提交，ORM 对象随后过期，
-    出去再摸属性会炸。
+    出去再读属性会报错。
     """
     with db_session() as session:
         account = account_from_cookie(session, login_cookie)

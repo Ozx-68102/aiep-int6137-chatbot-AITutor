@@ -51,7 +51,7 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
 
-    # 这里只记一行。栈由 uvicorn 打一遍就够，打两遍会把日志撑爆。
+    # 这里只记一行。栈由 uvicorn 输出一遍就够，输出两遍会把日志撑爆。
     logger.error("请求失败 %s %s：%s", request.method, request.url.path, exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

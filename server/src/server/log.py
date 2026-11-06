@@ -11,7 +11,7 @@ _STREAM_FORMAT = "%(levelprefix)s %(message)s"
 _LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "server.log"
 _MAX_BYTES = 5 * 1024 * 1024
 # 归档堆积的警告阈值：数量或总大小任一超标就提醒（维护者要调阈值改这里）。
-# 归档只增不删是拍板决定，这里只报警，不动文件。
+# 归档只增不删是定下的决定，这里只报警，不动文件。
 _ARCHIVE_WARN_COUNT = 20
 _ARCHIVE_WARN_BYTES = 500 * 1024 * 1024
 _FILE_HANDLER: logging.FileHandler | None = None

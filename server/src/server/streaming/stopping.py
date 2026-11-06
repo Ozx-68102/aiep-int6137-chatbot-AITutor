@@ -8,8 +8,8 @@ logger = logging.getLogger("server.streaming.stopping")
 
 
 stop_tasks: set[asyncio.Task[None]] = set()
-# 失败时叫停的那几下：要等它们落地（停止标记晚到的话，
-# 新开的那一轮会被自己人写的标记掐掉）。
+# 失败时叫停的那几下：要等它们完成（停止标记晚到的话，
+# 新开的那一轮会被自己人写的标记中止）。
 pending_stops: dict[UUID, set[asyncio.Task[None]]] = {}
 STOP_WAIT_SECONDS = 7.0
 
@@ -17,8 +17,8 @@ STOP_WAIT_SECONDS = 7.0
 def ask_upstream_to_stop(session_id: UUID, wait: bool = False) -> None:
     """给上游发停止请求，不等它返回。
 
-    wait 为真时把它记在会话上：开新一轮之前要等它落地
-    （停止标记晚到的话，新开的那一轮会被自己人写的标记掐掉）。
+    wait 为真时把它记在会话上：开新一轮之前要等它完成
+    （停止标记晚到的话，新开的那一轮会被自己人写的标记中止）。
     按停止那条路不用等：那时候上游还好好着，标记很快就写进去了。
     """
     task = asyncio.create_task(_stop_upstream(session_id))
@@ -39,10 +39,10 @@ def _forget_pending_stop(session_id: UUID, task: asyncio.Task[None]) -> None:
 
 
 async def wait_for_stop(session_id: UUID) -> None:
-    """等叫停上游的那几下落定。
+    """等叫停上游的那几下完成。
 
     停止是一个运行态标记：标记写进去，上游才会在下一个节点边界收手。
-    标记晚到的话，新开的那一轮会被自己人写的停止标记掐掉。
+    标记晚到的话，新开的那一轮会被自己人写的停止标记中止。
     """
     tasks = pending_stops.get(session_id)
     if not tasks:

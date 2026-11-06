@@ -3,7 +3,7 @@
 过期令牌的清扫（DELETE ... WHERE expires_at <= now()）原来挂在每个带
 cookie 的请求路径上、走全表扫；现在挪进了后台周期任务（app.py 的
 _sweep_expired_tokens_loop）。这条 DELETE 和令牌校验里
-expires_at > now() 的条件都吃这个索引（依据见
+expires_at > now() 的条件都用这个索引（依据见
 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「令牌表与定时清扫」一节）。
 
 Revision ID: 0001

@@ -34,7 +34,7 @@
 - 跑迁移：`cd server && uv run alembic upgrade head`
 - 规矩：此后表结构变更（加列、加索引、改约束）一律写成新的迁移文件，不再往 `db/init.py` 里加 `_ensure_*_column` 那种手写字段补丁；已有的补丁函数原样留着
 - 版本文件的 revision id 用四位递增编号（0001、0002……），文件名 `<rev>_<slug>.py`；新迁移的 down_revision 指向当前最新的那个
-- 引导仍走 `create_all`：`uv run python -m server.db.init` 继续负责新库建表和初始账号。两条路要给出一致的结构——模型里声明的索引（如 `ix_login_token_expires_at`）`create_all` 会建出来，迁移那边用 `CREATE INDEX IF NOT EXISTS` 这种幂等写法，谁先跑都不冲突
+- 引导仍走 `create_all`：`uv run python -m server.db.init` 继续负责新数据库的建表和初始账号。两条路要给出一致的结构——模型里声明的索引（如 `ix_login_token_expires_at`）`create_all` 会建出来，迁移那边用 `CREATE INDEX IF NOT EXISTS` 这种幂等写法，谁先跑都不冲突
 - `migrations/env.py` 复用 `server.db.session.get_engine()` 拿数据库 URL：不在 `alembic.ini` 里另配，也不复制任何密钥逻辑
 
 ## FastGPT 的版本基线
@@ -61,15 +61,15 @@ curl -sL https://raw.githubusercontent.com/labring/FastGPT/v4.14.5/<路径>
 
 ## 边界
 - 没有我的明确许可，不要动手实现：我回答你的问题、给你补充信息，都不算许可；只有我明确表示可以动手了，才动手。在那之前只做只读的事，不写文件、不改代码、不跑会改动仓库的命令
-- 遇到大改动，不管前面许没许可，都停下来：说清楚为什么这么改、要动哪些地方、有什么风险，然后等我的明确许可再继续，不准闷声干大事。算大改动的包括：一次动多个文件、改数据结构或接口契约、加依赖或换工具、动登录/会话/流式这类核心链路、动真实数据、起服务
-- 依赖优先于手搓：Python 这边同理，PyPI 上成熟的库能做的事，直接提出来让维护者 `uv add`，不要因为 agent 自己装不了依赖就宁应手写一份替代实现凑合。装不装由维护者定，该说的必须说
+- 遇到大改动，不管前面许没许可，都停下来：说清楚为什么这么改、要动哪些地方、有什么风险，然后等我的明确许可再继续，不准不声不响干大事。算大改动的包括：一次动多个文件、改数据结构或接口契约、加依赖或换工具、动登录/会话/流式这类核心链路、动真实数据、起服务
+- 依赖优先于手写：Python 这边同理，PyPI 上成熟的库能做的事，直接提出来让维护者 `uv add`，不要因为 agent 自己装不了依赖就宁可手写一份替代实现凑合。装不装由维护者定，该说的必须说
 - Python 版本锁在 3.13（`.python-version` 和 pyproject 的 `requires-python`），不要改
 - FastGPT 的地址、应用 id、变量名、登录方式和接口路径都不臆造，缺了就问
 - 密钥只放仓库根目录 `.env`（已忽略），由 `server/src/server/settings.py` 读取。不写进代码，也不写进日志
 - 日志在仓库根目录的 `logs/server.log`，超过 5MB 会轮转归档。里面写着用户提问和 FastGPT 的上游原文，不要贴进提交说明、文档或 issue
 - 新的 Redis 键空间一律挂在 `h2botapp-chat:` 前缀底下：应用连的 Redis 用户 `h2bot_app` 的 ACL 只放行这一个前缀，别的前缀会 `NoPermissionError`，而且照「Redis 不通就放行」的降级写法这个错不会浮出来——功能直接静默失效。要另起前缀先请维护者放开 ACL。实测见 [docs/FINDINGS.md](../docs/FINDINGS.md) 2026-11-02 那条
-- **只能单 worker 运行，不要加 `--workers`**：停止一轮靠「在本进程里找到那个中继任务并取消」，启动对账和过期令牌清扫也按单进程假设跑——多 worker 时停止请求大概率落到另一个进程，找不到任务、照样回成功，用户按了停止但回答继续写，而且不报错。容量瓶颈先考虑查询瘦身和机器规格。前提的细节见 [docs/CHAT_STREAM_PROTOCOL.md](../docs/CHAT_STREAM_PROTOCOL.md)「单进程前提」一节
+- **只能单 worker 运行，不要加 `--workers`**：停止一轮靠「在本进程里找到那个中继任务并取消」，启动核对和过期令牌清扫也按单进程假设跑——多 worker 时停止请求大概率落到另一个进程，找不到任务、照样回成功，用户按了停止但回答继续写，而且不报错。容量瓶颈先考虑查询精简和机器规格。前提的细节见 [docs/CHAT_STREAM_PROTOCOL.md](../docs/CHAT_STREAM_PROTOCOL.md)「单进程前提」一节
 - 配置模型和接口模型在 `server/src/server/types`
 
 ## 登录状态
-登录凭据存在名为 `login` 的 cookie 里：cookie 里放的是令牌，数据库的 `login_token` 表存它的哈希。有效期 7 天，每个带 cookie 的请求都会重新续 7 天。没登录的请求返回 401（JSON；会话类 401 带 reason 词，见 [docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md](../docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md)）。401 不删 cookie——主动清 cookie 的只有退出、控制台退出和改密路径，所以漏带 cookie 的表现是撞会话过期原地态（页面横幅 + 重新登录），不是「莫名其妙被登出」。
+登录凭据存在名为 `login` 的 cookie 里：cookie 里放的是令牌，数据库的 `login_token` 表存它的哈希。有效期 7 天，每个带 cookie 的请求都会重新续 7 天。没登录的请求返回 401（JSON；会话类 401 带 reason 词，见 [docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md](../docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md)）。401 不删 cookie——主动清 cookie 的只有退出、控制台退出和修改密码路径，所以漏带 cookie 的表现是碰到「留在原页面的过期状态」（页面横幅 + 重新登录），不是「莫名其妙被登出」。

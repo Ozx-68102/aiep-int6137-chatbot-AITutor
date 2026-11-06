@@ -70,7 +70,7 @@ async def login(
         raise
 
     # 登录成功清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的
-    # 账号在正常登录，它们的计数不该跟着被清掉（跟改密端点同款语义）。
+    # 账号在正常登录，它们的计数不该跟着被清掉（跟修改密码端点同款语义）。
     await clear_failures(RATELIMIT_ACCOUNT_SCOPE, login_account_key(body.username))
     set_cookie(response, COOKIE_NAME, token)
     return result
@@ -141,7 +141,7 @@ async def change_password(
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
     admin_cookie: Annotated[str | None, Cookie(alias=ADMIN_COOKIE_NAME)] = None,
 ) -> Response:
-    """改密码：验旧密码、写新哈希，把这个账号的登录全踢下线。
+    """改密码：验旧密码、写新哈希，把这个账号的登录全部强制下线。
 
     argon2 是 CPU 活：端点改成 async def 之后，验证、哈希与数据库读写
     仍全部丢进线程里跑（_password_snapshot / verify_password /
@@ -184,20 +184,20 @@ async def change_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
 
     # 写哈希和吊销令牌在同一个事务里（_apply_password_change）：不留
-    # 「密码改了、旧令牌还活着」的缝。所有设备都踢，含当前这一台，重新登录。
+    # 「密码改了、旧令牌还活着」的缝。所有设备都强制下线，含当前这一台，重新登录。
     revoked_id = await asyncio.to_thread(
         _apply_password_change, login_cookie, admin_cookie, body.new_password
     )
-    # 事务落地后给这个账号的所有页面推一帧「登录态没了」，reason 是
-    # password_changed。刚改完密的这个页面自己也会收到——有意为之：
+    # 事务提交后给这个账号的所有页面推一帧「登录态没了」，reason 是
+    # password_changed。刚修改完密码的这个页面自己也会收到——有意为之：
     # 服务器不区分「谁触发的」，推给该账号的全部连接；怎么表现（触发页
-    # 明知自己改了密，可以表现得更轻）由前端自己决定。放在 to_thread
+    # 明知自己改了密码，可以表现得更轻）由前端自己决定。放在 to_thread
     # 返回之后：事务已提交，且回到事件循环线程（publish 任何线程调都
     # 安全，见 pushbus.py）。
     pushbus.publish(revoked_id, {"reason": pushbus.REASON_PASSWORD_CHANGED})
 
     # 只清账号维度的计数；IP 维度的让它自然过期：同一个 IP 上还有别的账号在
-    # 正常改密，它们的计数不该跟着被清掉。
+    # 正常修改密码，它们的计数不该跟着被清掉。
     await clear_failures(RATELIMIT_ACCOUNT_SCOPE, account_id)
     logger.info("密码已修改 %s", account_id)
     result = Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -210,11 +210,11 @@ async def change_password(
 def _password_snapshot(
     login_cookie: str | None, admin_cookie: str | None
 ) -> tuple[str, str, str, str]:
-    """改密第一步（线程里）：从两边 cookie 里认出账号，带出验证要用的信息。
+    """修改密码第一步（线程里）：从两边 cookie 里认出账号，带出验证要用的信息。
 
     返回 (账号 id, 用户名, role, 旧密码哈希)。这一步只读不写：中间的
     锁定检查（异步 Redis）没法在同步线程里 await，所以认出账号就出来，
-    真正写库的事务在 _apply_password_change 里。
+    真正写进数据库的事务在 _apply_password_change 里。
     """
     with db_session() as session:
         account = password_account(session, login_cookie, admin_cookie)
@@ -226,17 +226,17 @@ def _apply_password_change(
     admin_cookie: str | None,
     new_password: str,
 ) -> UUID:
-    """改密最后一步（线程里）：写新哈希、吊销全部令牌，同一个事务。
+    """修改密码最后一步（线程里）：写新哈希、吊销全部令牌，同一个事务。
 
     重新按 cookie 认一遍账号：中途账号被删或令牌被吊销的话，
     password_account 会按会话过期语义报错，不会写到不该写的账号上。
-    返回被踢账号的 id，调用方在事务提交后拿它推送（在事务里推，可能
-    推出去了事务却没落地）。
+    返回被强制下线账号的 id，调用方在事务提交后拿它推送（在事务里推，可能
+    推出去了事务却没提交）。
     """
     with db_session() as session:
         account = password_account(session, login_cookie, admin_cookie)
         account.password_hash = hash_password(new_password)
-        # 密码已经改成自己的了，「必须改密」的标记就地清掉，同一个事务。
+        # 密码已经改成自己的了，「必须修改密码」的标记就地清掉，同一个事务。
         account.must_change_password = False
         session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))
         # 值在会话里就取好：db_session 退出时提交，ORM 对象随后过期。
@@ -274,7 +274,7 @@ def _login_account(
     result = LoginResponse(
         locale=language.locale,
         sessions=session_items(account),
-        # 账号行本来就查出来了，标记直接带上：前端靠它决定要不要先改密。
+        # 账号行本来就查出来了，标记直接带上：前端靠它决定要不要先修改密码。
         must_change_password=account.must_change_password,
     )
     return result, token

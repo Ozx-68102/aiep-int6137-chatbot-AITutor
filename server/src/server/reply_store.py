@@ -40,24 +40,24 @@ async def _tolerate(operation: str, chat_id: UUID) -> AsyncIterator[None]:
         logger.warning("Redis 写入失败 %s %s", operation, chat_id, exc_info=True)
 
 
-# 「查＋占」合成一步：SET … GET（Redis 6.2 起支持，写入新值的同时
-# 原子拿回旧值）。为什么不用 Lua 脚本：现网 Redis 用户的 ACL 不放行
-# 脚本命令，evalsha/eval 都吃 NoPermissionError（2026-11-06 真机实测），
-# 脚本失败一降级，单轮守卫就整个蒸发。为什么不用 SET NX：NX 只能表达
-# 「键不在才抢得到」，而上一轮落定之后状态键还会活到 TTL 到期——正常
+# 「检查＋占用」合成一步：SET … GET（Redis 6.2 起支持，写入新值的同时
+# 原子拿回旧值）。为什么不用 Lua 脚本：生产环境 Redis 用户的 ACL 不放行
+# 脚本命令，evalsha/eval 都收到 NoPermissionError（2026-11-06 真实环境实测），
+# 脚本失败一降级，单轮守卫就整个消失。为什么不用 SET NX：NX 只能表达
+# 「键不在才抢得到」，而上一轮结束之后状态键还会活到 TTL 到期——正常
 # 接着提问会永远 NX 失败；NX 失败再退回「先读后覆盖」，又回到
-# check-then-act 有缝的老路。set 命令在 ACL 的放行范围内（真机验证）。
+# check-then-act 有缝的老路。set 命令在 ACL 的放行范围内（真实环境验证）。
 async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
     """原子抢占这一轮：没有别的轮在写时，一步完成登记。
 
-    True = 抢到了：状态已在闸门动作里置成 streaming，轮次键（编号＋
+    True = 抢到了：状态已在占用检查动作里置成 streaming，轮次键（编号＋
     提问）写好、上一轮的半截文字删掉，TTL 规矩和原来的 begin_reply
     一致。False = 这场会话已经有一轮在写，调用方按既有语义回 409；
     没抢到的一方也会把状态键写成同样的 streaming 值（TTL 顺延），
     无副作用。
 
     Redis 不通时按抢占成功放行——和 round_in_flight「读不到按没有在
-    写」同一套降级哲学：半截回复是可选加固，Redis 挂了聊天照常，
+    写」同一套降级原则：半截回复是可选加固，Redis 挂了聊天照常，
     大不了失去单轮保护。
     """
     ttl = load_settings().redis_key_ttl_seconds
@@ -74,7 +74,7 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
         return True
     if previous == STREAMING:
         return False
-    # 闸门到手，补齐剩下的登记。这一步写失败不回退闸门：这一轮照常
+    # 占用检查通过，补齐剩下的登记。这一步写失败不回退占用检查：这一轮照常
     # 进行，只是断线后的恢复和半截文字降级（与 _tolerate 同方向）。
     try:
         pipe = get_redis().pipeline(transaction=False)
@@ -112,7 +112,7 @@ async def append_chunk(chat_id: UUID, text: str) -> None:
 
 
 async def _mark(chat_id: UUID, value: str) -> None:
-    """把状态词写成 value，顺手给文字和轮次键续命。"""
+    """把状态词写成 value，顺手给文字和轮次键续期。"""
     ttl = load_settings().redis_key_ttl_seconds
     pipe = get_redis().pipeline(transaction=False)
     pipe.set(_status_key(chat_id), value, ex=ttl)
@@ -217,11 +217,11 @@ async def current_turn_id(chat_id: UUID) -> str:
 _ROUND_KEY_SUFFIXES = (":status", ":text", ":turn", ":stop")
 
 
-async def clear_orphan_round_keys() -> int:
-    """清掉 h2botapp-chat: 前缀下的孤儿轮次键，返回清了几个。
+async def clear_leftover_round_keys() -> int:
+    """清掉 h2botapp-chat: 前缀下进程上次运行残留的轮次键，返回清了几个。
 
-    只给启动对账（lifespan）用：单进程前提下，进程刚启动时不可能真有
-    一轮在写，这些键必是上一世进程留下的孤儿——为什么可以无条件清，
+    只给启动核对（lifespan）用：单进程前提下，进程刚启动时不可能真有
+    一轮在写，这些键必是进程上次运行留下的残留——为什么可以无条件清，
     见 lifespan.py 调用处的注释和 docs/CHAT_STREAM_PROTOCOL.md
     「单进程前提」一节。
     用 SCAN 不用 KEYS：KEYS 会把整个 Redis 堵住。Redis 不通就如实

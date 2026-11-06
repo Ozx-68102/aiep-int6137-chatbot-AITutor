@@ -1,7 +1,7 @@
 """对话路由：/api/chat 端点与重发清理。
 
 从 app.py 抽出：流式中继本体住在 server.streaming，本模块只做请求编排
-（鉴权、重复请求、409、开轮前被停、任务登记与 SSE 响应）。
+（鉴权、重复请求、409、轮次开始前被停、任务登记与 SSE 响应）。
 """
 
 import asyncio
@@ -66,7 +66,7 @@ async def _clear_failed_turn(
         logger.warning("读不到上游记录，重发的这一轮删不掉旧的 %s", chat_id)
         return
 
-    # 文本比对优先用表里的原文；表里查不到（老数据、写库失败过）再退回
+    # 文本比对优先用表里的原文；表里查不到（老数据、写进数据库失败过）再退回
     # 请求体的文字。
     match_text = question if stored_question is None else stored_question
     content_ids = _failed_turn_content_ids(records, str(turn_id), match_text)
@@ -110,7 +110,7 @@ async def chat(
     started = time.monotonic()
     turn_id = str(body.turn_id)
     # 从这里起这一轮的日志行都带着轮次编号：asyncio 建任务会拷贝上下文，
-    # 中继和写库收尾那些后台任务自动继承。
+    # 中继和写进数据库收尾那些后台任务自动继承。
     set_turn_context(turn_id)
     # INFO 只留元数据；完整请求体降到 DEBUG（debug 开关打开才写，
     # 见 settings.py）。请求体里没有登录 cookie。
@@ -124,7 +124,7 @@ async def chat(
     logger.debug("对话请求全文 %s", body.model_dump_json(by_alias=True))
 
     account_id = await asyncio.to_thread(authorize_session, body.chat_id, login_cookie)
-    # 配置检查放在鉴权之后：未登录的请求一律 401，不能靠吃没吃到 500
+    # 配置检查放在鉴权之后：未登录的请求一律 401，不能靠收到没收到 500
     # 探出上游配置坏没坏。
     fastgpt = require_client()
 
@@ -151,7 +151,7 @@ async def chat(
         # 用户在对话请求到达之前就按了停止：这一轮不开。
         # 提问照样登记，刷新以后还能看到「问了什么、这一轮被停了」——
         # 登记已经由 claim_round 做好（它就是原来 begin_reply 的活），
-        # 这里只把状态落成 aborted。先抢占再查停止：忙（409）仍然压过
+        # 这里只把状态写成 aborted。先抢占再查停止：忙（409）仍然压过
         # 停，优先级和原来一致；被停这条路也不再自己写登记，不会把
         # 并发抢到的新轮登记覆盖掉。
         await mark_aborted(body.chat_id)
@@ -180,26 +180,26 @@ async def chat(
 
     # 重发：把上一轮在上游留下的记录删掉，历史里才不会出现两遍问答。
     #
-    # 顺序变化说明：等叫停落地挪进了 relay_turn（登记提问之后、调上游
-    # 之前），响应头不再被压住。这一步删除因此发生在等待落地之前——
+    # 顺序变化说明：等叫停完成挪进了 relay_turn（登记提问之后、调上游
+    # 之前），响应头不再被压住。这一步删除因此发生在等待完成之前——
     # 安全：叫停针对的是上一轮失败的生成，删的是历史记录，删记录碰不
-    # 到停止标记；必须守住的时序（新轮调上游之前叫停已落地）由
+    # 到停止标记；必须守住的时序（新轮调上游之前叫停已完成）由
     # relay_turn 里的等待保证。代价是上一轮若还被上游写着，这一删可能
     # 扑空（悬空提问只在它是最后一条时才删），上游历史里多留一条短
-    # 答案——原代码等待 7 秒超时放行时本来就是同样的并发面，删除本来
+    # 答案——原代码等待 7 秒超时放行时本来就是同样的并发情形，删除本来
     # 就尽力而为（找不到就不删）。
     if body.retry_of is not None:
         try:
             await _clear_failed_turn(body.chat_id, body.retry_of, body.message, fastgpt)
         except BaseException:
-            # 删记录半路炸了（数据库读写在线程里，可能抛）：把刚抢下
+            # 删记录半路出错了（数据库读写在线程里，可能抛）：把刚抢下
             # 的这一轮退掉，别留下「登记了在写、任务却没建」的假占用，
             # 不然这场会话要干等轮次键 TTL 到期才能再发问。
             await discard_reply(body.chat_id)
             raise
 
     # 这一轮在 claim_round 抢占成功时就登记完了（状态、半截文字、
-    # 轮次键一步写好）：页面断流之后靠它知道请求有没有落地。
+    # 轮次键一步写好）：页面断流之后靠它知道请求有没有生效。
     relay = Relay()
     relay.account_id = account_id
     relay.turn_id = turn_id
@@ -208,7 +208,7 @@ async def chat(
     )
     running.setdefault(body.chat_id, set()).add(task)
     task.add_done_callback(lambda finished: forget(body.chat_id, finished))
-    # 先把响应头发出去，页面的等待气泡立刻就转起来——等叫停落地在
+    # 先把响应头发出去，页面的等待气泡立刻就转起来——等叫停完成在
     # relay_turn 里做，不压响应头。上游出问题时流会直接结束（没有
     # [DONE]），页面据此判断这一轮没写完。
     return StreamingResponse(

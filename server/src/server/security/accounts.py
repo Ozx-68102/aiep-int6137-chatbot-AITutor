@@ -20,8 +20,8 @@ ROLE_DENIED_CHAT = "这个账号不能登录聊天页"
 ROLE_DENIED_ADMIN = "这个账号不能登录控制台"
 RATE_LIMITED = "尝试次数太多，请 15 分钟后再试"
 # 限流计数分两个维度，各自锁各自的：账号和来源 IP。scope 会拼进 Redis 的键名
-# （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。改密和登录
-# 共用这两个 scope：登录的账号维度拿归一化用户名当标识，改密拿账号 id，
+# （h2botapp-chat:ratelimit:{scope}:{identifier}，见 ratelimit.py）。修改密码和登录
+# 共用这两个 scope：登录的账号维度拿归一化用户名当标识，修改密码拿账号 id，
 # 两边的账号计数碰不到一起；IP 维度两边合用一个计数。
 RATELIMIT_ACCOUNT_SCOPE = "password"
 RATELIMIT_IP_SCOPE = "password:ip"
@@ -59,7 +59,7 @@ def authorize_session(session_id: UUID, login_cookie: str | None) -> str:
 def verified_account(session: Session, username: str, password: str) -> Account:
     """密码验过的账号。顺手把落后的哈希重写一遍。
 
-    没这个人、密码不对，都是同一句话：不给探测留口子。role 要等密码
+    没这个人、密码不对，都是同一句话：不给探测留线索。role 要等密码
     验对了才看（顺序见 docs/ACCOUNT_MANAGEMENT.md 的「role」一节）。
     """
     account = session.scalar(select(Account).where(Account.username == username))
@@ -98,7 +98,7 @@ def login_client_ip(request: Request) -> str:
 
 
 async def raise_if_login_locked(username: str, request: Request) -> None:
-    """进密码验证之前先查账号和 IP 两个维度的锁定（照改密端点的做法）。
+    """进密码验证之前先查账号和 IP 两个维度的锁定（照修改密码端点的做法）。
 
     限流计数走异步 Redis：本函数跟着变成 async，调用点 await。
     """
@@ -144,7 +144,7 @@ def account_from_cookie(session: Session, login_cookie: str | None) -> Account:
 
     判断放在这一层，所有聊天接口就都盖到了，不用每个端点自己记着查。
     中间件验过的 cookie 直接用缓存的账号 id（一次主键查询），
-    不再做一轮令牌查库加续期。
+    不再做一轮令牌查数据库加续期。
     """
     account = _cached_account(session, login_cookie)
     if account is None:
@@ -164,7 +164,7 @@ def admin_from_cookie(session: Session, admin_cookie: str | None) -> Account:
     """控制台接口只认 admin_login cookie 里的 admin 账号。
 
     镜像 account_from_cookie。token 无效或者账号不是 admin，都回
-    「未登录」（401）：这个 cookie 只有控制台登录接口自己种，
+    「未登录」（401）：这个 cookie 只有控制台登录接口自己设置，
     不像登录那样需要把「密码对了但角色不对」分开说。
     中间件的缓存只盖聊天侧的 login cookie，控制台这边自己查一轮。
     """
@@ -183,7 +183,8 @@ def password_account(
     login_cookie: str | None,
     admin_cookie: str | None,
 ) -> Account:
-    """改密端点两边都认：聊天 cookie 里的 chat 账号，或控制台 cookie 里的 admin 账号。
+    """修改密码端点两边都认：聊天 cookie 里的 chat 账号，或控制台 cookie 里的
+    admin 账号。
 
     管理员改自己的密码也走 /api/password，所以不能只用 account_from_cookie。
     两边都对不上就是没登录。

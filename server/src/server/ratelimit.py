@@ -48,7 +48,7 @@ async def is_locked(scope: str, identifier: str) -> bool:
 
 
 async def clear_failures(scope: str, identifier: str) -> None:
-    """改密成功以后把计数清掉：之前的失败不该继续跟着这个账号。"""
+    """修改密码成功以后把计数清掉：之前的失败不该继续跟着这个账号。"""
     key = _key(scope, identifier)
     try:
         await get_redis().delete(key)

@@ -45,8 +45,8 @@ class Account(Base):
         String(16), nullable=False, server_default=text("'chat'")
     )
     # 这个账号是不是必须改密码：预设账号（test01、控制台 admin）和控制台
-    # 重置出来的密码都打标，聊天侧的接口被中间件一律拦成 403（豁免清单
-    # 见 middleware.py），用户自己改密成功才清掉。
+    # 重置出来的密码都打上标记，聊天侧的接口被中间件一律拦成 403（豁免清单
+    # 见 middleware.py），用户自己修改密码成功才清掉。
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
@@ -105,7 +105,7 @@ class ChatSession(Base):
 class LoginToken(Base):
     __tablename__ = "login_token"
     # 周期清扫和令牌校验都按 expires_at 过滤（迁移 0001 建的同一个索引）。
-    # 写进 metadata：create_all 引导出来的新库和跑迁移的老库结构才一致。
+    # 写进 metadata：create_all 引导出来的新数据库和跑迁移的旧数据库结构才一致。
     __table_args__ = (Index("ix_login_token_expires_at", "expires_at"),)
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)

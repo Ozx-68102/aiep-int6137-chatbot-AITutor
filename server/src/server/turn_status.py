@@ -19,7 +19,7 @@ FAILED: Literal["failed"] = "failed"
 ABORTED: Literal["aborted"] = "aborted"
 
 # 类型别名：函数签名和模型字段用它们标注，状态词不再退化成裸 str。
-# DoneStatus 不含 streaming：done 帧只在轮次落定时发。
+# DoneStatus 不含 streaming：done 帧只在轮次结束时发。
 TurnStatus = Literal["streaming", "completed", "failed", "aborted"]
 DoneStatus = Literal["completed", "failed", "aborted"]
 DoneReason = Literal["stop", "upstream", "internal"]

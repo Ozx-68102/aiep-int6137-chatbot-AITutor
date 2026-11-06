@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 
 running: dict[UUID, set[asyncio.Task[None]]] = {}
-# 每一轮落定以后写库的任务。单独放着：写库不能被那一轮的取消带跑。
+# 每一轮结束以后写进数据库的任务。单独放着：写进数据库不能被那一轮的取消带跑。
 settle_tasks: set[asyncio.Task[None]] = set()
 
 

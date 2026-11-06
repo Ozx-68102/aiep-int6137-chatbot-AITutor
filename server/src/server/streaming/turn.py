@@ -23,16 +23,16 @@ async def relay_turn(
     # 表里留着这一轮的提问，页面上不会少一轮。
     await asyncio.to_thread(chat_log.begin_round, chat_id, UUID(turn_id), message)
     try:
-        # 上一轮失败后朝上游补发的叫停，必须赶在调上游之前落地：
+        # 上一轮失败后朝上游补发的叫停，必须赶在调上游之前完成：
         # v2 的停止是运行态标记，上游每轮开始先删标记，标记晚到的话，
-        # 新开的这一轮会被自己人写的标记掐掉。这个等待原来在
+        # 新开的这一轮会被自己人写的标记中止。这个等待原来在
         # routes/chat.py 返回响应头之前（最长压住响应头 7 秒，页面什么
         # 都收不到，像死机），现在挪进流任务里：响应头立刻回，提问在
         # 上面已经登记过，刷新马上看得到。等待期间流上没有帧：上限
         # 7 秒小于 15 秒的心跳（sse.py），不会触发心跳，页面靠等待
-        # 气泡兜底；摘要行的 first_byte_ms 会把这段等待算进去。
+        # 气泡保底；摘要行的 first_byte_ms 会把这段等待算进去。
         # 放在 try 里面：等待期间被停走下面的 CancelledError 分支，
-        # Redis 状态照旧落成 aborted、done 帧照旧发。
+        # Redis 状态照旧写成 aborted、done 帧照旧发。
         await stopping.wait_for_stop(chat_id)
         async for event in fastgpt.events(chat_id, message, turn_id):
             if isinstance(event, ProgressEvent):
@@ -57,7 +57,7 @@ async def relay_turn(
                 continue
 
             await reply_store.mark_finished(chat_id)
-            # 结局落定：done 帧说 completed。done 帧是即时判断，库是
+            # 结局确定：done 帧说 completed。done 帧是即时判断，库是
             # 最终事实（见 sse_stream 的 docstring）。
             relay.done_status = COMPLETED
             logger.debug("发给页面 %s", framing.DONE_FRAME)
@@ -70,13 +70,13 @@ async def relay_turn(
             relay.done_status = FAILED
             relay.done_reason = "upstream"
     except asyncio.CancelledError:
-        # 用户按了停止。状态在这里写：任务被掐掉时它确实还在写，
+        # 用户按了停止。状态在这里写：任务被中止时它确实还在写，
         # 页面轮询 /partial 时就能看到 aborted。
         logger.info("这一轮被停止 %s", chat_id)
         relay.status = ABORTED
         relay.done_status = ABORTED
         relay.done_reason = "stop"
-        # 停止端点在掐这个任务之前已经叫停了上游，摘要行照实记。
+        # 停止端点在中止这个任务之前已经叫停了上游，摘要行照实记。
         relay.stop_sent = True
         # 这里可以放心地 await Redis：取消已经投递过了，这一下写入带着
         # 短超时，写完仍把 CancelledError 原样抛上去，停止的语义不变。
@@ -102,20 +102,20 @@ async def relay_turn(
             # 不能 await：任务被取消时再 await 会把取消吞掉。
             relay.queue.put_nowait(None)
         # 失败以后也要叫上游收手。v2 不看连接断没断，不叫停的话
-        # 上游会把这一轮写完：token 白花，那条记录还会晚到我们的历史里。
+        # 上游会把这一轮写完：token 白白消耗，那条记录还会晚到我们的历史里。
         # 放在结束流以后叫：页面不用等这一下。
-        # 这一下要等它落地：那时候上游可能正卡着，请求过去得慢一些。
+        # 这一下要等它完成：那时候上游可能正卡着，请求过去得慢一些。
         if relay.failed:
             relay.stop_sent = True
             stopping.ask_upstream_to_stop(chat_id, wait=True)
-        # 这一轮落定以后写进我们自己的表。
+        # 这一轮结束以后写进我们自己的表。
         settle_round(chat_id, turn_id, relay, fastgpt)
 
 
 def record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> bool:
     """这一轮在开始之前就被按了停止：提问记下来，状态是 aborted。
 
-    返回写库成没成，摘要行用。
+    返回写进数据库成没成，摘要行用。
     """
     chat_log.begin_round(session_id, turn_id, question)
     return chat_log.finish_round(session_id, turn_id, "", ABORTED)
@@ -127,10 +127,10 @@ def settle_round(
     relay: Relay,
     fastgpt: FastGPT,
 ) -> None:
-    """这一轮落定以后写进我们自己的表。
+    """这一轮结束以后写进我们自己的表。
 
     放在单独的任务里：这一轮的任务可能正被取消（用户按了停止），
-    在它里面 await 写库会写不成。
+    在它里面 await 写进数据库会写不成。
     """
     outcome: TurnStatus = FAILED if relay.failed else relay.status
     task = asyncio.create_task(
@@ -147,32 +147,32 @@ async def _write_round_end(
     outcome: TurnStatus,
     fastgpt: FastGPT,
 ) -> None:
-    """这一轮落定以后写进我们自己的表。
+    """这一轮结束以后写进我们自己的表。
 
-    分工（2026-11-05 维护者拍板）：页面的即时语义由流里的 done 帧负责
+    分工（2026-11-05 维护者决定）：页面的即时语义由流里的 done 帧负责
     ——done 帧是即时判断，在这个函数跑起来之前就已经发出去了，不等待
-    也不回改。下面「失败后与上游对账」的逻辑保留，但降级为归档核对：
-    只修库里的存档文本和状态（页面刷新以后走 /messages 看到的语义），
+    也不回改。下面「失败后与上游核对并修正」的逻辑保留，但降级为归档核对：
+    只修数据库里的存档文本和状态（页面刷新以后走 /messages 看到的语义），
     不再影响任何页面即时语义。
     """
     text = relay.text
     if outcome == FAILED:
         # 归档核对：失败以后上游可能已经把答案写完了（我们的 [DONE]
-        # 丢了）。叫停已经发出去了，等它落地，再按编号核对一次上游。
-        # 核对的结果只进库，不进页面。
+        # 丢了）。叫停已经发出去了，等它完成，再按编号核对一次上游。
+        # 核对的结果只写进数据库，不进页面。
         await stopping.wait_for_stop(chat_id)
         answer = await _upstream_answer(chat_id, turn_id, fastgpt)
         if answer is not None and answer.startswith(text):
             # 上游那份从我们收到的那段接着往下写：这一轮其实写完了，
-            # 断的是我们的 [DONE]。存档用上游那份，库里状态改成写完了
+            # 断的是我们的 [DONE]。存档用上游那份，数据库里状态改成写完了
             # （done 帧已经说过的 failed 不回改）。
             text = answer
             outcome = COMPLETED
     written = await asyncio.to_thread(
         chat_log.finish_round, chat_id, UUID(turn_id), text, outcome
     )
-    # 这一轮到此落定：打一行结构化摘要。只在这里打一次——上面的对账
-    # 也在这个函数里，不会在重试或对账路径上重复打。
+    # 这一轮到此结束：输出一行结构化摘要。只在这里输出一次——上面的核对
+    # 也在这个函数里，不会在重试或核对路径上重复输出。
     log_turn_summary(
         turn_id=turn_id,
         chat_id=chat_id,
@@ -207,8 +207,8 @@ def log_turn_summary(
     outcome 用 turn_status 的状态词（completed/failed/aborted）；first_byte_ms
     是从开始到首个内容帧的毫秒数，一个内容帧都没有就是 "-"；
     progress_events 是这一轮转发给页面的进度帧数；done_status 是流里
-    done 帧告知页面的结局（即时判断），和 outcome（库里的最终事实）
-    可能不同：失败后与上游对账可能改成 completed，done 帧不回改。
+    done 帧告知页面的结局（即时判断），和 outcome（数据库里的最终事实）
+    可能不同：失败后与上游核对并修正可能改成 completed，done 帧不回改。
     """
     duration_ms = int((time.monotonic() - started_at) * 1000)
     first_byte_ms = (

@@ -109,7 +109,7 @@ def _ensure_initial_account(session: Session) -> None:
 
     这个账号原来叫 admin，现在 admin 留给控制台的管理员，聊天侧的
     初始账号改叫 test01。这里只认用户名：查得到 test01 就直接返回，
-    所以老库改过名之后再跑 init，不会重复建号，也不动已有的密码。
+    所以旧数据库改过名之后再跑 init，不会重复创建账号，也不动已有的密码。
     """
     statement = select(Account).where(Account.username == _INITIAL_USERNAME)
     existing = session.scalar(statement)
@@ -121,7 +121,7 @@ def _ensure_initial_account(session: Session) -> None:
             id=uuid4(),
             username=_INITIAL_USERNAME,
             password_hash=PasswordHasher().hash(_INITIAL_PASSWORD),
-            # 预设口令是公开写死的，第一次登录就得改掉。
+            # 预设口令是公开硬编码的，第一次登录就得改掉。
             must_change_password=True,
             language_setting=LanguageSetting(locale=_INITIAL_LOCALE),
         ),
@@ -133,7 +133,7 @@ def _ensure_console_admin(session: Session) -> None:
 
     先看有没有 role 是 admin 的账号，有就什么都不做；再看用户名
     admin 是不是被占着——被聊天账号占着也不动它，不擅自改角色，
-    改名过的老库跑 init 就走到这里返回，不会重复建号。
+    改名过的旧数据库跑 init 就走到这里返回，不会重复创建账号。
     两头都没有才新建一个管理员账号。
     """
     statement = select(Account).where(Account.role == "admin")

@@ -88,7 +88,7 @@ def begin_round(session_id: UUID, turn_id: UUID, question: str) -> None:
 
 
 def finish_round(session_id: UUID, turn_id: UUID, text: str, status: str) -> bool:
-    """这一轮落定：写上最后的状态和文字。返回写库成没成（摘要行用）。"""
+    """这一轮结束：写上最后的状态和文字。返回写进数据库成没成（摘要行用）。"""
 
     def action(session: Session) -> None:
         for row in _turn_rows(session, session_id, turn_id):
@@ -118,12 +118,12 @@ def delete_session_messages(session_id: UUID) -> None:
 
 
 def fail_stuck_rounds() -> int:
-    """启动对账：把表里所有 status=streaming 的行一次标成 failed。
+    """启动核对：把表里所有 status=streaming 的行一次标成 failed。
 
     单进程前提（docs/CHAT_STREAM_PROTOCOL.md「单进程前提」一节）：进程重启时
-    不可能有「还在写」的轮次——那些行必是死轮（写它的进程已经随旧进程
-    死了）。读时兜底（history.merge_current_turn）同样会把它们降级展示，
-    这里把库一次清干净。返回受影响的行数；写库失败只记警告。
+    不可能有「还在写」的轮次——那些行必是已中止却仍标着「在写」的轮次（写它的进程已经随旧进程
+    死了）。读时保底修正（history.merge_current_turn）同样会把它们降级展示，
+    这里把数据库一次清干净。返回受影响的行数；写进数据库失败只记警告。
     """
     try:
         with db_session() as session:
@@ -137,7 +137,7 @@ def fail_stuck_rounds() -> int:
             )
             return int(result.rowcount or 0)
     except SQLAlchemyError:
-        logger.warning("启动对账失败，卡住的 streaming 行保持原样", exc_info=True)
+        logger.warning("启动核对失败，卡住的 streaming 行保持原样", exc_info=True)
         return 0
 
 
@@ -148,8 +148,8 @@ def read_messages(session_id: UUID) -> list[StoredMessage]:
     这里），SQLAlchemyError 由路由接住回 503。不能吞掉异常返回空列表：
     那样路由回 200 加空历史，把数据库故障伪装成「没有消息」，页面分不清
     是库坏了还是这场会话真是空的。
-    对比下面的 _write：轮次进行中的写库失败是故意吞的（归档降级，上游
-    还有一份兜底）。读写两个方向语义不同，别拉齐。
+    对比下面的 _write：轮次进行中的写进数据库失败是故意吞的（归档降级，上游
+    还有一份保底）。读写两个方向语义不同，别强行对齐。
     """
     with db_session() as session:
         rows = session.scalars(
@@ -172,7 +172,7 @@ def read_messages(session_id: UUID) -> list[StoredMessage]:
 
 
 def read_question(session_id: UUID, turn_id: UUID) -> str | None:
-    """读出这一轮用户提问的文本。查不到或读库失败返回 None。
+    """读出这一轮用户提问的文本。查不到或读数据库失败返回 None。
 
     删轮之前用：重发时旧轮可能只在上游留下一条悬空提问记录，
     请求体里带的可能是新文字（编辑重发），只有表里的原文才能和它对上。
@@ -199,7 +199,7 @@ def read_question(session_id: UUID, turn_id: UUID) -> str | None:
 def has_turn(session_id: UUID, turn_id: UUID) -> bool:
     """这场会话的表里有没有这一轮（点赞点踩端点用）。
 
-    读库失败按没有处理：宁可回 404，也不把一个查不到的轮次放去上游。
+    读数据库失败按没有处理：宁可回 404，也不把一个查不到的轮次放去上游。
     这个吞是有意的（失败方向保守）；如实上抛的读路径见 read_messages。
     """
     try:
@@ -308,7 +308,7 @@ def _write(
     session_id: UUID,
     action: Callable[[Session], None],
 ) -> bool:
-    """写库失败不能把聊天整个弄挂：这份记录只是我们自己留的一份，上游还有。
+    """写进数据库失败不能把聊天整个弄挂：这份记录只是我们自己留的一份，上游还有。
 
     返回写没写成，需要知道结果的调用方（日志摘要行）用。
     """

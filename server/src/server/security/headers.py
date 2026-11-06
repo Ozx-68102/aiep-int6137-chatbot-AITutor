@@ -1,7 +1,7 @@
 """应用侧安全响应头。
 
 CSP、HSTS 这类与加密、部署形态绑定的头留给 nginx 统一发（部署日批次），
-避免两层各发一份、互相覆盖打架；这里只发应用层能确定的三条：
+避免两层各发一份、互相覆盖冲突；这里只发应用层能确定的三条：
 
 - X-Content-Type-Options: nosniff —— 别让浏览器猜 MIME 类型；
 - X-Frame-Options: DENY —— 任何站点都不能把本应用嵌进 iframe；

@@ -1,4 +1,4 @@
-"""安全域：请求上下文、登录 cookie、令牌与账号鉴权的公开面。"""
+"""安全域：请求上下文、登录 cookie、令牌与账号鉴权对外公开的接口。"""
 
 from server.security.accounts import (
     RATE_LIMITED,

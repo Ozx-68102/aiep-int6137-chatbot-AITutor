@@ -26,8 +26,8 @@ def get_engine(settings: Settings | None = None) -> Engine:
             database=settings.database_name,
         ),
         connect_args={"connect_timeout": 5},
-        # 默认的连接池不探活：数据库重启后，池里的旧连接要等第一批请求
-        # 撞上才报错。pool_pre_ping 在取连接前先探一下，坏连接自动重建。
+        # 默认的连接池不做存活检查：数据库重启后，池里的旧连接要等第一批请求
+        # 碰到才报错。pool_pre_ping 在取连接前先探一下，坏连接自动重建。
         pool_pre_ping=True,
         # 显式写出池子大小（常驻 5 条，高峰可临时超借 10 条），好按负载调。
         pool_size=5,

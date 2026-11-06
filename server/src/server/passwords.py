@@ -5,7 +5,7 @@
 
 学生（chat）账号的密码最小长度是 6，向香港本地学生平台的惯例靠拢
 （考评局 6–25 位、教育城至少 6 字符）；管理员（admin）账号保持 8。
-学生密码的现实风险是同学间窥屏共享，而不是离线爆破（argon2 本来就贵），
+学生密码的现实风险是同学间窥屏共享，而不是离线暴力破解（argon2 本来就贵），
 所以不强制复杂度，只靠拒绝名单挡掉极弱口令。依据见 docs/PARENT_PORTAL_PRIVACY.md。
 """
 
@@ -60,7 +60,7 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(stored_hash: str, password: str) -> bool:
-    """跟库里存的哈希对不对得上。对不上（包括哈希本身坏了）一律 False。"""
+    """跟数据库里存的哈希对不对得上。对不上（包括哈希本身坏了）一律 False。"""
     try:
         _hasher.verify(stored_hash, password)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
@@ -75,7 +75,7 @@ def needs_rehash(stored_hash: str) -> bool:
         return _hasher.check_needs_rehash(stored_hash)
     except InvalidHashError:
         # 这个哈希读不懂：当成落后处理，下次登录成功时重写，
-        # 库里就不留坏哈希了。
+        # 数据库里就不留坏哈希了。
         return True
 
 
@@ -100,7 +100,7 @@ def check_password_policy(
     消息要跟前端一字不差（分工见 docs/ACCOUNT_MANAGEMENT.md）。
 
     min_length 不传就用默认的 8：还没分角色的调用方（比如以后的注册）
-    维持旧门槛；改密端点按角色传 min_length_for_role(account.role)。
+    维持旧门槛；修改密码端点按角色传 min_length_for_role(account.role)。
     """
     effective_min = _MIN_LENGTH if min_length is None else min_length
     # 密码只能是连续字符：空格一律不收（维护者定的规则）。

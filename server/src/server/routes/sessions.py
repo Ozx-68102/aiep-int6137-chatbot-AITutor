@@ -127,10 +127,10 @@ async def delete_session(
     session_id: UUID,
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> Response:
-    """删会话：先删本地，再删上游（维护者拍板的顺序）。
+    """删会话：先删本地，再删上游（维护者决定的顺序）。
 
     老顺序是先删上游历史再删本地行：上游成功、本地失败时，会留下一个
-    用户看得见、却删不掉的僵尸会话。新顺序保证：会话从用户眼前消失时，
+    用户看得见、却删不掉的会话。新顺序保证：会话从用户眼前消失时，
     本地一定已经删掉了；上游的残留用户看不见，删失败只记日志。
     """
     await asyncio.to_thread(authorize_session, session_id, login_cookie)
@@ -178,7 +178,7 @@ async def abort_session_reply(
     body: AbortRequest | None = None,
     login_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> Response:
-    """用户按了停止：掐掉这一轮的上游任务。已经写出来的半截文字留着。
+    """用户按了停止：中止这一轮的上游任务。已经写出来的半截文字留着。
 
     先把停止记下来，再取消任务：这样即使这一轮还没开始（停止请求先到），
     后到的对话请求也会看到这个编号，不再开这一轮。
@@ -219,13 +219,13 @@ async def read_session_partial(
 
     Redis 里这场会话的状态是 streaming 才回 200（半截文字、轮次编号、
     提问）；其余一切情况（写完了/失败/被停/键不存在）一律 404，页面去
-    读库。结局语义不再由这个接口承担：即时结局随流的 done 帧走，永久
+    读数据库。结局语义不再由这个接口承担：即时结局随流的 done 帧走，永久
     结局在库的 message.status 上（docs/CHAT_STREAM_PROTOCOL.md
-    「刷新续传与断流恢复」一节，2026-11-05 维护者拍板）。Redis 读不通照旧抛错（500）：
+    「刷新续传与断流恢复」一节，2026-11-05 维护者决定）。Redis 读不通照旧抛错（500）：
     那是「问不到服务器」，不是「没在写」，客户端靠状态码区分这两种。
     """
     # 端点改成 async def：读半截文字要 await 异步 Redis 客户端。
-    # 鉴权那步（查库）仍丢进线程跑：authorize_session 里面就是
+    # 鉴权那步（查数据库）仍丢进线程跑：authorize_session 里面就是
     # account_from_cookie + require_session，和原来的写法一致。
     await asyncio.to_thread(authorize_session, session_id, login_cookie)
 
@@ -280,7 +280,7 @@ async def update_feedback(
 ) -> Response:
     """把一轮的点赞/点踩送到上游（docs/MESSAGE_ACTIONS.md 第四期）。
 
-    反馈不存在我们库里：上游按 dataId（就是我们的轮次编号）记在那条
+    反馈不存在我们数据库里：上游按 dataId（就是我们的轮次编号）记在那条
     回答上。没有轮次编号、或者这场会话的表里没有这一轮，都是 404——
     映射不到上游的 dataId，发过去也是打空。上游没收到是 502。
     """

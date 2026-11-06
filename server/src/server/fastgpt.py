@@ -64,7 +64,7 @@ class ProgressEvent:
 
 
 # 这两类事件的载荷带学生数据和对话历史预览：任何级别（包括 debug）
-# 都不整行落日志，只记事件名和字节数；也绝不 yield 给调用方。
+# 都不整行写进日志，只记事件名和字节数；也绝不 yield 给调用方。
 _SENSITIVE_EVENTS = frozenset({"flowNodeResponse", "updateVariables"})
 _FLOW_NODE_STATUS = "flowNodeStatus"
 
@@ -177,7 +177,7 @@ class FastGPT:
                     if piece is STREAM_DONE:
                         return
         except httpx2.HTTPError as exc:
-            # 连不上、读超时这些都算上游的问题，记一行就够，不打整页栈。
+            # 连不上、读超时这些都算上游的问题，记一行就够，不输出整页栈。
             logger.error("FastGPT 连不上 %s：%s", chat_id, exc)
             raise FastGPTError("events") from None
 
@@ -247,7 +247,7 @@ class FastGPT:
         data_id: str,
         feedback: Literal["good", "bad"] | None,
     ) -> None:
-        """给一条回答设置或清掉好差评（消息操作第四期）。
+        """给一条回答设置或清掉点赞点踩（消息操作第四期）。
 
         上游语义（docs/FASTGPT_API.md「点赞与点踩」）：字段出现就设、
         没出现就删——点赞只带 userGoodFeedback，点踩只带
@@ -289,7 +289,7 @@ class FastGPT:
         _read_body(response, "feedback")
 
     async def delete_item(self, chat_id: UUID, content_id: str) -> bool:
-        """删掉这场会话里的某一条记录（软删）。
+        """删掉这场会话里的某一条记录（软删除）。
 
         记录有两种编号：回答那一条的编号是我们给的（responseChatItemId），
         提问那一条是 FastGPT 自己给的。重发一轮的时候两条都要删，
@@ -368,7 +368,7 @@ def _snippet(text: str | None) -> str | None:
 
 
 def _describe(step: str, upstream_status: int | None, snippet: str | None) -> str:
-    """拼 str()：一句能直接落日志的人话。"""
+    """拼 str()：一句能直接写进日志的人话。"""
     parts = [f"FastGPT {step} 失败"]
     if upstream_status is not None:
         parts.append(f"上游状态 {upstream_status}")
@@ -382,7 +382,7 @@ def _progress_event(line: str) -> ProgressEvent | None:
 
     载荷只有 {name, status} 两个字符串字段（实测见 docs/FASTGPT_API.md
     「流式行为」）。字段不是字符串就不猜，丢掉这一条；
-    日志里不落载荷内容。
+    日志里不写载荷内容。
     """
     data = line.strip()
     if not data.startswith("data:"):

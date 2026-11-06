@@ -10,7 +10,7 @@ class Relay:
         self.queue: asyncio.Queue[str | None] = asyncio.Queue()
         self.failed = False
         self.sent = False
-        # 这一轮已经写出来的文字。落库的时候要写它。
+        # 这一轮已经写出来的文字。写进数据库的时候要写它。
         self.text = ""
         # 这一轮最后的状态：写完了、被停了、还是失败了。
         self.status: TurnStatus = COMPLETED
@@ -26,7 +26,7 @@ class Relay:
         self.progress = 0
         # 轮次编号：done 帧带着它，页面按编号认这一轮。
         self.turn_id: str = ""
-        # done 帧告知页面的结局（即时判断，库才是最终事实）。结局落定
+        # done 帧告知页面的结局（即时判断，库才是最终事实）。结局确定
         # 才有值；sse_stream 只在有值时发 done 帧。
         self.done_status: Literal["completed", "aborted", "failed"] | None = None
         # done 帧的 reason 词汇：stop（用户按停）、upstream（上游失败）、

@@ -16,7 +16,7 @@ DONE_FRAME = "data: [DONE]\n\n"
 def progress_chunk(event: ProgressEvent) -> str:
     """跟前端钉死的进度帧：event: progress + {"name","status"}。
 
-    name/status 原样转发，不做映射（2026-11-05 维护者拍板：节点名原样
+    name/status 原样转发，不做映射（2026-11-05 维护者决定：节点名原样
     显示）。前端解析器只认 data: 行，event: 行是给命名事件消费方的。
     """
     payload = json.dumps(
@@ -34,7 +34,7 @@ def done_chunk(
 
     与进度帧同款风格：命名事件、紧凑分隔符、ensure_ascii=False。
     老前端的解析器把未知命名事件的 data 整帧忽略，加这一帧不破坏
-    旧行为（2026-11-05 维护者拍板：流里引入命名事件）。
+    旧行为（2026-11-05 维护者决定：流里引入命名事件）。
     """
     event = TurnDoneEvent(
         turn_id=turn_id,
