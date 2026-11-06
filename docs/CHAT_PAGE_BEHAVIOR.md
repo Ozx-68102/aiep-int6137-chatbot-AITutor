@@ -1,6 +1,6 @@
 # 聊天页面行为
 
-聊天页面现在是怎么动的：滚动、等待气泡、输入、轮询、超时重试、错误边界、读屏、会话过期。写于 2026-11-05，描述现状。
+聊天页面现在是怎么动的：滚动、等待气泡、打字机放映、输入与草稿、轮询、超时重试、错误边界、标签页标题、多标签页同步、读屏、焦点、会话过期。写于 2026-11-05，2026-11-06 随前端四波更新，描述现状。
 
 分工：流协议与轮次生命周期（四种帧、停止、重试的协议面、刷新续传的服务器侧）见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)；气泡脚注的操作矩阵（失败/被停提示与重试按钮、编辑重发、复制、点赞点踩）见 [MESSAGE_ACTIONS.md](MESSAGE_ACTIONS.md)，本文只写页面级行为；提示放哪里、什么颜色见 [UI_WARNINGS.md](UI_WARNINGS.md)。
 
@@ -21,12 +21,24 @@
 - 进度文本按会话记在 `progressBySession`（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts)），只显示当前会话最新的一个节点名。清空时机：首个内容增量到达（进度完成使命）、流结束（五种结局都一样）、发送流程的 finally——清空是幂等的，本来就没有时返回同一份引用，不触发重渲染。
 - 进度文本 `aria-hidden`：只做视觉展示，读屏维持只播「正在思考」，不随节点名变化反复播报。
 
+## 打字机放映
+
+上游的答案整块到达（根因见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「上游整块返回答案」），页面拿到全文后把「本轮刚收到」的回答渐进放映出来（[TypewriterText.tsx](../src/components/chat/TypewriterText.tsx) 包住既有的 [MarkdownText.tsx](../src/components/chat/MarkdownText.tsx)；2026-11-05 立项、2026-11-06 落地）：
+
+- **登记与参数**：轮次引擎在本轮流的第一个内容增量到达时把消息 id 登记进 `presentIds`（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts) 的 `onDelta` 里登记，不等 done 帧——done 帧到达时全文已经渲染过一帧，晚登记会先闪全文再倒回放映）。放映 60 毫秒一拍；目标总时长 = clamp(文本长度 × 15 毫秒, 1 秒, 3 秒)——短文至少放 1 秒、长文封顶 3 秒（越长吐字越快，速度自适应），折成拍数后夹在 17~50。每拍字数 = ceil(全文长度 / 拍数)，每拍按最新全文重算：上游分块到达、放映中文本变长时，剩余内容仍按原拍数吐完。拍数封顶 50 也就是 MarkdownText 重解析次数的上限，累计解析量远低于掉帧量级——这是「按块吐＋节流」的取舍理由，rAF 级合批没做（渲染合批两条仍搁置）。
+- **只放映本轮新收到的回答**：历史消息、刷新恢复、断线补回的回答根本不进 `presentIds`，天然立即全显；被停半截的也一样——轮次以停止、失败、断流收场时引擎销号，`present` 撤销直接从 props 派生（不走状态翻转），变 false 的这一帧立刻全显、定时器停掉。`prefers-reduced-motion` 的用户不放映，直接全显。
+- **每条消息只放一次**：模块级 `everStarted` 集合保证跨组件重挂载成立（切会话会整棵重挂载 ChatMain，回来不重播）；只存内存，刷新页面即清空——刷新恢复的回答本来就不放映。放映收尾之后文本再变长（上游分块、极罕见）直接全显，不二次放映。
+- **读屏与全文操作**：放映中渐显层 `aria-hidden`，另配一个 sr-only 全文节点——读屏一次拿到全文，不逐字播报；放映结束两层撤掉，DOM 与不放映时一致。`message.text` 状态自始是全文：复制、点赞点踩、错误边界的降级文本拿到的都是全文，放映只是视觉层。
+- **滚动跟随衔接**：每拍气泡长高而消息数组不变，既有的滚动跟随效果指望不上；`onReveal` 每拍回调滚动容器，查 `atBottomRef`——贴底就持续跟随，用户上滚即停（见「滚动跟随与回到底部」和「已知限制」）。
+
 ## 输入
 
 - **输入上限 8000 字**：提问框和编辑重发的编辑框都挂 `maxLength={8000}`；后端 `ChatRequest.message` 的 `Field(max_length=8000)` 对齐，超长的请求 422 回一句中文（不会静默截断）。密码类字段的 128 上限是另一回事，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)。
 - 多行输入：提问框是自动增高的 textarea，Enter 发送 / Shift+Enter 换行，`isComposing` 防中文输入法组合期的回车误发；编辑框同一套按键（Enter/「发送」发出、Shift+Enter 换行、Esc 取消）。
+- **等回答时可以继续打字**（2026-11-06）：流式期间输入框不再禁用（`inputLocked` 只算「新会话建立中」与会话过期原地态）。这一轮在飞（pending）且输入为空时发送位显示停止按钮；有字（trim 后）时换成**禁用的发送按钮**，外壳 span 挂悬停浮层「请等待 AI 回答完毕」（`waitForReply` 键，三语）——disabled 按钮不吃鼠标事件，浮层挂外壳、按钮加 `pointer-events-none`；触屏（`(hover: none)` 命中）点按外壳弹同款 toast。pending 期间按 Enter 不发送，弹同一句提示（选「给提示」而不是静默：框里正打着字，静默会像键盘坏了）。清空输入，停止按钮回来。发送仍锁到本轮结束（`sendLocked`），打的字随按随落进该会话草稿（见下节）。
+- **移动端**（2026-11-06）：底部输入条 padding-bottom 取 `max(1rem, env(safe-area-inset-bottom))`，配合 [index.html](../index.html) viewport meta 的 `viewport-fit=cover`，iPhone 刘海屏/横屏下发送按钮不再贴进圆角；气泡窄屏 `max-w-[85%]`、md 断点起维持 600px 上限（[message-class.ts](../src/components/chat/message-class.ts)）；输入框 `text-base`（16px）防 iOS 聚焦缩放（随多行输入落地）。
 
-## 未发送内容缓存
+## 未发送内容缓存与按会话草稿
 
 sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)）：
 
@@ -34,11 +46,19 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 - **登录放回**：登录成功（`openAccount`）把存的话放回输入框，放回就消费掉（清缓存），不带去再下一次登录。原地重登录时输入框里的字本来就留着，没有存句就不动它。
 - **主动退出清掉**：退出登录（signOut）成功之后清缓存——自己走的，不该留。
 
+按会话草稿（2026-11-06，[src/session/drafts.ts](../src/session/drafts.ts)）：
+
+- **各存各的**：sessionStorage 键 `h2bot-draft:{sessionId}`，「新对话」用固定键 `h2bot-draft:new`（键名风格对齐 `h2bot-unsent`）。按键即写、刻意不做防抖——sessionStorage 同步写开销可忽略，还省掉「切会话/卸载时何时 flush」的时序坑（依据写在代码注释里）。存不下（隐私模式、配额满）静默放弃，草稿丢了不阻塞输入。
+- **恢复落点**：切会话（`showSession`）、开新对话（`showNewChat`）读各自的键；刷新/深链后由 `claimPath` 认领状态，它的三个落点（回根路径开新对话、地址里的会话 id 找不到、按 id 找到会话）各读各的草稿。离线启动兜底那段也读新对话草稿。**unsent 恢复优先于草稿**：被踢、繁忙回填存下的句子不能丢，没有存句才用草稿。
+- **清理时机**：发送成功清对应键（新会话首问和普通发送两条路径都 `clearDraft`）；主动退出登录 `clearAllDrafts()` 清空全部草稿（共用电脑不留半截字，对齐 `clearCachedProfile` 的隐私处理）；被踢不清——重登录后草稿原样恢复。旧的 `rememberDraft` 单槽机制已删除。
+- 分工：`h2bot-unsent` 管「已提交但没送达」，草稿管「输入框里正打着的字」，两回事。
+
 ## 轮询与断线补查
 
 - **续传轮询 500 毫秒**一拍（[src/session/poll.ts](../src/session/poll.ts) 的 `startPartialPolling`）：问服务器「还在写吗」。200 → 把半截文字应用到页面、接着轮；**404 和 401 都是终止条件**（onEnd 带上那个 ApiError，调用方分开处理「这一轮没在写了」→ 对账数据库，和「会话过期」→ 统一的 401 出口）；网络错继续下一拍——问不到服务器不等于没在写。
 - **后台标签暂停**：页面切到后台（`document.hidden`）不发请求、光等；回到前台立刻补查一次，不等下一拍。
-- **断线补查**：`window online` 事件和 `visibilitychange` 回可见时，对每个还在等回答的会话挨个补查一次线程（`refreshThread`，里面带着续传逻辑）；**跳过本页正在流式的会话**——那场让流自己收尾，别在这儿换掉消息列表（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts) 的 catchUp）。
+- **断网即时感知与恢复确认**（2026-11-06 改写，[use-service-status.ts](../src/hooks/use-service-status.ts)）：`offline` 事件立即挂既有的服务横幅（`unreachable` 档、`connectionRetry` 文案），不用等最坏 30 秒的下一拍。`online` 不轻信——网卡通了不代表服务器够得着——主动探测 `GET /api/status` 确认，失败按 1s/2s/4s…封顶 15s 指数退避重试；代数号（`confirmGeneration`）作废旧链：offline 和新的 online 都把代数加一，不会出现两条确认循环并存；`navigator.onLine` 为假时暂停、等下一次 online。确认在飞期间，常规 30 秒节拍与可见性补查都让路——同一时刻只有一条探测链在打 `/api/status`。确认成功后先 `clearTimeout` 再同步重挂 30 秒定时器（倒计时清零，任何时刻只有一个定时器），并广播 window 事件 `h2bot:network-ok`（[poll.ts](../src/session/poll.ts) 导出的 `networkOkEvent`）。
+- **谁在听 `h2bot:network-ok`**：① 500 毫秒续传轮询循环——提前结束这一拍的等待、立即以全新的一拍开始（`finish` 幂等；唤醒后先发请求、请求回来才建下一拍定时器，没有新旧定时器并存的窗口）。② 断线补查 catchUp（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts)）——不再直接听浏览器 raw `online`：那时补查多半白失败一趟，还会和主动探测形成双份补查。补查行为不变：对每个还在等回答的会话挨个补查一次线程（`refreshThread`，里面带着续传逻辑），**跳过本页正在流式的会话**——那场让流自己收尾，别在这儿换掉消息列表。`visibilitychange` 回可见的常规补查与可见性提前结束轮询等待照旧。
 - **兜底定位键**：从上游回填的老会话消息可能没有轮次编号。waiting 消息没有 turnId 时，轮询用 `message.id` 当定位键（只认还在等待中的那条），续传不再静默失效（`applyPartialText` 的 fallbackKey 分支）。
 - 服务器侧 `/partial` 的收窄语义（200 只回 streaming、其余一律 404）和 `probePartial` 三态见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「刷新续传与断流恢复」。
 
@@ -52,13 +72,54 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 ## 错误边界与降级
 
 - **单条消息**：[BubbleBoundary](../src/components/chat/BubbleBoundary.tsx) 包住每条消息的渲染。一条消息渲染炸了（Markdown/KaTeX 管线、组件定制抛错），那一条降级成纯文本气泡（原文照显），其余消息照常——不再整页白屏。
-- **整页**：[PageBoundary](../src/components/shell/PageBoundary.tsx) 包住 App 根部。非消息区域炸了给整页降级：「页面出了点问题」（`pageError` 键）+「刷新页面」（`refreshPage` 键）按钮。
+- **整页**：[PageBoundary](../src/components/shell/PageBoundary.tsx) 包住 App 根部。非消息区域炸了给整页降级：「页面出了点问题」（`pageError` 键）+「刷新页面」（`refreshPage` 键）按钮。`/admin` 懒加载分块的 rejection（分块到手后渲染炸了）也由它兜底。
+- **管理页懒加载与分块加载失败**（2026-11-06）：`/admin` 改 `React.lazy` ＋ `Suspense`，fallback 是控制台自己 checking 占位同款的空白 div（`h-full bg-base-200`，不引入新文案）。发布骑跨（旧页面要旧分块、服务器已换新）会让动态 import 失败，Vite 统一派发 `vite:preloadError`：App 顶层的 PageBoundary **之外**另挂 `ChunkFailureToast` 监听它，弹 toast「有新版本了，刷新页面即可」（`newVersionRefresh` 键，三语）；模块级标志保证一次页面会话只弹一条（刷新页面即复位——刷新后就拿到新分块了，一条就够）。刻意挂在边界外：`/admin` 分块加载失败时 lazy 的 rejection 会把整页送进错误边界，toast 得留在边界外才看得见。它的语言在失败瞬间从本地记的资料取一次快照，读不到随系统。
+
+## 标签页标题与 html lang
+
+`useDocumentMeta(locale, pageTitle?)`（[use-document-meta.ts](../src/hooks/use-document-meta.ts)，2026-11-06）统管 `<html>` 的 `lang` 属性和 `document.title` 两件事，ChatApp 与 AdminConsole 里两处重复的同款效果已删除：
+
+- 聊天页标题 =「{会话名} - H^2 Bot」：会话名超过 30 字符截断加省略号；无标题、新对话、未登录都只是「H^2 Bot」。切会话、改名、置顶刷新（sessions 整份替换）、登录登出都经由 `active` 自动跟随，不用额外接线。
+- 管理台标题 =「管理员控制台 - H^2 Bot」（`adminConsole` 键）。
+- `document.title` 是纯文本赋值，会话标题是学生随手输入也没有注入面。
+
+## 多标签页同步
+
+登录态、语言与头像的跨标签页同步（2026-11-06，[App.tsx](../src/App.tsx) 的 storage 监听；键与辅助函数在 [profile-cache.ts](../src/session/profile-cache.ts)）。storage 事件只派发给「其他」标签页，写入方自己收不到：
+
+- **资料与头像**：`h2bot-profile` / `h2bot-avatar` 变更当场应用语言、用户名、头像（另一标签页切语言，本页立即跟着换）。`newValue` 为 null（清缓存只发生在登出/被踢路径）不做二次处理、更不踢页面——主动登出由下面的登出标记接管，服务器侧被踢照旧靠 401 兜底。
+- **主动登出标记**：键 `h2bot-logout`，值是写入时刻的时间戳（只用来区分「新标记」，数值无业务含义）。`signOut` 成功写入，登录（`openAccount`）清除。其他标签页听到且 `newValue ≠ null` → `enterLoginGuarded`：已在会话过期原地态的保持原地（横幅挂着、输入锁着，不升级成整页清空），否则走整页登录路径；正打的字照旧存进 `h2bot-unsent`。写入方收不到自己的事件，不会自踢；`openAccount` 清标记会广播一次 `newValue` 为 null 的 storage 事件，消费方只认非 null 的写入，不会误踢。
+- **与服务器侧吊销的分工**：会话过期、账号停用、改密吊销令牌都不写任何本地标记，仍由本页下一次请求吃 401（`handleAuthError`）和原地态机制接住；`/api/events` 推送通道仍是 backlog（[ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」）。分工依据注在 profile-cache.ts 的注释里。
+
+## 侧栏置顶乐观更新
+
+置顶/取消置顶改乐观更新（2026-11-06，[use-session-actions.ts](../src/hooks/use-session-actions.ts) 的 `pinOpenSession`）：
+
+- 点击界面立即生效（`pinnedAt` 用本地时间顶上），请求后台发；成功把本地值换成服务端的权威值；失败回滚界面。回滚简化：原 `pinnedAt` 没快照，恢复成 null——罕见的回滚场景只影响这条会话在置顶组里的先后，可忽略（调研 frontend-app O11 认可过这个简化）。
+- 失败反馈走错误 toast（菜单点完就关，输入区上方的警示框容易被漏看）——从原来的 `setNotice` 改成 toast；401 走登录界面、带服务器给的说法，不弹 toast；连接类失败照旧挂全局服务横幅（横幅与 toast 一起出现）；成功不提示。
+- 侧栏的 FLIP 重排动画跟着乐观更新立即播，失败回滚时再反向播一次。
 
 ## 读屏行为
 
 - **消息滚动容器 `role="log"`，不挂 aria-live**：log 语义就是「追加式消息记录」，浏览器对新增内容有默认的礼貌处理；早先整个大容器挂 `aria-live="polite"`，流式期间每个 chunk 都触发播报，读屏用户基本没法用。容器带 `aria-label`（会话标题）和 `aria-busy`（这一轮在写时为真）。
 - **独立的 sr-only status 区只报「正在思考」**：本会话有等待中的回答时报，空闲时为空——读屏播报收窄到这一处里程碑，不逐字播。
 - 等待气泡自身 `role="status"`；进度节点名 `aria-hidden`（见「等待气泡与进度显示」）。
+
+## 焦点管理
+
+Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.tsx)，全部弹窗统一；调研 frontend-app P6 的落点）：
+
+- **面板栈**：模块级 `openPanels` 栈，多个弹窗叠开时（例如会话过期就地重登录叠在设置弹窗上）只有栈顶那个响应 Esc 和 Tab 焦点圈定，不互相抢键盘。
+- **打开即聚焦**：优先 `autofocus` 元素，其次面板里第一个可聚焦元素；一个可聚焦元素都没有就退回面板本身（`tabIndex=-1`）。
+- **Tab 首尾循环**（Shift+Tab 同理）；焦点不知怎么落到面板外时直接拉回第一个元素。`focusableIn` 过滤 `inert` 子树里的（收起状态的语言菜单浮层）和 `display: none` 的（头像的 file input）——它们不进 Tab 顺序也不进圈定循环。
+- **背景滚动锁**：`body` 的 `overflow: hidden`，计数式——最后一个弹窗关闭才恢复。移动端 Safari 上 `overflow: hidden` 不保留滚动位置（解锁后跳回顶部），已知小瑕疵先接受（`position: fixed` 的替代方案代价更大，不做）。
+- **关闭还焦点给触发元素**：打开时记录（此刻焦点还在面板外才算数；面板 autofocus 先抢走焦点时没有可靠的触发元素可记，跳过）；还焦点前查 `isConnected`——触发元素随页面卸载了就不再 focus。
+- 面板上的 `opacity-100` / `scale-100` 反制动效类**未动**（既有硬约束，原样保留）。
+
+两处 `role="menu"` 浮层的键盘导航（2026-11-06，[LanguageMenu.tsx](../src/components/language/LanguageMenu.tsx) 与 [SessionRow.tsx](../src/components/sidebar/SessionRow.tsx) 的行级更多菜单，同款写法各自实现）：
+
+- 方向键上/下循环移动、Home/End 跳首尾；type-ahead 不做（选项少，方向键循环够用，注释记了理由）。
+- 打开即聚焦（语言菜单优先落在当前语言项上）；关闭把焦点还给触发按钮——只在浮层转入 `inert`、浏览器把焦点丢回 body 或焦点还留在菜单里时接管，点外部按钮关闭的场景焦点已在点击目标上，不抢回来。
 
 ## 会话过期原地态
 
@@ -88,5 +149,7 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 - **`probePartial` 把 401 归为 unreachable**：流断了去问「还在写吗」时如果会话已过期，401 被归进「问不到服务器」，走连接警示横幅而不是会话过期原地态。等推送通道落地时再认 reason。
 - **原地态里侧栏/设置操作的 401 静默失败**：`enterLoginGuarded` 保证不清页，但那些操作本身也没成功，用户看不到单独的解释（横幅是共用的那条）。
 - **`/password` 页提交吃到 401 无可见反馈**：会话过期原地态的提示在聊天页，独立路由的改密页收不到；提交失败只留在表单错误里，不说「会话已过期」。
-- **多标签页登录态不同步**：一个标签页退出/改密，另一个要等下一次请求吃 401 才知道。等推送通道。
-- **滚动跟随只看消息列表和编辑框文本**：纯高度变化（高亮懒加载迟到、KaTeX 排版完成、思考气泡进度文本）不会重新触发贴底判定，已贴底时跟随可能悄悄脱钩；「回到底部」按钮仍可用。
+- **服务器侧吊销仍等推送通道**：主动退出登录已跨标签页同步（2026-11-06，`h2bot-logout` storage 标记，见「多标签页同步」）；改密、停用这类服务器侧吊销仍要等下一次请求吃 401 才知道，等 `/api/events` 推送通道（backlog）。
+- **滚动跟随只看消息列表和编辑框文本**：打字机放映的每拍长高已持续跟随（2026-11-06，每拍 `onReveal` 查贴底，见「打字机放映」）；其余纯高度变化（高亮懒加载迟到、KaTeX 排版完成、思考气泡进度文本）仍不会重新触发贴底判定，已贴底时跟随可能悄悄脱钩；「回到底部」按钮仍可用。
+- **其余 6 个组件的 lang hack 未收敛**：`error === text.connectionError ? htmlLang[locale] : 'zh-Hans'` 的写法还留在 AdminConsole、AdminLoginForm、ConfirmAdminLogout、ConfirmResetPassword、LoginScreen、ConfirmLogout 六个组件里——错误文案 i18n 映射（2026-11-06）之后，英/繁界面的错误多数已是本地化映射文案，内容正确，但这个 hack 会把它们的 `lang` 标成 `zh-Hans`，标注不准。归 frontend-app P4 后续收敛。
+- **`must_change_password` 未消费**：后端 `ProfileResponse` 已返回该字段（迁移 0002），前端 `parseProfile` 还没读——「首登强制改密」流程是 backlog（[ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「强制改密码」）。
