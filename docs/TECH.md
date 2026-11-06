@@ -21,13 +21,13 @@
 npm install -g pnpm
 ```
 
-仓库里有 `pnpm-lock.yaml`。装依赖和跑命令都用 pnpm，不要用 npm 或 yarn。`package.json` 的 `packageManager` 字段钉了 `pnpm@12.16.1`（2026-11-06 加，corepack 与 CI 的 pnpm/action-setup 都认它）；`engines` 字段没加，Node 版本仍靠 `.nvmrc` 约定。
+仓库里有 `pnpm-lock.yaml`。装依赖和跑命令都用 pnpm，不要用 npm 或 yarn。`package.json` 的 `packageManager` 字段固定为 `pnpm@12.16.1`（2026-11-06 加，corepack 与 CI 的 pnpm/action-setup 都认它）；`engines` 字段没加，Node 版本仍靠 `.nvmrc` 约定。
 
 ## 前端
 
 - 构建：Vite 8.3.5，插件 @vitejs/plugin-react 6.1.2
 - UI：React 19.3.1、react-dom 19.3.1
-- 路由：react-router 8.5.1，BrowserRouter 真实路径：聊天 `/`、会话 `/chat/:id`、改密 `/password`、登录入口 `/login`、控制台 `/admin`。登录本身是状态不是路由：未登录时任何路径就地渲染登录屏，登录成功后路由自动认领原地址。不带 id 的 `/chat` 和未知路径归位到根路径
+- 路由：react-router 8.5.1，BrowserRouter 真实路径：聊天 `/`、会话 `/chat/:id`、改密 `/password`、登录入口 `/login`、控制台 `/admin`。登录本身是状态不是路由：未登录时任何路径直接渲染登录屏，登录成功后路由自动认领原地址。不带 id 的 `/chat` 和未知路径归位到根路径
 - 图标：lucide-react 1.61.0
 - 样式：Tailwind CSS 4.3.3，插件 @tailwindcss/vite 4.3.3
 - 组件库：daisyUI 5.7.50（Tailwind 插件，`src/index.css` 里用 `@plugin` 接线）。内置主题已关掉，只用自定义 `aiep` 主题：语义变量（base-*、primary、error 等）与 stone/emerald 色板同值。组件类按需生成，源码里没出现的类不会进产物
@@ -37,8 +37,8 @@ npm install -g pnpm
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
 - 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint、oxfmt --check 加类型检查（`pnpm exec tsc --noEmit`）一起跑
 - 类型检查和打包：`pnpm build`，等于 `pnpm exec tsc --noEmit && vite build`。产物在 `dist/`，已被忽略
-- 构建产物形态（2026-11-06 实测）：vendor 拆块走 `vite.config.ts` 的 `build.rolldownOptions.output.codeSplitting.groups`（Vite 8 是 rolldown 内核，旧 `manualChunks` 写法已废弃）——`vendor-react` 254.74 kB（react、react-dom、scheduler、react-router 家族），`vendor-markdown` 413.63 kB（react-markdown、remark、rehype、micromark、katex 整树；与高亮树共享的 14 个包显式排除在分组外，保持高亮按需块自包含）；主块 124 kB；`/admin` 懒加载出独立分块 `AdminConsole-*.js` 10.86 kB（gzip 2.98 kB）；代码高亮按需块 45.6 kB、zxcvbn 字典 4 个懒加载块不变。`build.sourcemap: 'hidden'`：生成 `.map` 但产物 JS 不写 `sourceMappingURL` 注释，部署不发布 `.map`（留构建机，排障时手动加载）
-- 界面文案（i18n）：按功能域拆成 `src/i18n/` 下的 `index`、`common`、`chat`、`auth`、`admin`、`errors`、`format` 七个文件（2026-11-06，原单文件 `src/i18n.ts`），每域三语同屏、方便核对齐不齐。类型机制：简中对象 `typeof` 推导 `Messages` 类型，繁中/英文双层显式标注（域文件里一层、index 合并结果再一层）——任何一键在任何语言缺失都是 tsc 编译错误，不再留到运行时变 `undefined` 渲染成空白。带参数的文案走 `format(template, {name})` 具名占位插值（`src/i18n/format.ts`）。错误文案词条在 `src/i18n/errors.ts`，状态码映射与裁决规则在 `src/api/failure.ts`：简中界面后端 `detail` 逐字优先，英文/繁中用状态码映射文案（403/404/408/422/429/500/502/503，401 按 `reason` 分流 expired/disabled），映射不到退 `detail`；改密页客户端门槛的两条提示同批三语化，简中与后端 `check_password_policy` 逐字一致
+- 构建产物形态（2026-11-06 实测）：vendor 代码块拆分走 `vite.config.ts` 的 `build.rolldownOptions.output.codeSplitting.groups`（Vite 8 是 rolldown 内核，旧 `manualChunks` 写法已废弃）——`vendor-react` 254.74 kB（react、react-dom、scheduler、react-router 家族），`vendor-markdown` 413.63 kB（react-markdown、remark、rehype、micromark、katex 整树；与高亮树共享的 14 个包显式排除在分组外，保持高亮按需块自包含）；主块 124 kB；`/admin` 懒加载出独立分块 `AdminConsole-*.js` 10.86 kB（gzip 2.98 kB）；代码高亮按需块 45.6 kB、zxcvbn 字典 4 个懒加载块不变。`build.sourcemap: 'hidden'`：生成 `.map` 但产物 JS 不写 `sourceMappingURL` 注释，部署不发布 `.map`（留构建机，排查故障时手动加载）
+- 界面文案（i18n）：按功能域拆成 `src/i18n/` 下的 `index`、`common`、`chat`、`auth`、`admin`、`errors`、`format` 七个文件（2026-11-06，原单文件 `src/i18n.ts`），每域三语同屏、方便核对齐不齐。类型机制：简中对象 `typeof` 推导 `Messages` 类型，繁中/英文双层显式标注（域文件里一层、index 合并结果再一层）——任何一键在任何语言缺失都是 tsc 编译错误，不再留到运行时变 `undefined` 渲染成空白。带参数的文案走 `format(template, {name})` 具名占位插值（`src/i18n/format.ts`）。错误文案词条在 `src/i18n/errors.ts`，状态码映射与裁决规则在 `src/api/failure.ts`：简中界面后端 `detail` 逐字优先，英文/繁中用状态码映射文案（403/404/408/422/429/500/502/503，401 按 `reason` 分流 expired/disabled），映射不到退回 `detail`；改密页客户端门槛的两条提示同批三语化，简中与后端 `check_password_policy` 逐字一致
 - 部署：真实路径路由要求托管方配 SPA 回落（任何未知路径返回 index.html），Nginx 配置和故障排查见 [NGINX_SPA_DEPLOYMENT_GUIDE.md](NGINX_SPA_DEPLOYMENT_GUIDE.md)
 - `pnpm test` 只输出一句如实说明「本项目不使用测试框架，见 AGENTS.md」并正常退出（exit 0，2026-11-06 改，不再是 npm init 模板那个假失败）。仓库里没有自动化测试
 
@@ -47,7 +47,7 @@ npm install -g pnpm
 命令在 `server/` 里用 `uv run`，不要直接用 `python` 或 `pip`。各库目前装上的版本：
 
 - 语言：Python 3.13。包管理：uv 0.12.13
-- Web：FastAPI 0.162.0，进程用 uvicorn 0.54.0 拉起，只听本机 3001。访问 FastGPT 只用 httpx2 2.16.0 的异步客户端。地址用 furl 2.1.4 拼接
+- Web：FastAPI 0.162.0，进程用 uvicorn 0.54.0 启动，只监听本机 3001。访问 FastGPT 只用 httpx2 2.16.0 的异步客户端。地址用 furl 2.1.4 拼接
 - 数据库：PostgreSQL 18.6（Homebrew）。驱动 psycopg 3.3.6，ORM SQLAlchemy 2.1.6
 - 迁移：alembic 1.20.1（2026-11-05 装上；脚本在 `server/migrations/`，现有 0001 = login_token.expires_at 索引、0002 = account.must_change_password 列。表结构变更一律写迁移文件，规矩见 [server/AGENTS.md](../server/AGENTS.md)「迁移」节）
 - 配置：Pydantic 2.14.1，pydantic-settings 2.16.1
@@ -56,7 +56,7 @@ npm install -g pnpm
 - 检查：ruff 0.17.2
 - 格式化：ruff format，规则在 `server/pyproject.toml` 的 `[tool.ruff.format]`。`uv run ruff format .` 改格式，`uv run ruff format --check .` 只查不改。在仓库根目录跑 `bash scripts/check-server.sh` 是这两项检查加 ruff check 一起
 
-`uv run server` 是 pyproject 里登记的命令，等价于起一个 uvicorn 进程听 127.0.0.1:3001。
+`uv run server` 是 pyproject 里登记的命令，等价于起一个 uvicorn 进程监听 127.0.0.1:3001。
 
 接口清单看 `server/src/server/routes/`（按域拆分的路由包；`app.py` 只做装配），字段和校验看 `server/src/server/types/api.py`。
 
@@ -69,7 +69,7 @@ pnpm run dev:frontend
 pnpm run dev:backend
 ```
 
-`dev:frontend` 只起页面。`dev:backend` 执行 `scripts/start-server.sh`，接口听 `127.0.0.1:3001`。
+`dev:frontend` 只起页面。`dev:backend` 执行 `scripts/start-server.sh`，接口监听 `127.0.0.1:3001`。
 
 数据库的表和初始账号要准备一次，命令是：
 
@@ -104,4 +104,4 @@ bash scripts/setup-hooks.sh
 
 - **提交前钩子**（`.githooks/pre-commit`，`setup-hooks.sh` 自动启用）：提交前跑一遍前后端的格式与代码规范检查（调 `scripts/check-all.sh`，含前端类型检查，实测总共约 4 秒）。失败会点名哪一步不过、给复验命令；紧急可以 `git commit --no-verify` 跳过，但 CI 还会跑同一套，跳过不解决问题。
 - **统一检查入口**：仓库根 `bash scripts/check-all.sh`——前端规范（oxlint）、前端格式（oxfmt --check）、前端类型（tsc --noEmit）、后端两件套（复用 `scripts/check-server.sh`）四步连跑，是 CI 的本地等价物。
-- **持续集成**：`.github/workflows/ci.yml`，push 到 main 和所有 pull request 自动跑：前端作业（pnpm 冻结安装 → `pnpm check` → 构建并确认产物）、后端作业（uv 冻结同步 → ruff 两件套）。CI 不跑迁移、不起服务（runner 没有 PostgreSQL/Redis）。**尚未在 GitHub 实跑过**——push 权在维护者，首次 push 时才会第一次触发。
+- **持续集成**：`.github/workflows/ci.yml`，push 到 main 和所有 pull request 自动跑：前端作业（pnpm 冻结安装 → `pnpm check` → 构建并确认产物）、后端作业（uv 冻结同步 → ruff 两件套）。CI 不跑迁移、不起服务（runner 没有 PostgreSQL/Redis）。**尚未在 GitHub 实际运行过**——push 权在维护者，首次 push 时才会第一次触发。

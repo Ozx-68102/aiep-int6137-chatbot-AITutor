@@ -8,7 +8,7 @@
 
 在那之前只做只读的事：读文件、搜索、查资料、分析问题、给方案、列下一步能做什么。不写文件、不改代码，也不跑会改动仓库的命令——`pnpm install`、`pnpm fmt`、`pnpm build`、`uv sync`、`git add`、`git commit` 都算改动。只读的命令随便跑：`pnpm check`、`pnpm exec tsc --noEmit`、`bash scripts/check-server.sh`、`git status`。
 
-遇到大改动，不管前面许没许可，都停下来：说清楚为什么这么改、要动哪些地方、有什么风险，然后等我的明确许可再继续，不准闷声干大事。算大改动的包括：一次动多个文件、改数据结构或接口契约、加依赖或换工具、动登录/会话/流式这类核心链路、动真实数据、起服务。
+遇到大改动，不管前面许没许可，都停下来：说清楚为什么这么改、要动哪些地方、有什么风险，然后等我的明确许可再继续，不准不声不响干大事。算大改动的包括：一次动多个文件、改数据结构或接口契约、加依赖或换工具、动登录/会话/流式这类核心链路、动真实数据、起服务。
 
 ## 说话和写文档
 
@@ -25,9 +25,9 @@
 - 实测到的反直觉行为（浏览器、库、平台层）：[docs/FINDINGS.md](docs/FINDINGS.md)。新发现追加到那里，不写密钥、密码、cookie，也不贴 logs/ 里的内容——logs/server.log 里写着用户提问和 FastGPT 的上游原文，超过 5MB 会轮转归档
 - FastGPT 上游的接口与行为实测：[docs/FASTGPT_API.md](docs/FASTGPT_API.md)
 - 聊天流协议与轮次生命周期（四种帧、停止、重试、刷新续传、`message` 表）：[docs/CHAT_STREAM_PROTOCOL.md](docs/CHAT_STREAM_PROTOCOL.md)
-- 登录态、令牌与限流（cookie、令牌清扫、401 原因、防爆破）：[docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md](docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md)
+- 登录态、令牌与限流（cookie、令牌清扫、401 原因、防暴力破解）：[docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md](docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md)
 - 轮次日志与排查（turn_summary、debug 开关、turn_dump）：[docs/TURN_LOGGING_AND_DIAGNOSTICS.md](docs/TURN_LOGGING_AND_DIAGNOSTICS.md)
-- 聊天页面行为（滚动、等待气泡、轮询、错误边界、会话过期原地态）：[docs/CHAT_PAGE_BEHAVIOR.md](docs/CHAT_PAGE_BEHAVIOR.md)
+- 聊天页面行为（滚动、等待气泡、轮询、错误边界、会话过期后留在原页面的状态）：[docs/CHAT_PAGE_BEHAVIOR.md](docs/CHAT_PAGE_BEHAVIOR.md)
 - 界面上的提示（警示框、气泡脚注、表单错误行、Toast）放在哪里、什么颜色：[docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)
 - UI 组件体系：daisyUI 5（类名速查 daisyui.com/components）；主题变量和插件接线在 `src/index.css`
 - 控制台/家长端的定位决定和香港私隐法规依据：[docs/PARENT_PORTAL_PRIVACY.md](docs/PARENT_PORTAL_PRIVACY.md)
@@ -38,20 +38,20 @@
 - 信息不足先问：需求、接口、字段、配置不清楚时停下来问并说明理解，不猜、不臆造
 - **不推送**。推送只能维护者做：上游推送后禁止删除和改写提交树，模型推上去的东西一旦有问题就再也改不了。提交自己做（维护者给了常驻许可），具体规矩见「Git」一节
 - 不擅自加依赖、换包管理器、改目录结构，如有需要直接提出来，不要静默绕过这些问题
-- 依赖优先于手搓：成熟三方库能做的事，就点名那个库、让维护者装，不要因为自己装不了依赖就宁应手写一份实现凑合——装不装由维护者定，该说的必须说
-- 依赖目前只能由维护者装：agent 沙箱里 pnpm 会把 store 切到 `node_modules/.pnpm-store`，维护者终端里用的是 `~/Library/pnpm/store`，两边对不上，pnpm 报 ERR_PNPM_UNEXPECTED_STORE。沙箱里装一次，维护者下一次 `pnpm add` 就撞上这个错。store 目录固定下来之后这条可以放开，细节见 [docs/FINDINGS.md](docs/FINDINGS.md) 里 2026-10-31 那条
+- 依赖优先于手写：成熟三方库能做的事，就点名那个库、让维护者装，不要因为自己装不了依赖就宁可手写一份实现凑合——装不装由维护者定，该说的必须说
+- 依赖目前只能由维护者装：agent 沙箱里 pnpm 会把 store 切到 `node_modules/.pnpm-store`，维护者终端里用的是 `~/Library/pnpm/store`，两边对不上，pnpm 报 ERR_PNPM_UNEXPECTED_STORE。沙箱里装一次，维护者下一次 `pnpm add` 就碰到这个错。store 目录固定下来之后这条可以放开，细节见 [docs/FINDINGS.md](docs/FINDINGS.md) 里 2026-10-31 那条
 - 聊天页面在 `src/`，接口服务在 `server/`。浏览器只访问本仓库的接口，不直连 FastGPT。FastGPT 的工作流和知识库不在本仓库改，那边的事找 FastGPT 的维护者。我们这个 FastGPT 是内部部署的 **v4.14.5** 基线，接口以官方源码为准，不要照文档站抄（见 [server/AGENTS.md](server/AGENTS.md) 的「FastGPT 的版本基线」）
 - 登录状态存在浏览器的 `login` cookie 里，请求都要带上它：普通请求走 `src/api/http.ts` 里的 `requestEmpty` / `requestJson`，流式回答在 `src/api/chat.ts`，两处都已经带上 `credentials: 'include'`。不要另写 fetch，也不要用绝对地址——服务端没有 CORS，浏览器会拦
 - 用户名和语言另外记在 localStorage 的 `h2bot-profile` 里（`src/session/profile-cache.ts`）：接口服务连不上的时候靠它撑住「我是谁、我用哪种语言」，退出登录要清掉。别当成冗余删了
 - 密钥只放根目录 `.env`（已忽略）。不进前端代码、不加 `VITE_` 前缀
 - 界面一律用 daisyUI 5 的组件类（btn、input、card、alert、chat、table、menu、avatar、loading 等），不再手写「描边 + 圆角 + hover 变色」这类 utility 组合。颜色优先用语义类（btn-primary、text-error、bg-base-200），它们在 `aiep` 主题下与 stone/emerald 色板同值。类名的权威参考是 `node_modules/daisyui/components/*.css`（按钮在 button.css，不在 btn.css），别凭记忆猜
 - 聊天气泡是 `.chat` 包装 + `.chat-bubble` 双层结构（`src/components/chat/message-class.ts`），气泡下方的按钮要包 `.chat-footer`，否则会被 grid 定位挤歪
-- 提示面（警示框、行内表单错误、Toast、气泡脚注）背景一律 `bg-base-100` 白底、文字一律 `base-content` 黑字，语义色只出现在图标上（红 `text-error`、琥珀 `text-warning`、绿 `text-success`）；不要用 `alert-error` / `alert-warning` / `alert-success` 的整块语义色背景（2026-11-04 维护者拍板，规则正文在 [docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)）
+- 提示面（警示框、行内表单错误、Toast、气泡脚注）背景一律 `bg-base-100` 白底、文字一律 `base-content` 黑字，语义色只出现在图标上（红 `text-error`、琥珀 `text-warning`、绿 `text-success`）；不要用 `alert-error` / `alert-warning` / `alert-success` 的整块语义色背景（2026-11-04 维护者决定，规则正文在 [docs/UI_WARNINGS.md](docs/UI_WARNINGS.md)）
 - `src/components/shell/Modal.tsx` 面板上的 `opacity-100 scale-100` 两个类是在反制 `.modal-box` 的默认隐藏态：daisyUI 靠 `.modal-open` 父级解锁可见，而本项目用的是自建 portal 外壳、没有那个父级。删掉这两个类，所有弹窗会直接隐形
 - 会话行和语言菜单的浮层保持 createPortal 结构，不要换成 daisyUI 的 dropdown：dropdown 依赖行内定位，会被行上动画的 transform 层叠上下文困住（原理见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-10-31 那条）
-- CSS 注释里不要出现 `col-*/offset-*` 这种带 `*/` 的写法：注释会提前终止，后面的 `@plugin` 块被静默丢弃——构建照常成功，只有一条 `Unexpected token` 警告，产物却少了整个插件（2026-11-03 踩过）
-- 格式交给工具：写完跑对应的 fmt 命令，不要手动跟格式较劲
-- 工作草稿不进仓库目录：中间稿、对比 dump、灌入负载、一次性脚本这类临时产物一律放系统临时目录（`/tmp` 或 `$TMPDIR`），用完即删；确实需要放进仓库的，名字用 `.tmp-` 前缀，收尾前自己删掉。收工前过一遍 `git status`：除维护者自己的文件外不应有新的未跟踪残留，不要让维护者每次提醒（2026-11-06 踩过：一路会话把 `push-scratch/` 留在根目录十几个小时没人收）。维护者自己的未跟踪文件（资料、讨论稿）不要动，也不要替维护者决定去留
+- CSS 注释里不要出现 `col-*/offset-*` 这种带 `*/` 的写法：注释会提前终止，后面的 `@plugin` 块被静默丢弃——构建照常成功，只有一条 `Unexpected token` 警告，产物却少了整个插件（2026-11-03 遇到过）
+- 格式交给工具：写完跑对应的 fmt 命令，不要手动改回去对抗格式化结果
+- 工作草稿不进仓库目录：中间稿、对比 dump、导入负载、一次性脚本这类临时产物一律放系统临时目录（`/tmp` 或 `$TMPDIR`），用完即删；确实需要放进仓库的，名字用 `.tmp-` 前缀，收尾前自己删掉。结束工作前过一遍 `git status`：除维护者自己的文件外不应有新的未跟踪残留，不要让维护者每次提醒（2026-11-06 遇到过：一个会话把 `push-scratch/` 留在根目录十几个小时没人清理）。维护者自己的未跟踪文件（资料、讨论稿）不要动，也不要替维护者决定去留
 
 ## 验收
 
@@ -67,13 +67,13 @@
 - 远端开着禁止删除和禁止强推，别去关它。要改已经推送的内容，用新提交、`git revert` 或 `git commit-tree`；推送之后不要强推，要解除这两条规则先问维护者
 - 提交说明用英文写成 `feat: add session pinning` 这种样子：类型、冒号、一句话；类型后面不要加括号（`feat(server): ...` 会被钩子拒绝）
 - 类型按语义选：用户能感知到的界面或能力变化（含视觉改版）用 feat；纯代码排版用 style；行为不变的重构用 refactor；依赖增删用 chore
-- 提交信息必须自足：只描述改动本身，标题和正文都不得出现只存在于开发会话或特定工具链里的词——wave/波次编号、phase/期数编号、LayerFS 与宿主工具名、复刻、回灌这类一律禁止（2026-11-06 经维护者许可把历史里 23 笔旧消息清理成了自足表述）。从 LayerFS 侧复刻提交到 git 时，原信息含这类词就当场改写，不照抄；LayerFS 侧自己的提交信息不受此限
+- 提交信息必须自足：只描述改动本身，标题和正文都不得出现只存在于开发会话或特定工具链里的词——wave/波次编号、phase/期数编号、LayerFS 与宿主工具名、复刻、回灌这类一律禁止（2026-11-06 经维护者许可把历史里 23 笔旧消息清理成了自足表述）。从 LayerFS 侧复制提交到 git 时，原信息含这类词就当场改写，不照抄；LayerFS 侧自己的提交信息不受此限
 - 分支名遵循 Conventional Branch（https://conventionalbranch.org）：`main`、`master`、`develop` 不用前缀；其余写成 `<type>/<description>`。类型只用 feature、feat、bugfix、fix、hotfix、release、chore，以及 ai、copilot、cursor、claude、codex。描述只用小写字母、数字、连字符和点，例如 `feature/add-login-page`。推送前由 `.githooks/pre-push` 检查，正则是 https://conventionalbranch.org/v1.1.0/spec.json 里的那条，用 Perl 匹配
 - 远端 GitHub 已经导入同一份分支名规则集（https://conventionalbranch.org/enforce/#rulesets）。不合规的分支名推不上去，本地用 `--no-verify` 跳过钩子也绕不过
-- 用 LayerFS 并行开发时，最终合并在 LayerFS 里做：0 冲突才落地 git——用 `git commit-tree` 把那边的分支和提交复刻过来，拓扑、每个提交的时间戳、每一步的改动痕迹都照搬。唯一例外是只建目录的步骤（LayerFS 的 `fs.mkdir` 提交）：git 不跟踪空目录，这类步骤没有对应物，复刻时跳过、让后续提交直接挂到上一个有内容的提交上——git 历史里不允许出现零改动的空提交（2026-11-06 踩过「皇帝的新文件夹」）；分支名和提交信息按上面两条钩子规矩写（commit-tree 是底层命令，不触发钩子，所以要逐条拿 `.githooks/commit-msg` 预检）。复刻出来的合并提交，信息里引用的分支名要用 git 侧的合规名（`feature/password-relax` 这种），不要照抄 LayerFS 的合并消息——LayerFS 分支名不允许斜杠，照抄过来必不合规（2026-11-03 踩过）。有冲突就停下来问维护者怎么合，不自己拍板
-- 反方向（本地 git 领先 LayerFS，要灌回去）走这套：fork 分支 → 按 git 提交逐个 `fs.apply`（文件内容取 `git show <hash>:<path>`，提交信息照抄，保留中间态）→ 全量文件 md5 对比复验零差异 → 沙箱里构建验证 → `branch publish`。不要用 `layerfs init` 重建（macOS 上它结构性损坏且会写坏项目记录，见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-11-03 两条）
+- 用 LayerFS 并行开发时，最终合并在 LayerFS 里做：0 冲突才写进 git——用 `git commit-tree` 把那边的分支和提交复制过来，拓扑、每个提交的时间戳、每一步的改动痕迹都照搬。唯一例外是只建目录的步骤（LayerFS 的 `fs.mkdir` 提交）：git 不跟踪空目录，这类步骤没有对应物，复制时跳过、让后续提交直接挂到上一个有内容的提交上——git 历史里不允许出现零改动的空提交（2026-11-06 遇到过「皇帝的新文件夹」）；分支名和提交信息按上面两条钩子规矩写（commit-tree 是底层命令，不触发钩子，所以要逐条拿 `.githooks/commit-msg` 预检）。复制出来的合并提交，信息里引用的分支名要用 git 侧的合规名（`feature/password-relax` 这种），不要照抄 LayerFS 的合并消息——LayerFS 分支名不允许斜杠，照抄过来必不合规（2026-11-03 遇到过）。有冲突就停下来问维护者怎么合，不自己决定
+- 反方向（本地 git 领先 LayerFS，要同步回去）走这套：fork 分支 → 按 git 提交逐个 `fs.apply`（文件内容取 `git show <hash>:<path>`，提交信息照抄，保留中间态）→ 全量文件 md5 对比复验零差异 → 沙箱里构建验证 → `branch publish`。不要用 `layerfs init` 重建（macOS 上它结构性损坏且会写坏项目记录，见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-11-03 两条）
 - LayerFS 沙箱里前端命令可用，但 main 已不再带 node_modules（2026-11-05 重新播种只留源码）：挂了工作区先 `CI=true pnpm install --frozen-lockfile`（镜像里有热缓存，实测约 10 秒），然后 `pnpm check`、`vite build` 都实测通过；npm 不能在 pnpm 树里跑（`catalog:` 协议报错）。早先「main 的 node_modules 按 Linux 重建并发布」的说法随重新播种作废，相关历史见 [docs/FINDINGS.md](docs/FINDINGS.md) 2026-11-03 条目
-- 复刻落地之后，把本轮在 git 里建的分支删掉（`git branch -d` 只删已合并的，删不丢内容；这一步属于常驻许可，不用再问）
+- 同步完成之后，把本轮在 git 里建的分支删掉（`git branch -d` 只删已合并的，删不丢内容；这一步属于常驻许可，不用再问）
 - 上面这套仪式防的是真有重叠的那天：文件不相交时线性提交的信息一样全，但两条线改了同一个文件时，线性重放会静默覆盖掉一边的改动，只有真合并会把冲突报出来
 - 新克隆后执行一次 `bash scripts/setup-hooks.sh`
 - 不提交 `.env`、`server/.venv`、`logs/`

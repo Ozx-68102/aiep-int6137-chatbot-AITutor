@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm 版本显式写死为 12.16.1，与 package.json 的 packageManager 字段、
+      # pnpm 版本显式固定为 12.16.1，与 package.json 的 packageManager 字段、
       # docs/TECH.md 的版本表保持一致，不让 action 自己去猜。
       # 必须放在 setup-node 之前，下面的 cache: pnpm 才找得到 pnpm 命令。
       - uses: pnpm/action-setup@v4
@@ -66,7 +66,7 @@ jobs:
           cache-dependency-glob: server/uv.lock
 
       # Python 版本按 server/.python-version（3.13）显式装好；
-      # uv sync 也读这个文件，两边不会打架。
+      # uv sync 也读这个文件，两边不会冲突。
       - run: uv python install 3.13
 
       # 严格按 server/uv.lock 安装依赖。只装依赖，不连数据库、不起服务。

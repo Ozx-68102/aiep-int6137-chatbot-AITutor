@@ -2,7 +2,7 @@
 # 一键跑完全部检查：前端（oxlint + oxfmt --check + tsc --noEmit）加后端（ruff check + ruff format --check）。
 # 用法：在仓库里执行 bash scripts/check-all.sh
 # 这是 CI（.github/workflows/ci.yml）的本地等价物：CI 里跑的就是这几项，只另加一次前端构建。
-# 提交前想全量自查，或者 CI 挂了想在本地复现，都跑这个。
+# 提交前想全量自查，或者 CI 失败了想在本地复现，都跑这个。
 # 所有步骤都只查不改：不会动你的文件，跑完什么样子进来还是什么样子出去。
 set -euo pipefail
 
@@ -19,7 +19,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# 哪一步挂了就说清楚是哪一步，并告诉人怎么修完之后复验。
+# 哪一步失败了就说清楚是哪一步，并告诉人怎么修完之后复验。
 fail() {
   {
     echo ""

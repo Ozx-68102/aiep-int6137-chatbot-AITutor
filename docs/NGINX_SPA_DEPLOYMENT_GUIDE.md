@@ -48,7 +48,7 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
-    # ④ 接口反代到本机的接口服务。
+    # ④ 接口反向代理到本机的接口服务。
     location /api/ {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -57,7 +57,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         # 聊天走 SSE 流。缓冲必须关：否则 Nginx 会把先到的帧憋在手里，
-        # 浏览器在流结束前一个字节都收不到，长静默也更容易撞超时。
+        # 浏览器在流结束前一个字节都收不到，长静默也更容易碰到超时。
         # 注意：「静默几秒后回答整块出现」是上游的正常行为（它把答案
         # 全部写完才发，见 docs/FASTGPT_API.md「流式行为」），不是这行的锅。
         proxy_buffering off;
@@ -88,7 +88,7 @@ sudo systemctl reload nginx
 # 回落生效：随便编一个不存在的路径，应该返回 200 和 text/html，而不是 404
 curl -I http://你的域名/chat/does-not-exist
 
-# 接口反代生效：应该拿到后端返回的 JSON，而不是 Nginx 的 404 页
+# 接口反向代理生效：应该拿到后端返回的 JSON，而不是 Nginx 的 404 页
 curl http://你的域名/api/status
 ```
 
@@ -100,7 +100,7 @@ curl http://你的域名/api/status
 |-----------------------------------|-------------------------------|----------------------------------------------------------------|
 | 刷新 `/chat/xxx`、`/admin` 就 404 | 没配 SPA 回落                 | 补上①                                                          |
 | 页面白屏，控制台报 JS/CSS 404     | `root` 指错目录               | 确认 `index.html` 和 `assets/` 就在 `root` 下面一层            |
-| 页面正常但登录报网络错误          | `/api` 没反代，或接口服务没起 | 查④，确认 3001 端口有进程在听                                  |
+| 页面正常但登录报网络错误          | `/api` 没配反向代理，或接口服务没启动 | 查④，确认 3001 端口有进程在监听                                  |
 | 静默几秒后回答整块出现              | 正常行为，不是故障               | 上游把答案全部写完才发，见 FASTGPT_API.md「流式行为」            |
 | 请求结束前一个字节都收不到          | Nginx 缓冲没关，答案和收尾一起到 | `proxy_buffering off`（④里那行）                                 |
 | 发了新版，用户看到的还是旧页面    | `index.html` 被缓存了         | 查②；也检查有没有在更外层配全局缓存                            |

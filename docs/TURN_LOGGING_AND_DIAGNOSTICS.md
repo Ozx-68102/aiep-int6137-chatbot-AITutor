@@ -12,13 +12,13 @@
 %(asctime)s %(levelname)s %(name)s [turn %(turn_id)s] %(message)s
 ```
 
-- **轮次编号是日志行的一部分**：对话和停止两个端点在入口处调 `set_turn_context(turn_id)`，编号存进 contextvars；`logging.Filter`（`_TurnFilter`）把它注进每条日志。asyncio 建后台任务时会拷贝上下文，所以中继、写库收尾这些后台任务的日志行自动带上编号；请求上下文之外的行（启动、清扫、第三方库）输出 `-`。
+- **轮次编号是日志行的一部分**：对话和停止两个端点在入口处调 `set_turn_context(turn_id)`，编号存进 contextvars；`logging.Filter`（`_TurnFilter`）把它注进每条日志。asyncio 建后台任务时会拷贝上下文，所以中继、写数据库收尾这些后台任务的日志行自动带上编号；请求上下文之外的行（启动、清扫、第三方库）输出 `-`。
 - 停止那一侧的日志行也带同一个编号，跟对话那一侧对得上。
 - 终端输出用 uvicorn 自己的排版和颜色，不套这个格式。
 
 ## 每轮一行：turn_summary
 
-一轮落定时打一行结构化摘要（`_log_turn_summary`；「开轮前被停」的路径也打），键值对形式，方便 grep。只在一轮落定时打一次，重试和对账路径不会重复打。
+一轮落定时打一行结构化摘要（`_log_turn_summary`；「开轮前被停」的路径也打），键值对形式，方便 grep。只在一轮落定时打一次，重试和核对路径不会重复打。
 
 ```
 turn_summary turn_id=… chat_id=… account_id=… outcome=… duration_ms=… first_byte_ms=… bytes_sent=… stop_sent=… db_written=… progress_events=… done_status=…
@@ -27,16 +27,16 @@ turn_summary turn_id=… chat_id=… account_id=… outcome=… duration_ms=… 
 | 字段 | 意思 |
 |---|---|
 | `turn_id` / `chat_id` / `account_id` | 轮次编号、会话、账号（拿不到账号时 `-`） |
-| `outcome` | 库里的最终事实：completed / failed / aborted（词表归 [turn_status.py](../server/src/server/turn_status.py)） |
+| `outcome` | 数据库里的最终事实：completed / failed / aborted（词表归 [turn_status.py](../server/src/server/turn_status.py)） |
 | `duration_ms` | 这一轮从请求进来到落定的毫秒数 |
 | `first_byte_ms` | 从开始到首个内容帧的毫秒数；一个内容帧都没有就是 `-` |
 | `bytes_sent` | 发给页面的正文字节数（进度帧不算） |
 | `stop_sent` | 有没有给上游发过停止（yes/no） |
-| `db_written` | 落定的写库成没成（yes/no） |
+| `db_written` | 落定的写数据库成没成（yes/no） |
 | `progress_events` | 这一轮转发给页面的进度帧数 |
 | `done_status` | 流里 done 帧告知页面的结局（即时判断） |
 
-`done_status` 和 `outcome` 可能不同：失败之后服务器还会与上游做归档核对，核对上了就把库改成 completed，而 done 帧已经说过的 failed 不回改（分工见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「done 帧是即时判断，数据库是最终事实」）。两个字段并排放在摘要行里，就是为了让这种不一致一眼可见。另一个口径小变化（2026-11-06）：等叫停落地（`wait_for_stop`，最多 7 秒）挪进了流任务，`duration_ms` 和 `first_byte_ms` 现在把这段等待算进去——「失败后立刻重发」的场景数字最多比原来大 7 秒，不是变慢了。
+`done_status` 和 `outcome` 可能不同：失败之后服务器还会与上游做归档核对，核对上了就把数据库改成 completed，而 done 帧已经说过的 failed 不回改（分工见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「done 帧是即时判断，数据库是最终事实」）。两个字段并排放在摘要行里，就是为了让这种不一致一眼可见。另一个口径小变化（2026-11-06）：等叫停生效（`wait_for_stop`，最多 7 秒）挪进了流任务，`duration_ms` 和 `first_byte_ms` 现在把这段等待算进去——「失败后立刻重发」的场景数字最多比原来大 7 秒，不是变慢了。
 
 ## debug 开关与全文日志
 
@@ -55,7 +55,7 @@ turn_summary turn_id=… chat_id=… account_id=… outcome=… duration_ms=… 
 
 任何级别（包括 debug）都不进日志的：
 
-- 上游的 `flowNodeResponse`（节点输出明细，含对话历史预览）和 `updateVariables`（工作流变量全量，带学生数据）两类事件**不整行落日志**，只记事件名和字节数（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py) 的 `_SENSITIVE_EVENTS` 分支）。
+- 上游的 `flowNodeResponse`（节点输出明细，含对话历史预览）和 `updateVariables`（工作流变量全量，带学生数据）两类事件**不整行写进日志**，只记事件名和字节数（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py) 的 `_SENSITIVE_EVENTS` 分支）。
 
 INFO 级别（正常运行时）不含学生提问和回答的全文，只有长度和编号；全文只在 debug 开关打开时才写。配套的既有规矩不变：`logs/server.log` 的内容不要贴进提交说明、文档或 issue（[AGENTS.md](../AGENTS.md)、[server/AGENTS.md](../server/AGENTS.md)）；turn_dump 的输出带提问和回答的预览，同样别贴进公开渠道。
 
@@ -67,7 +67,7 @@ INFO 级别（正常运行时）不含学生提问和回答的全文，只有长
 uv run python -m server.turn_dump <session_id> [turn_id]
 ```
 
-- `session_id` 就是会话 id（对话请求里的 chat_id）；`turn_id` 可选，给了就把 `message` 表里属于那一轮的行用 `>>` 标出来，表里没有这一轮的行时会明说（写库失败过，或被重试删掉了）。
+- `session_id` 就是会话 id（对话请求里的 chat_id）；`turn_id` 可选，给了就把 `message` 表里属于那一轮的行用 `>>` 标出来，表里没有这一轮的行时会明说（写数据库失败过，或被重试删掉了）。
 - 输出是并排的两份：Redis 的半截回复（status、轮次编号、提问长度、回答长度和首尾各 40 字的预览）+ 数据库 `message` 表的逐行清单（seq、role、turn_id、status、字数）。
 - **只读工具**：不写任何数据，不改任何状态。本机 PostgreSQL 和 Redis 都要在运行。
 
@@ -83,4 +83,4 @@ grep "<轮次编号>" logs/server.log
 
 ## 日志轮转现状
 
-`logs/server.log` 超过 5MB 轮转归档（`log.py` 的 `_SizeLogFile`，归档文件按时间戳命名 `server-<时间戳>.log`）。**归档保留已拍板（2026-11-05）：不做自动删除**，归档的保留与清理归运维部署机的人负责；程序只提醒——每次轮转后统计归档的个数与总大小，超过阈值（默认 20 个或 500MB，`log.py` 里两个常量，要调改常量）就在日志里写一行 warning，提示人工处理。决定记录见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 22 条注记。AGENTS.md 和 TECH.md 里关于日志文件位置、「不要贴进公开渠道」的规矩不变，这里不搬家。
+`logs/server.log` 超过 5MB 轮转归档（`log.py` 的 `_SizeLogFile`，归档文件按时间戳命名 `server-<时间戳>.log`）。**归档保留已决定（2026-11-05）：不做自动删除**，归档的保留与清理归运维部署机的人负责；程序只提醒——每次轮转后统计归档的个数与总大小，超过阈值（默认 20 个或 500MB，`log.py` 里两个常量，要调改常量）就在日志里写一行 warning，提示人工处理。决定记录见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 22 条注记。AGENTS.md 和 TECH.md 里关于日志文件位置、「不要贴进公开渠道」的规矩不变，这里不搬家。
