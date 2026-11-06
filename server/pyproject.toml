@@ -19,10 +19,15 @@ dependencies = [
     "pydantic-settings>=2.16.1",
     "python-multipart>=0.0.33",
     "redis>=8.1.0",
-    "ruff>=0.17.2",
     "sqlalchemy>=2.1.6",
     "starlette>=1.10.0",
     "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "ruff>=0.17.2",
 ]
 
 [project.scripts]
