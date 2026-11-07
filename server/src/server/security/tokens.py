@@ -145,7 +145,7 @@ async def sweep_expired_tokens_loop() -> None:
     这里跑。失败只记一条、不中止循环：数据库恢复以后下一轮会补上。
     每轮扫完，对命中的账号逐个检查：只剩一个有效令牌都没有的账号，
     才推一帧「登录态没了」（reason=expired）——令牌是每台设备一张，
-    一台设备的令牌过期，不能把同账号其它还在登录的设备踢下线
+    一台设备的令牌过期，不能把同账号其它还在登录的设备强制下线
     （总线见 server/pushbus.py）。
     """
     while True:
@@ -156,7 +156,7 @@ async def sweep_expired_tokens_loop() -> None:
             # 本身任何线程调都安全。
             for account_id in swept:
                 # 令牌是每台设备一张：这个账号还有没过期令牌就不推，
-                # 免得把其它还在登录的设备误踢下线；一个不剩才推。
+                # 免得把其它还在登录的设备误当成失效强制下线；一个不剩才推。
                 if await asyncio.to_thread(_account_has_live_token, account_id):
                     continue
                 publish(account_id, {"reason": REASON_EXPIRED})

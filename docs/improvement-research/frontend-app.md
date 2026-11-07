@@ -632,7 +632,7 @@
       key in params ? String(params[key]) : match,
     );
   }
-  // 文案：resetConfirm: '重置后 {username} 所有设备都会被踢下线…'
+  // 文案：resetConfirm: '重置后 {username} 所有设备都会被强制下线…'
   // 用法：t(text.resetConfirm, {username})
   ```
 

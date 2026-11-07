@@ -9,7 +9,7 @@ const zhCN = {
   noAccounts: '暂无账号',
   refreshAccounts: '刷新账号列表',
   resetPassword: '重置密码',
-  resetConfirm: '重置后这个账号所有设备都会被踢下线，要用新密码重新登录。',
+  resetConfirm: '重置后这个账号所有设备都会被强制下线，要用新密码重新登录。',
   passwordShownOnce: '密码只显示这一次，先抄下来。',
   changeMyPassword: '修改我的密码',
   changeMyPasswordWarning: '修改成功后，所有设备都会退出登录，需要用新密码重新登录。',
