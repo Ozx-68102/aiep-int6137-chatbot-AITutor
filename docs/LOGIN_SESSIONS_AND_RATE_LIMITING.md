@@ -75,13 +75,13 @@
 
 **服务端强制**：cookie 校验的续期语句顺带带回标记（见「每请求的成本」一节，不加数据库查询），中间件（`middleware.py`）对标记账号请求 `/api/` 且不在豁免集的路径直接回 403：`{"detail": "请先修改密码，然后才能继续使用", "code": "must_change_password"}`，不进端点。豁免集：`/api/login`（重新登录不拦，响应里带标记）、`/api/password`（改密本身）、`/api/logout`、`/api/profile`、`/api/status`、`/api/avatar`、`/api/events`（推送通道，只读）。非 `/api` 路径（静态资源）不受影响。
 
-**契约**：`LoginResponse` 和 `ProfileResponse` 都带 `must_change_password` 布尔字段（snake_case，与两个模型的既有字段同约定，无别名）。前端已实现（2026-11-06）：登录或页面恢复时标记为真就强制进入修改密码拦截——只渲染强制修改密码页、路径守卫把地址按在 `/password`，不改完不放行；任何业务请求收到 403（code `must_change_password`）也经全局保底事件进入同一拦截。改密成功后服务器在同一事务里吊销全部令牌并清 cookie，页面回登录界面、用新密码重新登录（标记已清，拦截自然解除）。实现在 `src/App.tsx` 的拦截分支与路径守卫、`src/api/http.ts` 的保底事件、`src/components/settings/ChangePasswordPage.tsx` 的强制模式。
+**契约**：`LoginResponse` 和 `ProfileResponse` 都带 `must_change_password` 布尔字段（snake_case，与两个模型的既有字段同约定，无别名）。前端已实现（2026-11-06）：登录或页面恢复时标记为真就强制进入修改密码拦截——只渲染强制修改密码页、路径守卫把地址按在 `/password`，不改完不放行；任何业务请求收到 403（code `must_change_password`）也经全局保底事件进入同一拦截。改密成功后服务器在同一事务里吊销全部令牌并清 cookie，页面回登录界面、用新密码重新登录（标记已清，拦截自然解除）。实现在 `src/App.tsx` 的拦截分支与 `src/hooks/use-auth-flow.ts` 的路径守卫、`src/api/http.ts` 的保底事件、`src/components/settings/ChangePasswordPage.tsx` 的强制模式。
 
 **永久决定（2026-11-06）**：服务器端不对控制台（`/api/admin/*`）一侧做强制改密，这是最终决定，不是等入口补上的过渡状态（维护者原话「服务器不做那么细」；当初的顾虑是控制台没有「改自己密码」的入口，强制会把管理员锁死在控制台外）。控制台重置打上的标记照旧在聊天侧生效。控制台的自助改密入口（前端另一批在做）只为管理员方便，不与强制联动。
 
 ## 推送通道 `/api/events`
 
-服务器侧的登录态失效，原来页面要等下一次请求收到 401 才知道；现在直接推给该账号所有开着的页面。2026-11-06 后端实施完成（进程内总线 `pushbus.py` ＋ `routes/events.py`），**前端已于同日接上**（`src/session/push-channel.ts` ＋ `src/App.tsx` 接线：登录后建连，失效帧进入与带 reason 的 401 同一套留在原页面的过期状态，重新登录后新建连接、不做手动重连；设计脉络见 [ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」）。
+服务器侧的登录态失效，原来页面要等下一次请求收到 401 才知道；现在直接推给该账号所有开着的页面。2026-11-06 后端实施完成（进程内总线 `pushbus.py` ＋ `routes/events.py`），**前端已于同日接上**（`src/session/push-channel.ts` ＋ `src/hooks/use-auth-flow.ts` 接线：登录后建连，失效帧进入与带 reason 的 401 同一套留在原页面的过期状态，重新登录后新建连接、不做手动重连；设计脉络见 [ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」）。
 
 - **建立连接**：登录后 `new EventSource("/api/events")`，同源自动带 cookie，不需要也不能另设请求头。每个标签页各挂一条。未登录 401；控制台的 admin cookie 不认这条通道（也是 401）；admin 角色走聊天侧登录态来连回 403。本端点在「必须改密」豁免集里。
 - **帧**：命名事件 `state`。连上第一帧一定送达 `data: {"valid":true,"account":"<用户名>"}`——断线重连成功后也先收到它，状态天然补齐，前端不用另写补状态逻辑。登录态失效时推 `data: {"valid":false,"reason":"…","message":"…"}`，随后服务器主动结束这条流。心跳是 15 秒一帧的 `: ping` 注释帧（EventSource 自动忽略）。帧风格与聊天流一致（紧凑分隔符、不转义非 ASCII），响应头同一份（no-store ＋ X-Accel-Buffering: no）。

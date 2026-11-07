@@ -95,7 +95,7 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 
 ## 多标签页同步
 
-登录态、语言与头像的跨标签页同步（2026-11-06，[App.tsx](../src/App.tsx) 的 storage 监听；键与辅助函数在 [profile-cache.ts](../src/session/profile-cache.ts)）。storage 事件只派发给「其他」标签页，写入方自己收不到：
+登录态、语言与头像的跨标签页同步（2026-11-06，[use-multi-tab-sync.ts](../src/hooks/use-multi-tab-sync.ts) 的 storage 监听；键与辅助函数在 [profile-cache.ts](../src/session/profile-cache.ts)）。storage 事件只派发给「其他」标签页，写入方自己收不到：
 
 - **资料与头像**：`h2bot-profile` / `h2bot-avatar` 变更当场应用语言、用户名、头像（另一标签页切语言，本页立即跟着换）。`newValue` 为 null（清缓存只发生在登出/被强制退回登录页路径）不做二次处理、更不会把页面退回登录界面——主动登出由下面的登出标记接管，服务器侧的强制下线照旧靠 401 保底处理。
 - **主动登出标记**：键 `h2bot-logout`，值是写入时刻的时间戳（只用来区分「新标记」，数值无业务含义）。`signOut` 成功写入，登录（`openAccount`）清除。其他标签页听到且 `newValue ≠ null` → `enterLoginGuarded`：已经处于「会话过期后留在原页面的状态」的标签页保持原样（横幅挂着、输入锁着，不升级成整页清空），否则走整页登录路径；正打的字照旧存进 `h2bot-unsent`。写入方收不到自己的事件，不会把自己强制退回登录页；`openAccount` 清除标记时会广播一次 `newValue` 为 null 的 storage 事件，消费方只认非 null 的写入，不会误把用户强制退回登录页。各标签页在处理登出标记时还会把自己保存的全部会话草稿清掉（2026-11-06 补：sessionStorage 按标签页隔离，登出方清不到别的标签页，只能各清各的）。
@@ -133,7 +133,7 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 
 ## 会话过期后留在原页面的状态
 
-会话类 401 现在带 `reason` 字段（词表和后端实现见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「401 带原因」）。页面这边（[App.tsx](../src/App.tsx) 的 `handleAuthError`）：
+会话类 401 现在带 `reason` 字段（词表和后端实现见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「401 带原因」）。页面这边（[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的 `handleAuthError`）：
 
 - **进入条件**：auth 是 ready 时收到带 reason 的 401 → 进入留在原页面的过期状态（`sessionInvalid`：expired 或 disabled）。不带 reason 的 401（老后端）保守回退整页 `enterLogin` 路径；checking/anonymous 阶段的 401 照旧走整页登录屏。
 - **留在原页面的过期状态保留什么**：会话列表、消息、草稿、profile 缓存全部原样不动；输入区禁用（`inputLocked` 把 `sessionInvalid` 算进去）；输入区分隔线上方挂**常驻警示条，不可关闭**——expired 用琥珀的「有状况」语气 + 「重新登录」按钮（`logInAgain` 键），disabled 用红色出错语气、不给按钮（终态，登录也没用）。白底黑字、语义色只在图标上（[UI_WARNINGS.md](UI_WARNINGS.md) 的颜色规则）。
@@ -146,7 +146,7 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 
 密码来自别人手的账号（预设密码、被控制台重置过密码），服务器带着 `must_change_password` 标记（迁移 0002），中间件对它请求非豁免路径一律回 403（code `must_change_password`）。前端对应的拦截（2026-11-06）：
 
-- **进入拦截的三个来源**：登录响应里标记为真；页面恢复时拉到的资料里标记为真；任何请求收到 403 且 code 为 `must_change_password`（[http.ts](../src/api/http.ts) 在唯一的响应体解析口广播全局事件，[App.tsx](../src/App.tsx) 监听后进入拦截）。
+- **进入拦截的三个来源**：登录响应里标记为真；页面恢复时拉到的资料里标记为真；任何请求收到 403 且 code 为 `must_change_password`（[http.ts](../src/api/http.ts) 在唯一的响应体解析口广播全局事件，[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 监听后进入拦截）。
 - **拦截期间的行为**：只渲染强制修改密码页（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的强制模式：不显示取消/返回入口，顶部一条白底说明横幅解释为什么被拦），正常聊天主体一概不渲染；路径守卫把地址按在 `/password`——手输别的地址、用浏览器前进后退都会被送回。
 - **解除**：改密成功后服务器在同一事务里吊销全部令牌并清 cookie，「改完接着用」物理上做不到——页面沿用既有成功路径回登录界面（提示「密码已修改，请用新密码重新登录」），用新密码重新登录；登录响应里标记已是 false，拦截解除。万一标记仍为真，拦截重新生效。
 - **控制台一侧**：服务器不做强制改密（维护者永久决定，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」）。控制台的「修改我的密码」入口（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）纯自助；修改成功后所有设备同样下线，回控制台登录界面用新密码重新登录。

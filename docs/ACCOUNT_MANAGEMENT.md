@@ -69,7 +69,7 @@
 - [x] 登录时为真就跳改密码页。（2026-11-06 前端已实现：登录响应或资料响应里标记为真就进入强制拦截——只渲染强制修改密码页，路径守卫把地址按在 `/password`；任何请求收到 403 且 code 为 `must_change_password` 也会经全局保底事件进入同一拦截。改密成功后服务器吊销全部令牌并清 cookie，页面回登录界面、用新密码重新登录——标记已清，拦截解除。）
 - [x] 后端强制：被标记账号请求豁免清单之外的 `/api/` 路径回 403「请先修改密码」（code `must_change_password`）。实际豁免清单比原设计宽：登录、改密、退出、资料、状态、头像、推送七条（见 `middleware.py`）。聊天侧已强制；控制台一侧（`/api/admin/*`）不强制——维护者永久决定（2026-11-06，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」的「永久决定」段）。
 
-注记（2026-11-06 更新）：「首次登录强制改密」流程已全链路实施——后端列与中间件 403（上面两条已勾）、前端读取标记并强制拦截（[src/App.tsx](../src/App.tsx) 的拦截分支与路径守卫）、403 保底事件（[src/api/http.ts](../src/api/http.ts)）、修改密码页强制模式（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的 `forced`）。控制台「修改我的密码」入口同日补上（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）：纯自助、不与强制联动（永久决定见上）；修改成功后该账号所有设备下线，回控制台登录界面用新密码重新登录。
+注记（2026-11-06 更新）：「首次登录强制改密」流程已全链路实施——后端列与中间件 403（上面两条已勾）、前端读取标记并强制拦截（[src/App.tsx](../src/App.tsx) 的拦截分支与 [use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的路径守卫）、403 保底事件（[src/api/http.ts](../src/api/http.ts)）、修改密码页强制模式（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的 `forced`）。控制台「修改我的密码」入口同日补上（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）：纯自助、不与强制联动（永久决定见上）；修改成功后该账号所有设备下线，回控制台登录界面用新密码重新登录。
 
 ## 忘记密码
 
@@ -151,7 +151,7 @@
 
 > **2026-11-05：最小 HTTP 版已实现**（本节的推送通道仍未做）：会话类 401 的响应体在 `detail` 之外多带一个 `reason` 字段，词表 `expired`（带了 cookie 但令牌不认识/已过期/被吊销，无法也无需细分）/ `disabled`（账号被停用——`account.disabled` 列还没建，后端暂时发不出这个值，前端已按词表接好）。没带 cookie 的匿名请求不算会话类，401 维持现状（不带 reason）。前端收到带 reason 的 401 时聊天页在原页面保留：会话、消息、草稿、profile 缓存都不动，输入区禁用、输入区上方挂常驻警示条；`expired` 给「重新登录」按钮，在原页面弹出 Modal 里的 LoginScreen，成功后走 `openAccount` 在原页面恢复；`disabled` 不给登录按钮。没有 reason 的 401（老后端）回退旧的整页登录路径。下面的轮询保底处理和发送前预检仍未做。
 
-> **2026-11-06：后端推送通道已实现**（`GET /api/events`；进程内总线 `pushbus.py` ＋ 三个触发点：定时清扫扫掉过期令牌→`expired`、改密吊销→`password_changed`、控制台重置吊销→`admin_reset`）。协议按本节设计稿：`state` 命名事件、`{valid, reason, message}` 信封、连上先发一次状态、断线重连自然补齐。与设计稿的出入：reason 由单一 `revoked` 细化成上面三个词（`expired` 与会话类 401 的 reason 同词，前端可当一套词表用）；`disabled` 仍发不出（列没建，缺口同前）；**退出登录改为不推送**（用户自己的动作；跨标签退出感知已由前端 localStorage 标记承担，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「已知限制」）；推完 `valid:false` 服务器主动关流，客户端重新登录后新建连接而不依赖自动重连。前端已于同日接上（`src/session/push-channel.ts`：登录后建连，失效帧进入与带 reason 的 401 同一套「留在原页面的过期状态」，重新登录后新建连接、不做手动重连；接线在 `src/App.tsx`）；完整对接契约在 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道 `/api/events`」一节。
+> **2026-11-06：后端推送通道已实现**（`GET /api/events`；进程内总线 `pushbus.py` ＋ 三个触发点：定时清扫扫掉过期令牌→`expired`、改密吊销→`password_changed`、控制台重置吊销→`admin_reset`）。协议按本节设计稿：`state` 命名事件、`{valid, reason, message}` 信封、连上先发一次状态、断线重连自然补齐。与设计稿的出入：reason 由单一 `revoked` 细化成上面三个词（`expired` 与会话类 401 的 reason 同词，前端可当一套词表用）；`disabled` 仍发不出（列没建，缺口同前）；**退出登录改为不推送**（用户自己的动作；跨标签退出感知已由前端 localStorage 标记承担，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「已知限制」）；推完 `valid:false` 服务器主动关流，客户端重新登录后新建连接而不依赖自动重连。前端已于同日接上（`src/session/push-channel.ts`：登录后建连，失效帧进入与带 reason 的 401 同一套「留在原页面的过期状态」，重新登录后新建连接、不做手动重连；接线在 `src/hooks/use-auth-flow.ts`）；完整对接契约在 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道 `/api/events`」一节。
 
 三层，各管一段：
 
@@ -211,7 +211,7 @@
 
 ## 会话过期时别把用户的东西弄丢
 
-- [x] 页面加 `expired` 状态：聊天页在原页面保留，输入框上方提示「会话已过期，请重新登录」+ 一个「重新登录」按钮，登录框弹出来；不清会话列表、不清草稿。（现在的 `enterLogin` 是一次性清空，[src/App.tsx](../src/App.tsx)）（2026-11-05 已实现最小 HTTP 版：401 带 `reason` 进入留在原页面的过期状态；2026-11-06 推送通道接上后，服务器侧失效也实时进入同一状态；`enterLogin` 保留给主动退出和不带 reason 的 401 保底处理。见「会话状态通道」一节的注记）
+- [x] 页面加 `expired` 状态：聊天页在原页面保留，输入框上方提示「会话已过期，请重新登录」+ 一个「重新登录」按钮，登录框弹出来；不清会话列表、不清草稿。（现在的 `enterLogin` 是一次性清空，[src/hooks/use-auth-flow.ts](../src/hooks/use-auth-flow.ts)）（2026-11-05 已实现最小 HTTP 版：401 带 `reason` 进入留在原页面的过期状态；2026-11-06 推送通道接上后，服务器侧失效也实时进入同一状态；`enterLogin` 保留给主动退出和不带 reason 的 401 保底处理。见「会话状态通道」一节的注记）
 - [ ] 发送前预检：点发送先发一个轻量鉴权请求，401 就不发，把草稿保住。
 - [x] 被强制下线时把输入框里的内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。（commit 6da0b34）
 - [ ] `login_token` 加 `revoked_at`：撤销的时候标记而不是删行，服务器才分得清「令牌不认识 / 被撤销 / 账号被停用」，页面也能给出对应的一句话。
