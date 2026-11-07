@@ -11,6 +11,12 @@ export type Profile = {
   locale: Locale;
   /** 头像的地址。换头像以后地址会变（后面带内容哈希）。 */
   avatarUrl: string;
+  /**
+   * 这个账号是不是被标了「必须修改密码」（预设密码、被控制台重置过密码）。
+   * 为真时用户要先自己改出一个新密码才能继续使用
+   *（docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」）。
+   */
+  mustChangePassword: boolean;
 };
 
 export async function readProfile(): Promise<Profile> {
@@ -81,5 +87,7 @@ function parseProfile(value: unknown): Profile {
     username: value.username,
     locale: value.locale,
     avatarUrl,
+    // 字段缺失按 false：只有服务器明确说 true 才进入拦截。
+    mustChangePassword: value.must_change_password === true,
   };
 }

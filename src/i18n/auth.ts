@@ -30,6 +30,8 @@ const zhCN = {
   sessionExpired: '会话已过期，请重新登录',
   accountDisabled: '账号已被停用，请联系管理员',
   logInAgain: '重新登录',
+  mustChangePasswordNotice: '这个账号的密码是别人设置的，请先改一个新密码，然后才能继续使用。',
+  passwordResetByAdmin: '管理员重置了你的密码，请重新登录',
 };
 
 export type AuthCopy = typeof zhCN;
@@ -63,6 +65,8 @@ const zhTW: AuthCopy = {
   sessionExpired: '會話已過期，請重新登入',
   accountDisabled: '帳號已被停用，請聯絡管理員',
   logInAgain: '重新登入',
+  mustChangePasswordNotice: '這個帳號的密碼是別人設置的，請先改一個新密碼，然後才能繼續使用。',
+  passwordResetByAdmin: '管理員重設了你的密碼，請重新登入',
 };
 
 const en: AuthCopy = {
@@ -95,6 +99,9 @@ const en: AuthCopy = {
   sessionExpired: 'Your session has expired. Please log in again.',
   accountDisabled: 'This account has been disabled. Please contact your administrator.',
   logInAgain: 'Log in again',
+  mustChangePasswordNotice:
+    'The password for this account was set by someone else. Please choose a new password before you continue.',
+  passwordResetByAdmin: 'An administrator reset your password. Please log in again.',
 };
 
 export const auth: Record<Locale, AuthCopy> = {'zh-CN': zhCN, 'zh-TW': zhTW, en};

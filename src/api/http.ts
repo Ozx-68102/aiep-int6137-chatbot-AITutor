@@ -5,18 +5,41 @@
  */
 export type AuthFailureReason = 'expired' | 'disabled';
 
+/**
+ * 403「必须修改密码」拦截的 code 值（契约见
+ * docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」）：被服务器打了
+ * 标记的账号请求豁免清单之外的路径，会收到 403、响应体
+ * {"detail":"请先修改密码，然后才能继续使用","code":"must_change_password"}。
+ */
+export const mustChangePasswordCode = 'must_change_password';
+
+/**
+ * 收到上面那种 403 时广播的自定义事件名（与 src/session/poll.ts 的
+ * networkOkEvent 同款做法）：App.tsx 监听它进入强制修改密码的拦截。
+ * 事件同步派发：监听器在错误往上抛之前就会执行。
+ */
+export const mustChangePasswordEvent = 'h2bot:must-change-password';
+
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string | null;
   /** 只有 401 才可能有：会话失效的原因。其余状态、老后端的 401 都是 null。 */
   readonly reason: AuthFailureReason | null;
+  /** 响应体里的业务标记（比如 403 的 must_change_password）；没有就是 null。 */
+  readonly code: string | null;
 
-  constructor(status: number, detail: string | null, reason: AuthFailureReason | null = null) {
+  constructor(
+    status: number,
+    detail: string | null,
+    reason: AuthFailureReason | null = null,
+    code: string | null = null,
+  ) {
     super(detail ?? '');
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
     this.reason = reason;
+    this.code = code;
   }
 }
 
@@ -88,7 +111,7 @@ export async function requestEmpty(
       }
       if (!response.ok) {
         const failure = await readFailure(response);
-        throw new ApiError(response.status, failure.detail, failure.reason);
+        throw new ApiError(response.status, failure.detail, failure.reason, failure.code);
       }
     },
     {retry: autoRetry(init)},
@@ -104,7 +127,7 @@ export async function requestJson(
       const response = await request(path, init);
       if (!response.ok) {
         const failure = await readFailure(response);
-        throw new ApiError(response.status, failure.detail, failure.reason);
+        throw new ApiError(response.status, failure.detail, failure.reason, failure.code);
       }
 
       try {
@@ -145,21 +168,31 @@ async function request(
   }
 }
 
-/** 非 2xx 响应体里的完整失败信息：中文的 detail 句子 + 401 的 reason 词。 */
+/**
+ * 非 2xx 响应体里的完整失败信息：中文的 detail 句子 + 401 的 reason 词 +
+ * 业务标记 code（比如 403 的 must_change_password）。
+ */
 export type ApiFailure = {
   detail: string | null;
   reason: AuthFailureReason | null;
+  code: string | null;
 };
 
 export async function readFailure(response: Response): Promise<ApiFailure> {
   try {
     const body: unknown = await response.json();
     if (!isRecord(body) || typeof body.detail !== 'string') {
-      return {detail: null, reason: null};
+      return {detail: null, reason: null, code: null};
     }
-    return {detail: body.detail, reason: readReason(response.status, body)};
+    const code = typeof body.code === 'string' ? body.code : null;
+    if (response.status === 403 && code === mustChangePasswordCode) {
+      // 全局保底：任何请求被「必须修改密码」的 403 拦下，都在这里广播一次
+      // 事件，App.tsx 监听后进入强制修改密码的拦截，不用每个调用方各自处理。
+      window.dispatchEvent(new Event(mustChangePasswordEvent));
+    }
+    return {detail: body.detail, reason: readReason(response.status, body), code};
   } catch {
-    return {detail: null, reason: null};
+    return {detail: null, reason: null, code: null};
   }
 }
 

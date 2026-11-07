@@ -15,6 +15,7 @@ import {translations} from '../../i18n/index.ts';
 import {readCachedProfile} from '../../session/profile-cache.ts';
 import {htmlLang, localeFromSystem, type Locale} from '../../type/locale.ts';
 import {AdminLoginForm} from './AdminLoginForm.tsx';
+import {ChangeMyPasswordDialog} from './ChangeMyPasswordDialog.tsx';
 import {ConfirmAdminLogout} from './ConfirmAdminLogout.tsx';
 import {ConfirmResetPassword} from './ConfirmResetPassword.tsx';
 import {NewPasswordPanel} from './NewPasswordPanel.tsx';
@@ -41,6 +42,13 @@ export function AdminConsole() {
   const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  // 「修改我的密码」弹窗（纯自助入口，服务器端不对控制台做强制改密）。
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  // 本页这次登录的管理员用户名：改密弹窗的强度表用它查「密码含用户名」。
+  // 挂载时靠 cookie 恢复登录的话拿不到（接口不回「我是谁」），就 null。
+  const [adminUsername, setAdminUsername] = useState<string | null>(null);
+  // 登录表单上方的中性提示（改密成功后「请用新密码重新登录」）。
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
 
   // lang 和标签页标题走 useDocumentMeta（O8：与 ChatApp 的同款效果去重）；
   // 控制台整页独立，标题带上页面名（N11）。
@@ -99,7 +107,8 @@ export function AdminConsole() {
   const pollSkipRef = useRef({dialogOpen: false, refreshBusy: false});
   useEffect(() => {
     pollSkipRef.current = {
-      dialogOpen: confirmLogout || resetUsername !== null || resetResult !== null,
+      dialogOpen:
+        confirmLogout || resetUsername !== null || resetResult !== null || changePasswordOpen,
       refreshBusy,
     };
   });
@@ -149,8 +158,10 @@ export function AdminConsole() {
     }
     setLoginBusy(true);
     setLoginError(null);
+    setLoginNotice(null);
     try {
-      await adminLogin(username, password);
+      const session = await adminLogin(username, password);
+      setAdminUsername(session.username);
       setAccounts(await fetchAdminAccounts());
     } catch (error) {
       // 401（密码不对）、403（这个账号不是管理员）都带着中文 detail：简中
@@ -191,6 +202,8 @@ export function AdminConsole() {
     setResetUsername(null);
     setResetError(null);
     setResetResult(null);
+    setChangePasswordOpen(false);
+    setLoginNotice(null);
     setLoginError(detail);
   }
 
@@ -226,6 +239,7 @@ export function AdminConsole() {
       <AdminLoginForm
         locale={locale}
         error={loginError}
+        notice={loginNotice}
         busy={loginBusy}
         onSubmit={(username, password) => {
           void submitLogin(username, password);
@@ -257,6 +271,15 @@ export function AdminConsole() {
             ) : (
               <RotateCw aria-hidden="true" className="size-4" />
             )}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => {
+              setChangePasswordOpen(true);
+            }}
+          >
+            <span lang={htmlLang[locale]}>{text.changeMyPassword}</span>
           </button>
           <button
             type="button"
@@ -339,6 +362,24 @@ export function AdminConsole() {
         result={resetResult}
         onClose={() => {
           setResetResult(null);
+        }}
+      />
+      <ChangeMyPasswordDialog
+        locale={locale}
+        open={changePasswordOpen}
+        username={adminUsername}
+        onClose={() => {
+          setChangePasswordOpen(false);
+        }}
+        onSuccess={() => {
+          // 成功即吊销该账号全部登录（含控制台自己这条），cookie 已被服务器
+          // 清掉：回登录界面，带一条「请用新密码重新登录」的提示。
+          enterLoginForm(null);
+          setLoginNotice(text.passwordChanged);
+        }}
+        onReLogin={(detail) => {
+          // 登录态已失效：回登录界面，带上服务器给的说法。
+          enterLoginForm(detail);
         }}
       />
       <ConfirmAdminLogout

@@ -9,7 +9,7 @@ import {serviceNoticeText, useServiceStatus} from './hooks/use-service-status.ts
 import {useTurnEngine} from './hooks/use-turn-engine.ts';
 import {connectionFailure, explain} from './api/failure.ts';
 import {sendFeedback} from './api/feedback.ts';
-import {ApiError} from './api/http.ts';
+import {ApiError, mustChangePasswordCode, mustChangePasswordEvent} from './api/http.ts';
 import {logout, readProfile} from './api/profile.ts';
 import {defaultAvatarUrl, type Profile} from './api/profile.ts';
 import {createSession, emptySession, listSessions, login, sessionsFromList} from './api/session.ts';
@@ -25,7 +25,7 @@ import {Modal} from './components/shell/Modal.tsx';
 import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Sidebar} from './components/sidebar/Sidebar.tsx';
 import {Toast, type ToastItem} from './components/toast/Toast.tsx';
-import {translations} from './i18n/index.ts';
+import {translations, type Messages} from './i18n/index.ts';
 import {
   avatarCacheKey,
   clearCachedProfile,
@@ -39,6 +39,7 @@ import {
 } from './session/profile-cache.ts';
 import type {CachedProfile} from './session/profile-cache.ts';
 import {clearAllDrafts, clearDraft, readDraft, saveDraft} from './session/drafts.ts';
+import {openPushChannel} from './session/push-channel.ts';
 import {clearUnsent, readUnsent, saveUnsent} from './session/unsent.ts';
 import {titleFromQuestion} from './session/title.ts';
 import {BrowserRouter, Route, Routes, useLocation, useNavigate} from 'react-router';
@@ -62,6 +63,45 @@ const AdminConsole = lazy(() =>
 // 模块级变量跨组件挂载卸载存活，刷新页面即复位——刷新后就拿到新分块了，
 // 一次就够。
 let chunkFailureNoticed = false;
+
+/**
+ * 「会话失效、留在原页面」状态的原因：401 的 reason 词表（expired/disabled）
+ * 加上推送通道的失效原因（password_changed/admin_reset）；推送帧里不认识的
+ * reason 词一律记成 unknown——也按失效处理，文案退回服务器推来的 message。
+ */
+type SessionInvalidReason = 'expired' | 'disabled' | 'password_changed' | 'admin_reset' | 'unknown';
+
+/** 留在原页面的失效状态：原因 + 服务器推来的建议文案（只在 unknown 时用）。 */
+type SessionInvalid = {reason: SessionInvalidReason; message: string | null};
+
+/** 推送帧的 reason 词 → 页面状态词；词表之外的词一律 unknown。 */
+function toSessionInvalidReason(reason: string): SessionInvalidReason {
+  if (
+    reason === 'expired' ||
+    reason === 'disabled' ||
+    reason === 'password_changed' ||
+    reason === 'admin_reset'
+  ) {
+    return reason;
+  }
+  return 'unknown';
+}
+
+/** 会话失效警示条的文案：每个原因配固定的本地化词条；unknown 退回服务器推来的 message。 */
+function sessionInvalidText(invalid: SessionInvalid, text: Messages): string {
+  switch (invalid.reason) {
+    case 'expired':
+      return text.sessionExpired;
+    case 'disabled':
+      return text.accountDisabled;
+    case 'password_changed':
+      return text.passwordChanged;
+    case 'admin_reset':
+      return text.passwordResetByAdmin;
+    case 'unknown':
+      return invalid.message ?? text.sessionExpired;
+  }
+}
 
 /**
  * 接住动态分块加载失败（发布期间新旧版本交错的窗口）：Vite 对动态 import 失败统一派
@@ -161,8 +201,18 @@ function ChatApp() {
   // 留在原页面的过期状态（docs/ACCOUNT_MANAGEMENT.md 会话状态通道的最小 HTTP 版）：
   // auth 保持 ready，聊天页原样保留、输入区禁用、输入区上方挂常驻警示条。
   // expired 可以就地重新登录（Modal 里弹 LoginScreen）；disabled 是终态，只给提示。
-  const [sessionInvalid, setSessionInvalid] = useState<'expired' | 'disabled' | null>(null);
+  // 触发来源两个：带 reason 的 401（handleAuthError），以及推送通道的失效帧
+  //（handlePushInvalid，原因多三种：密码已修改、被管理员重置、不认识的词）。
+  const [sessionInvalid, setSessionInvalid] = useState<SessionInvalid | null>(null);
   const [reloginOpen, setReloginOpen] = useState(false);
+  // 推送通道的世代编号：重新登录成功后加一，通道效果随之关掉旧连接、新建
+  // 一条（旧连接在登录态失效后已经彻底死了，不复用）。
+  const [pushEpoch, setPushEpoch] = useState(0);
+  // 「必须修改密码」拦截：密码来自别人手的账号（预设密码、被控制台重置过
+  // 密码）被服务器打了标记，本人改出一个新密码之前不放行其他功能。来源
+  // 三个：登录响应、profile 响应，以及任何请求收到的 403（http.ts 的全局
+  // 保底事件）。契约见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」。
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(() => new Set());
   const [toast, setToast] = useState<ToastItem | null>(null);
   const draftRef = useRef(draft);
@@ -175,6 +225,11 @@ function ChatApp() {
   // 直接读后面才声明的函数会被 React Compiler 记成「初始化期间读取」。
   // 镜像在挂载后的第一帧就完成，storage 事件不可能比它更早到。
   const enterLoginGuardedRef = useRef<((detail: string | null) => void) | null>(null);
+  // 推送失效的回调同样走 ref：通道效果只注册一次，回调要读到最新的一份
+  //（和 enterLoginGuardedRef 同一做法，镜像效果在函数声明之后）。
+  const handlePushInvalidRef = useRef<((reason: string, message: string | null) => void) | null>(
+    null,
+  );
   const toastCount = useRef(0);
   const text = translations[locale];
   const loginError = loginOffline ? text.connectionError : loginDetail;
@@ -260,23 +315,25 @@ function ChatApp() {
   // 会话级的提示都在输入区分隔线上方的警示框里（聊天滚动区与输入区之间的流内节点），只有一种样子。
   const warnings: WarningItem[] = [];
   if (sessionInvalid !== null) {
-    // 会话失效的常驻警示条，不可关闭：expired 用琥珀的「有状况」语气（可以
-    // 就地重新登录）；disabled 用红色出错语气（终态，登录也没用，不给按钮）。
-    // 白底黑字，语义色只在图标上（docs/UI_WARNINGS.md）。
+    // 会话失效的常驻警示条，不可关闭：disabled 用红色出错语气（终态，登录也
+    // 没用，不给按钮）；其余原因（含推送来的密码已修改、被管理员重置）都是
+    // 琥珀的「有状况」语气，可以就地重新登录。白底黑字，语义色只在图标上
+    //（docs/UI_WARNINGS.md）。
+    const terminal = sessionInvalid.reason === 'disabled';
     warnings.push({
       id: 'session-invalid',
-      tone: sessionInvalid === 'disabled' ? 'error' : 'warning',
-      text: sessionInvalid === 'disabled' ? text.accountDisabled : text.sessionExpired,
-      ...(sessionInvalid === 'expired'
-        ? {
+      tone: terminal ? 'error' : 'warning',
+      text: sessionInvalidText(sessionInvalid, text),
+      ...(terminal
+        ? {}
+        : {
             action: {
               label: text.logInAgain,
               onClick: () => {
                 setReloginOpen(true);
               },
             },
-          }
-        : {}),
+          }),
     });
   }
   if (serviceNotice !== null) {
@@ -324,6 +381,10 @@ function ChatApp() {
           // 随之作废，立即进入登录界面路径，不等下一次 401。已经在
           // 留在原页面的过期状态里时横幅挂着、输入锁着，就保持原地（enterLoginGuarded 的
           // 语义），不升级成整页清空。
+          // 草稿存在 sessionStorage、按标签页各存各的：登出的那个标签页清不到
+          // 这一份，每个标签页听到广播都清自己的（对齐 signOut 里 clearAllDrafts
+          // 的「共用电脑不留半截字」）。
+          clearAllDrafts();
           enterLoginGuardedRef.current?.(null);
         }
         return;
@@ -353,6 +414,45 @@ function ChatApp() {
       window.removeEventListener('storage', onStorage);
     };
   }, []);
+
+  // http.ts 的全局保底：任何请求收到 403 且响应体带 must_change_password
+  // 标记，都会广播这个事件，页面在这里进入强制修改密码的拦截。事件是同步
+  // 派发的：监听器在错误继续往上抛之前就会执行，各调用方不用各自处理。
+  useEffect(() => {
+    function onMustChangePassword() {
+      setMustChangePassword(true);
+    }
+    window.addEventListener(mustChangePasswordEvent, onMustChangePassword);
+    return () => {
+      window.removeEventListener(mustChangePasswordEvent, onMustChangePassword);
+    };
+  }, []);
+
+  // 推送通道 /api/events（docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「推送通道」）：
+  // 登录态有效期间挂着一条连接，服务器主动推「你已被强制下线」（令牌过期、
+  // 密码已修改、被管理员重置），不用等下一次请求收到 401。进入登录态
+  //（auth 不是 ready）时效果清理、连接关闭；重新登录成功后 pushEpoch 加一，
+  // 效果重跑、新建一条连接，不复用旧的。每标签页一条，同源自动带 cookie。
+  useEffect(() => {
+    if (auth !== 'ready') {
+      return;
+    }
+    const channel = openPushChannel((reason, message) => {
+      handlePushInvalidRef.current?.(reason, message);
+    });
+    return () => {
+      channel.close();
+    };
+  }, [auth, pushEpoch]);
+
+  // 拦截期间的路径守卫：用户手输别的地址、用浏览器前进后退离开，都送回
+  // /password。渲染分支本身不看地址（拦截生效期间只渲染强制改密页），这里
+  // 把地址栏也按住，两边一致。
+  useEffect(() => {
+    if (auth === 'ready' && mustChangePassword && location.pathname !== '/password') {
+      void navigate('/password', {replace: true});
+    }
+  }, [auth, mustChangePassword, location.pathname, navigate]);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -399,6 +499,8 @@ function ChatApp() {
           setLocale(profile.locale);
           setAvatarUrl(profile.avatarUrl);
           saveCachedProfile({username: profile.username, locale: profile.locale});
+          // 页面恢复时拿到「必须修改密码」标记：进入拦截。
+          setMustChangePassword(profile.mustChangePassword);
         }
         setAuth('ready');
       },
@@ -408,6 +510,18 @@ function ChatApp() {
         }
         if (error instanceof ApiError && error.status === 401) {
           setAuth('anonymous');
+          return;
+        }
+        if (
+          error instanceof ApiError &&
+          error.status === 403 &&
+          error.code === mustChangePasswordCode
+        ) {
+          // 被标了「必须修改密码」的账号刷新页面：会话列表请求被拦成 403，
+          // 但登录态还有效。直接进入强制修改密码的拦截，不回登录界面——改密、
+          // 退出、资料这些入口都在服务器的豁免清单里，拦截期间这些入口照常可用。
+          setMustChangePassword(true);
+          setAuth('ready');
           return;
         }
         if (connectionFailure(error)) {
@@ -479,6 +593,8 @@ function ChatApp() {
     setConfirmLogout(false);
     setSessionInvalid(null);
     setReloginOpen(false);
+    // 回登录界面就解除拦截：标记还在不在，由下一次登录响应说了算。
+    setMustChangePassword(false);
     profileApiRef.current.setProfileError(null);
     passwordRef.current.setError(null);
     sessionActionsRef.current.titleSaves.current.clear();
@@ -497,10 +613,19 @@ function ChatApp() {
    */
   function handleAuthError(error: ApiError) {
     if (error.reason === 'expired' || error.reason === 'disabled') {
-      setSessionInvalid(error.reason);
+      setSessionInvalid({reason: error.reason, message: null});
       return;
     }
     enterLogin(error.detail);
+  }
+
+  /**
+   * 推送通道收到 valid:false：与收到带 reason 的 401 完全同一套行为——
+   * 会话、消息、草稿原地保留，输入区禁用、挂常驻警示条。不认识的 reason
+   * 词也按失效处理（文案退回帧里的 message）。
+   */
+  function handlePushInvalid(reason: string, message: string | null) {
+    setSessionInvalid({reason: toSessionInvalidReason(reason), message});
   }
 
   /**
@@ -520,6 +645,12 @@ function ChatApp() {
   // 镜像效果位于声明之前。storage 监听只读 ref，不直接捕获函数。
   useEffect(() => {
     enterLoginGuardedRef.current = enterLoginGuarded;
+  });
+
+  // handlePushInvalid 的 ref 镜像单独放在它的声明之后：和 enterLoginGuardedRef
+  // 同一个理由，React Compiler 不接受在函数声明之前把它捕获进闭包。
+  useEffect(() => {
+    handlePushInvalidRef.current = handlePushInvalid;
   });
 
   function updateSession(sessionId: string, change: (session: Session) => Session) {
@@ -590,6 +721,12 @@ function ChatApp() {
     engineRef.current.bumpThreadRetry();
     setSessionInvalid(null);
     setReloginOpen(false);
+    // 登录响应里的「必须修改密码」标记：为真就进入拦截（只渲染强制改密页），
+    // 为假解除拦截、恢复正常。
+    setMustChangePassword(result.must_change_password);
+    // 重新登录成功后推送通道新建一条连接：auth 本来就是 ready 时（在原页面
+    // 重新登录）靠这个编号让通道效果重跑；全新登录时 auth 的变化同样触发。
+    setPushEpoch((current) => current + 1);
     let next = sessionsFromList(result.sessions);
     setSessions(next);
     routingRef.current.claimPath(next);
@@ -609,6 +746,9 @@ function ChatApp() {
         setLocale(profile.locale);
         setAvatarUrl(profile.avatarUrl);
         saveCachedProfile({username: profile.username, locale: profile.locale});
+        // 重新拉一份 profile 核对标记：改密成功时服务器在同一个事务里清掉
+        // 它；万一这里还拿到 true，拦截重新生效。
+        setMustChangePassword(profile.mustChangePassword);
       })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 401) {
@@ -848,6 +988,23 @@ function ChatApp() {
     );
   }
 
+  // 「必须修改密码」拦截：标记为真就只渲染强制改密页，正常聊天主体一概不
+  // 渲染；地址由上面的守卫效果按在 /password。改密成功后服务器吊销这个账号
+  // 的全部登录（含当前设备），走 use-password-change 既有的成功路径回登录
+  // 界面；重新登录后由登录响应里的标记解除拦截。
+  if (mustChangePassword) {
+    return (
+      <ChangePasswordPage
+        locale={locale}
+        username={username}
+        error={password.error}
+        busy={password.busy}
+        forced
+        onSubmit={password.submit}
+      />
+    );
+  }
+
   // 修改密码是独立的一页，不是弹窗：没有背景可误点，密码输一半不会丢。
   // 地址是 /password，刷新和后退都是页面的行为，不是弹窗的。
   if (location.pathname === '/password') {
@@ -1026,7 +1183,7 @@ function ChatApp() {
           任何状态；登录失败弹窗不关，错误留在表单里；成功由 openAccount 就地
           恢复（刷新 profile 和会话列表）。disabled 不提供（终态，登录也没用）。 */}
       <Modal
-        open={sessionInvalid === 'expired' && reloginOpen}
+        open={sessionInvalid !== null && sessionInvalid.reason !== 'disabled' && reloginOpen}
         titleId="relogin-title"
         panelClass="w-full max-w-sm p-0"
         onClose={() => {

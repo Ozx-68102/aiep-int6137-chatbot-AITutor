@@ -11,11 +11,14 @@ import {htmlLang, type Locale} from '../../type/locale.ts';
 export function AdminLoginForm({
   locale,
   error,
+  notice,
   busy,
   onSubmit,
 }: {
   locale: Locale;
   error: string | null;
+  /** 登录表单上方的中性提示（比如「密码已修改，请用新密码重新登录」）。 */
+  notice?: string | null;
   busy: boolean;
   onSubmit: (username: string, password: string) => void;
 }) {
@@ -70,6 +73,11 @@ export function AdminLoginForm({
             >
               <CircleAlert className="size-4 shrink-0 text-error" aria-hidden="true" />
               <span>{error}</span>
+            </p>
+          ) : null}
+          {notice ? (
+            <p className="m-0 text-info" lang={htmlLang[locale]}>
+              {notice}
             </p>
           ) : null}
           <button

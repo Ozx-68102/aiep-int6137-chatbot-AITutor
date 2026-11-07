@@ -1,53 +1,12 @@
-import {CircleAlert} from 'lucide-react';
+import {CircleAlert, TriangleAlert} from 'lucide-react';
 import {useState} from 'react';
 import {format, translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {PasswordStrength} from './PasswordStrength.tsx';
-import {isWeakPassword} from './password-strength.ts';
-
-/**
- * 三个框都只收英文键盘上打得出来的连续字符（可打印 ASCII，不含空格）：
- * 空格、中文、emoji、全角符号在输入时直接滤掉，不报错。中文多半是粘贴
- * 或输入法误触带进来的，静默丢掉比弹一句红字友好。
- * 后端 check_password_policy 有同一条硬门槛。
- *
- * 旧密码框也过滤：数据库里的密码都是经过策略存进去的，不含空格和非 ASCII，
- * 过滤不会把人锁在外面。登录页的密码框才是真不能过滤的那个——它要能
- * 原样对上任何历史密码，所以那边不动。
- */
-function allowedChars(value: string): string {
-  return value.replace(/[^\x21-\x7E]/g, '');
-}
+import {allowedChars, MAX_PASSWORD_LENGTH, passwordRejected} from './password-strength.ts';
 
 /** 聊天侧（学生）账号的密码最小长度：跟后端 min_length_for_role('chat') 同一道门槛。 */
 const MIN_PASSWORD_LENGTH = 6;
-/** 密码最大长度：跟后端 check_password_policy 同一道门槛。 */
-const MAX_PASSWORD_LENGTH = 128;
-
-/** 客户端硬门槛的拒绝原因；显示文案按语言本地化（auth 域的两个键）。 */
-type PasswordRejection = 'tooShort' | 'tooCommon';
-
-/**
- * 客户端硬门槛，提交前拦截：门槛语义跟后端 check_password_policy 一字不差
- * （分工见 docs/ACCOUNT_MANAGEMENT.md，前端是提示、后端是门槛；能在本地
- * 判定的提前拦掉，省一个来回，后端仍然会再拦一道）。这个页面是聊天侧
- * 学生用的，最小长度 6。空格和非 ASCII 在输入时就被 allowedChars 滤掉了，
- * 到不了这里；含用户名由后端拦，它的消息经 error 原样显示。
- * 弱口令拒绝名单从 password-strength.ts 导入，不在这里再写一份。
- *
- * 返回的是拒绝原因，不是现成文案：文案在 i18n 的 auth 域里三语齐
- * （passwordTooShort / passwordTooCommon），简中文案仍与后端拒绝消息
- * 逐字一致，{min}/{max} 占位符由 format 填。
- */
-function newPasswordRejected(password: string): PasswordRejection | null {
-  if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
-    return 'tooShort';
-  }
-  if (isWeakPassword(password)) {
-    return 'tooCommon';
-  }
-  return null;
-}
 
 /**
  * 修改密码，独立的一页，不是弹窗：弹窗点一下背景就关，密码输一半全丢
@@ -55,6 +14,10 @@ function newPasswordRejected(password: string): PasswordRejection | null {
  * 离开只有「取消」按钮这一条显式的路。
  *
  * 组件随页面切换整个卸载后重新挂载，三个输入框天然清空，不用手写清理逻辑。
+ *
+ * 强制模式（forced）：账号被服务器标了「必须修改密码」时由 App.tsx 的拦截
+ * 渲染——不显示取消/返回入口，顶部挂一条说明横幅解释为什么被拦，其余与
+ * 普通模式完全一样。
  */
 export function ChangePasswordPage({
   locale,
@@ -63,13 +26,16 @@ export function ChangePasswordPage({
   busy,
   onSubmit,
   onCancel,
+  forced = false,
 }: {
   locale: Locale;
   username: string | null;
   error: string | null;
   busy: boolean;
   onSubmit: (oldPassword: string, newPassword: string, confirmPassword: string) => Promise<void>;
-  onCancel: () => void;
+  onCancel?: (() => void) | undefined;
+  /** 强制模式：没有取消/返回入口，顶部挂说明横幅。 */
+  forced?: boolean | undefined;
 }) {
   const text = translations[locale];
   const [oldPassword, setOldPassword] = useState('');
@@ -95,7 +61,7 @@ export function ChangePasswordPage({
             return;
           }
           // 客户端硬门槛：本地就能判定的拒绝，不发请求；文案按语言本地化。
-          const rejected = newPasswordRejected(newPassword);
+          const rejected = passwordRejected(newPassword, MIN_PASSWORD_LENGTH);
           if (rejected === 'tooShort') {
             setGateError(
               format(text.passwordTooShort, {min: MIN_PASSWORD_LENGTH, max: MAX_PASSWORD_LENGTH}),
@@ -114,6 +80,16 @@ export function ChangePasswordPage({
           <h1 className="card-title" lang={htmlLang[locale]}>
             {text.changePassword}
           </h1>
+          {forced ? (
+            // 强制模式的说明横幅：说清楚为什么被拦在这里。白底黑字，
+            // 语义色只在图标上（docs/UI_WARNINGS.md）。
+            <div className="alert bg-base-100" role="status">
+              <TriangleAlert className="size-5 shrink-0 text-warning" aria-hidden="true" />
+              <span className="min-w-0 flex-1 wrap-break-word" lang={htmlLang[locale]}>
+                {text.mustChangePasswordNotice}
+              </span>
+            </div>
+          ) : null}
           <label className="fieldset">
             <span className="fieldset-label">{text.oldPassword}</span>
             <input
@@ -160,9 +136,12 @@ export function ChangePasswordPage({
             </p>
           ) : null}
           <div className="card-actions justify-end">
-            <button type="button" className="btn btn-outline" onClick={onCancel}>
-              {text.cancel}
-            </button>
+            {/* 强制模式没有取消/返回入口：不改完密码出不去。 */}
+            {forced || onCancel === undefined ? null : (
+              <button type="button" className="btn btn-outline" onClick={onCancel}>
+                {text.cancel}
+              </button>
+            )}
             <button type="submit" className="btn btn-primary" disabled={blocked}>
               {text.changePassword}
             </button>

@@ -12,6 +12,12 @@ export type SessionItem = {
 export type LoginResult = {
   locale: string;
   sessions: SessionItem[];
+  /**
+   * 这个账号是不是被标了「必须修改密码」（预设密码、被控制台重置过密码）。
+   * 为真时前端先把用户按到修改密码界面，改完才放行
+   *（docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」）。
+   */
+  must_change_password: boolean;
 };
 
 export async function login(username: string, password: string): Promise<LoginResult> {
@@ -106,7 +112,12 @@ function sessionFromItem(item: SessionItem, messagesKnown: boolean): Session {
 }
 
 function isLoginResult(value: unknown): value is LoginResult {
-  return isRecord(value) && typeof value.locale === 'string' && isSessionList(value.sessions);
+  return (
+    isRecord(value) &&
+    typeof value.locale === 'string' &&
+    isSessionList(value.sessions) &&
+    typeof value.must_change_password === 'boolean'
+  );
 }
 
 function isSessionList(value: unknown): value is SessionItem[] {
