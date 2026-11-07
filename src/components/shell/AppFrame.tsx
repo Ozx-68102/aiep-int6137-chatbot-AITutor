@@ -65,7 +65,11 @@ type AppFrameProps = {
   showToast: (message: string) => void;
   handleDraft: (value: string) => void;
   submitMessage: (event: SubmitEvent<HTMLFormElement>) => void;
-  submitLogin: (usernameValue: string, passwordValue: string) => Promise<void>;
+  submitLogin: (
+    usernameValue: string,
+    passwordValue: string,
+    turnstileToken: string,
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   handleAuthError: (error: ApiError) => void;
   navigate: NavigateFunction;

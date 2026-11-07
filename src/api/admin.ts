@@ -18,10 +18,15 @@ export type ResetPasswordResult = {
   password: string;
 };
 
-export async function adminLogin(username: string, password: string): Promise<AdminSession> {
+export async function adminLogin(
+  username: string,
+  password: string,
+  turnstileToken: string,
+): Promise<AdminSession> {
   const value = await requestJson('/api/admin/login', {
     method: 'POST',
-    body: JSON.stringify({username, password}),
+    // cf-turnstile-response 是 Cloudflare 的约定字段名：后端 LoginRequest 用 alias 接。
+    body: JSON.stringify({username, password, 'cf-turnstile-response': turnstileToken}),
   });
   if (!isRecord(value) || typeof value.username !== 'string') {
     throw new ApiError(0, null);

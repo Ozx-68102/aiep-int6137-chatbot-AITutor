@@ -275,7 +275,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     handlePushInvalidRef.current = handlePushInvalid;
   });
 
-  async function submitLogin(usernameValue: string, password: string) {
+  async function submitLogin(usernameValue: string, password: string, turnstileToken: string) {
     if (loginOffline) {
       return;
     }
@@ -284,7 +284,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     setLoginDetail(null);
     setLoginNotice(null);
     try {
-      const result = await login(usernameValue, password);
+      const result = await login(usernameValue, password, turnstileToken);
       await openAccount(result);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {

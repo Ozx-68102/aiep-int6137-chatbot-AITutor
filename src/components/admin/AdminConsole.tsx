@@ -152,7 +152,7 @@ export function AdminConsole() {
     };
   }, [accountsOpen]);
 
-  async function submitLogin(username: string, password: string) {
+  async function submitLogin(username: string, password: string, turnstileToken: string) {
     if (loginBusy) {
       return;
     }
@@ -160,7 +160,7 @@ export function AdminConsole() {
     setLoginError(null);
     setLoginNotice(null);
     try {
-      const session = await adminLogin(username, password);
+      const session = await adminLogin(username, password, turnstileToken);
       setAdminUsername(session.username);
       setAccounts(await fetchAdminAccounts());
     } catch (error) {
@@ -241,9 +241,9 @@ export function AdminConsole() {
         error={loginError}
         notice={loginNotice}
         busy={loginBusy}
-        onSubmit={(username, password) => {
-          void submitLogin(username, password);
-        }}
+        onSubmit={(username, password, turnstileToken) =>
+          submitLogin(username, password, turnstileToken)
+        }
       />
     );
   }

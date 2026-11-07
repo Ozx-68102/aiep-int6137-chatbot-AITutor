@@ -7,6 +7,9 @@
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>H^2 Bot</title>
+    <!-- Turnstile 人机验证脚本：异步加载，挂出 window.turnstile。两个登录表单
+         显式渲染 widget（src/hooks/use-turnstile.ts）。 -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   </head>
   <body>
     <div id="root"></div>

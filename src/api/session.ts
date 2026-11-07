@@ -20,10 +20,15 @@ export type LoginResult = {
   must_change_password: boolean;
 };
 
-export async function login(username: string, password: string): Promise<LoginResult> {
+export async function login(
+  username: string,
+  password: string,
+  turnstileToken: string,
+): Promise<LoginResult> {
   const body = await requestJson('/api/login', {
     method: 'POST',
-    body: JSON.stringify({username, password}),
+    // cf-turnstile-response 是 Cloudflare 的约定字段名：后端 LoginRequest 用 alias 接。
+    body: JSON.stringify({username, password, 'cf-turnstile-response': turnstileToken}),
   });
   if (!isLoginResult(body)) {
     throw new ApiError(0, null);

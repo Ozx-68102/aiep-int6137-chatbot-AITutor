@@ -395,9 +395,9 @@ function ChatApp() {
         offline={loginOffline}
         submitting={loginSubmitting}
         onLocale={setLocale}
-        onSubmit={(usernameValue, password) => {
-          void submitLogin(usernameValue, password);
-        }}
+        onSubmit={(usernameValue, password, turnstileToken) =>
+          submitLogin(usernameValue, password, turnstileToken)
+        }
       />
     );
   }

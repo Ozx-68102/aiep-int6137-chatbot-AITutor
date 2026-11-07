@@ -1,6 +1,7 @@
 import {CircleAlert} from 'lucide-react';
 import {useState} from 'react';
 import logoUrl from '../../assets/H-Squared_Bot_Vector.svg';
+import {useTurnstile} from '../../hooks/use-turnstile.ts';
 import {translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {LanguageMenu} from '../language/LanguageMenu.tsx';
@@ -27,12 +28,16 @@ export function LoginScreen({
   /** embedded 时给标题加 id，供 Modal 的 aria-labelledby 指。 */
   headingId?: string;
   onLocale: (locale: Locale) => void;
-  onSubmit: (username: string, password: string) => void;
+  /** 返回的 promise settling 后表单会 reset Turnstile widget（令牌一次性）。 */
+  onSubmit: (username: string, password: string, turnstileToken: string) => Promise<void>;
 }) {
   const text = translations[locale];
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const blocked = offline || submitting || username.trim() === '' || password === '';
+  // Turnstile widget：令牌就绪前禁用按钮；每次登录尝试结束后 reset 换新令牌。
+  const turnstile = useTurnstile('login');
+  const blocked =
+    offline || submitting || username.trim() === '' || password === '' || turnstile.token === null;
 
   return (
     <main
@@ -44,10 +49,15 @@ export function LoginScreen({
         }
         onSubmit={(event) => {
           event.preventDefault();
-          if (blocked) {
+          const turnstileToken = turnstile.token;
+          if (blocked || turnstileToken === null) {
             return;
           }
-          onSubmit(username.trim(), password);
+          // 令牌一次性：不管登录成功还是失败，都 reset widget 换一个新令牌，
+          // 再允许下一次尝试。
+          void onSubmit(username.trim(), password, turnstileToken).finally(() => {
+            turnstile.reset();
+          });
         }}
       >
         <div className="card-body gap-4">
@@ -87,6 +97,8 @@ export function LoginScreen({
           <p className="m-0 text-xs text-stone-500" lang={htmlLang[locale]}>
             {text.forgotPasswordHint}
           </p>
+          {/* Turnstile 人机验证 widget：由 use-turnstile 显式渲染；令牌没就绪时按钮禁用。 */}
+          <div ref={turnstile.containerRef} className="flex justify-center" />
           {error ? (
             <p
               className="m-0 flex items-center gap-1.5"

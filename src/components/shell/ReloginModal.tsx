@@ -9,7 +9,7 @@ type ReloginModalProps = {
   offline: boolean;
   submitting: boolean;
   onLocale: (locale: Locale) => void;
-  onSubmit: (usernameValue: string, password: string) => Promise<void>;
+  onSubmit: (usernameValue: string, password: string, turnstileToken: string) => Promise<void>;
   onClose: () => void;
 };
 
@@ -37,9 +37,7 @@ export function ReloginModal({
         embedded
         headingId="relogin-title"
         onLocale={onLocale}
-        onSubmit={(usernameValue, password) => {
-          void onSubmit(usernameValue, password);
-        }}
+        onSubmit={onSubmit}
       />
     </Modal>
   );
