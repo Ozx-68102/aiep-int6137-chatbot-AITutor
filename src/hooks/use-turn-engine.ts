@@ -6,14 +6,23 @@ import {probePartial} from '../api/partial.ts';
 import type {PartialReply} from '../api/partial.ts';
 import {abortReply} from '../api/session.ts';
 import {translations} from '../i18n/index.ts';
-import {networkOkEvent, startPartialPolling} from '../session/poll.ts';
-import {visibleText} from '../session/text.ts';
-import {loadThread} from '../session/thread.ts';
+import {networkOkEvent} from '../session/poll.ts';
+import {createPollerRegistry} from '../session/poller-registry.ts';
+import {
+  applyStreamText as applyStreamTextToMessages,
+  markTurnStatus as markTurnStatusInMessages,
+  questionOfTurn as questionOfTurnInMessages,
+  removeTurn as removeTurnFromMessages,
+  removeTurnAnswer as removeTurnAnswerFromMessages,
+  restoreTurn as restoreTurnInMessages,
+} from '../session/turn-actions.ts';
 import {saveUnsent} from '../session/unsent.ts';
 import type {Message, Session} from '../type/chat.ts';
 import type {Locale} from '../type/locale.ts';
+import {useReplyRecovery} from './use-reply-recovery.ts';
+import {useThreadLoader} from './use-thread-loader.ts';
 
-type TurnEngineDeps = {
+export type TurnEngineDeps = {
   locale: Locale;
   auth: 'checking' | 'anonymous' | 'ready';
   activeId: string | null;
@@ -31,14 +40,16 @@ type TurnEngineDeps = {
 
 /**
  * 流式回答引擎：发送一轮问答、把流式文本应用到气泡、停止、重试、续传，
- * 以及线程加载（切到还没加载历史的会话时拉取记录）和进行中状态登记
- * （pending 标记、加载标记、aborter/poller 注册表）。
+ * 以及进行中状态登记（pending 标记、aborter/停止器注册表）。
+ *
+ * 拆分出去的配套模块：线程加载（切到还没加载历史的会话时拉取记录）在
+ * use-thread-loader，断流恢复的编排在 use-reply-recovery，轮询器登记表在
+ * session/poller-registry.ts，消息变换（纯函数）在 session/turn-actions.ts。
  *
  * 依赖放进 ref、在效果里镜像：流式回答是跨渲染的长异步流程，回调和
  * 会话列表都要拿最新的一份；渲染期间写 ref 是被禁止的（react/refs）。
  */
 export function useTurnEngine(deps: TurnEngineDeps) {
-  const {auth, activeId, composingNew} = deps;
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [sessionWarning, setSessionWarning] = useState<{sessionId: string; text: string} | null>(
     null,
@@ -51,8 +62,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   // 发送失败收场时由引擎移出登记——播放组件的 present 变 false，立刻全部显示。
   // 播放只是视觉层，动画状态不进 sessions。
   const [presentIds, setPresentIds] = useState<Set<string>>(() => new Set());
-  const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
-  const [threadRetry, setThreadRetry] = useState(0);
   const sendingRef = useRef<Set<string>>(new Set());
   const aborters = useRef(new Map<string, {controller: AbortController; turnId: string}>());
   const stoppers = useRef(new Map<string, Promise<void>>());
@@ -61,93 +70,46 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   // 这段流程整个放弃，旧登录态的在途请求就不会把结果写进新登录的会话里。
   // 与 use-service-status 里确认循环用的世代编号是两个各自独立的计数。
   const loginGeneration = useRef(0);
-  const pollers = useRef(new Map<string, () => void>());
-  const loadedThreads = useRef(new Set<string>());
-  const threadFlight = useRef(new Set<string>());
   const depsRef = useRef(deps);
   const textRef = useRef(translations[deps.locale]);
   // pending 会话集合的镜像：断线补查的监听器注册一次，要能读到最新的一份。
   const pendingIdsRef = useRef(pendingIds);
+  // refreshThread 的函数指针：catchUp 效果注册一次、调用链只经 ref 读可变量，
+  // 与线程加载层的 resumePartialRef 同一个做法；镜像效果在下面。
+  const refreshThreadRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
   useEffect(() => {
     depsRef.current = deps;
     textRef.current = translations[deps.locale];
     pendingIdsRef.current = pendingIds;
   });
 
-  useEffect(() => {
-    if (auth !== 'ready' || composingNew || activeId === null) {
-      return;
-    }
-    const sessionId = activeId;
-    const flights = threadFlight.current;
-    if (loadedThreads.current.has(sessionId) || flights.has(sessionId)) {
-      return;
-    }
-    const existing = depsRef.current.sessions.find((session) => session.id === sessionId);
-    if (existing && existing.messages.length > 0) {
-      loadedThreads.current.add(sessionId);
-      return;
-    }
-    let cancelled = false;
-    flights.add(sessionId);
-    setHistoryLoadingId(sessionId);
-    void loadThread(sessionId)
-      .then((thread) => {
-        if (cancelled) {
-          return;
-        }
-        loadedThreads.current.add(sessionId);
-        depsRef.current.setSessions((current) =>
-          current.map((session) => {
-            if (session.id !== sessionId || session.messages.length > 0) {
-              return session;
-            }
-            return {...session, messages: thread.messages, messagesKnown: true};
-          }),
-        );
-        if (thread.partial.kind === 'streaming') {
-          resumePartial(sessionId, thread.messages);
-        }
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        if (error instanceof ApiError && error.status === 401) {
-          depsRef.current.onAuthError(error);
-          return;
-        }
-        if (connectionFailure(error)) {
-          depsRef.current.onConnectionWarning();
-          return;
-        }
-        depsRef.current.setNotice(
-          explain(error, depsRef.current.locale, textRef.current.connectionError),
-        );
-      })
-      .finally(() => {
-        if (cancelled) {
-          return;
-        }
-        flights.delete(sessionId);
-        setHistoryLoadingId((current) => (current === sessionId ? null : current));
-      });
-    return () => {
-      cancelled = true;
-      flights.delete(sessionId);
-      setHistoryLoadingId((current) => (current === sessionId ? null : current));
-    };
-  }, [activeId, auth, composingNew, threadRetry]);
+  const loader = useThreadLoader({deps, loginGeneration});
+  // 轮询器登记表只在挂载时建一次，表里的停止函数跨渲染保持不变。
+  // handlers 捕获的是首帧的函数：它们全部经 ref 读可变量（depsRef、
+  // loginGeneration、resumePartialRef），行为与拆分前逐次捕获一致。
+  const [pollers] = useState(() =>
+    createPollerRegistry({
+      applyPartial: applyPartialForPoller,
+      clearPending,
+      onAuthError: (error) => depsRef.current.onAuthError(error),
+      refreshThread,
+    }),
+  );
+  const recovery = useReplyRecovery({
+    depsRef,
+    loginGeneration,
+    setPendingIds,
+    startPolling: pollers.startPolling,
+    refreshThread,
+  });
 
   useEffect(() => {
-    const active = pollers.current;
+    const active = pollers;
     return () => {
-      for (const stop of active.values()) {
-        stop();
-      }
-      active.clear();
+      active.stopAll();
     };
-  }, []);
+    // pollers 是挂载时建一次的登记表，从不更换：放进依赖数组不会让效果重跑。
+  }, [pollers]);
 
   // 服务器确认够得着 / 页面回到可见：还在等回答的会话可能在断线期间有了
   // 进展，挨个补查一次线程（refreshThread 里带着续传逻辑）。
@@ -178,6 +140,13 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     };
   }, []);
 
+  // resumePartial 和 refreshThread 的镜像放在线程加载层、恢复层创建之后：
+  // 调用点都在异步回调里，执行时这里早已把最新的函数放进 ref。
+  useEffect(() => {
+    loader.resumePartialRef.current = recovery.resumePartial;
+    refreshThreadRef.current = loader.refreshThread;
+  });
+
   function addWaitingMessage(sessionId: string, messageId: string, turnId: string) {
     const message: Message = {
       id: messageId,
@@ -197,101 +166,42 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   function applyStreamText(sessionId: string, messageId: string, chunk: string) {
     depsRef.current.updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.map((message) => {
-        if (message.id !== messageId) {
-          return message;
-        }
-        const text = message.text + chunk;
-        return {...message, text, waiting: visibleText(message.role, text) === ''};
-      }),
+      messages: applyStreamTextToMessages(session.messages, messageId, chunk),
     }));
   }
 
-  function applyPartialText(
+  /** 轮询器拿到半截文字时的回调：转给恢复层的 applyPartialText。 */
+  function applyPartialForPoller(
     sessionId: string,
     turnId: string,
     partial: PartialReply,
-    fallbackKey: string = '',
+    fallbackKey: string,
   ) {
-    if (turnId === '' && fallbackKey === '') {
-      return;
-    }
-    depsRef.current.updateSession(sessionId, (session) => {
-      let index = session.messages.findIndex((message) => message.turnId === turnId);
-      if (index === -1 && fallbackKey !== '') {
-        // 按轮次编号找不到气泡：用消息 id 保底，只认还在等待中的那条。
-        index = session.messages.findIndex(
-          (message) => message.id === fallbackKey && message.waiting === true,
-        );
-      }
-      if (index === -1) {
-        if (turnId === '') {
-          // 没有轮次编号、保底也没找到：不补气泡，等下一个周期。
-          return session;
-        }
-        // 这一轮还没进到页面里（比如刚刷新完），先补一个气泡。
-        // 走到这里的一定是「还在写」的 partial（接口 200 只回 streaming）。
-        const message: Message = {
-          id: turnId,
-          role: 'assistant',
-          text: partial.text,
-          locale: depsRef.current.locale,
-          turnId,
-          waiting: true,
-        };
-        return {...session, messages: [...session.messages, message]};
-      }
-      const message = session.messages[index];
-      if (message === undefined) {
-        // index 来自 findIndex 且已排除 -1，元素必然存在，这里只是类型上的保底处理
-        return session;
-      }
-      if (!partial.text.startsWith(message.text)) {
-        return session;
-      }
-      const waiting = visibleText(message.role, partial.text) === '';
-      const messages = [...session.messages];
-      messages[index] = {...message, text: partial.text, waiting};
-      return {...session, messages};
-    });
+    recovery.applyPartialText(sessionId, turnId, partial, fallbackKey);
   }
 
-  /** 把这一轮的回答气泡去掉，提问留着。 */
   function removeTurnAnswer(sessionId: string, turnId: string) {
     depsRef.current.updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.filter(
-        (message) => !(message.turnId === turnId && message.role === 'assistant'),
-      ),
+      messages: removeTurnAnswerFromMessages(session.messages, turnId),
     }));
   }
 
-  /** 把这一轮的提问和气泡一起去掉（这一轮根本没发出去）。 */
   function removeTurn(sessionId: string, turnId: string) {
     depsRef.current.updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.filter((message) => message.turnId !== turnId),
+      messages: removeTurnFromMessages(session.messages, turnId),
     }));
   }
 
-  /**
-   * 把这一轮的回答标成失败/被停：脚注里的常驻状态提示和重试按钮由消息
-   * 自身的标志驱动（docs/MESSAGE_ACTIONS.md），实时流程里就打上标记，不只靠
-   * 刷新后的服务器标志。waiting 一并清掉，零文字的轮次不再显示三个点；
-   * 气泡不去掉——没有文字时只渲染脚注。
-   */
   function markTurnStatus(sessionId: string, turnId: string, status: 'failed' | 'aborted') {
     if (turnId === '') {
+      // 轮次编号为空：连 updateSession 都不调，与拆分前一致。
       return;
     }
-    const mark = status === 'failed' ? {failed: true} : {aborted: true};
     depsRef.current.updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.map((message) =>
-        message.turnId === turnId && message.role === 'assistant'
-          ? {...message, waiting: false, ...mark}
-          : message,
-      ),
+      messages: markTurnStatusInMessages(session.messages, turnId, status),
     }));
   }
 
@@ -341,45 +251,21 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     });
   }
 
-  /** 发送没成功：把这一轮恢复成重发之前的样子（提问文字、回答、状态标志都在内）。 */
   function restoreTurn(sessionId: string, turnId: string, indexStart: number, snapshot: Message[]) {
     if (snapshot.length === 0) {
+      // 快照为空：连 updateSession 都不调，与拆分前一致。
       return;
     }
-    depsRef.current.updateSession(sessionId, (session) => {
-      const existing = session.messages.findIndex((message) => message.turnId === turnId);
-      const without = session.messages.filter((message) => message.turnId !== turnId);
-      const at = Math.min(existing === -1 ? indexStart : existing, without.length);
-      return {
-        ...session,
-        messages: [...without.slice(0, at), ...snapshot, ...without.slice(at)],
-      };
-    });
+    depsRef.current.updateSession(sessionId, (session) => ({
+      ...session,
+      messages: restoreTurnInMessages(session.messages, turnId, indexStart, snapshot),
+    }));
   }
 
-  /**
-   * 某一轮问的是什么。
-   *
-   * 先按轮次编号认提问那条。提问不一定带这一轮的编号：刷新以后看到的
-   * 提问是上游的记录，上游不知道我们的编号。那就按位置找 —— 这一轮的
-   * 回答前面最近的一条提问。
-   */
+  /** 某一轮问的是什么（查找逻辑在 session/turn-actions.ts 的同名函数）。 */
   function questionOfTurn(sessionId: string, turnId: string): string | null {
     const messages = depsRef.current.sessions.find((item) => item.id === sessionId)?.messages ?? [];
-    const own = messages.find((message) => message.role === 'user' && message.turnId === turnId);
-    if (own !== undefined) {
-      return own.text;
-    }
-    const answer = messages.findIndex(
-      (message) => message.role === 'assistant' && message.turnId === turnId,
-    );
-    for (let index = answer - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message !== undefined && message.role === 'user') {
-        return message.text;
-      }
-    }
-    return null;
+    return questionOfTurnInMessages(messages, turnId);
   }
 
   /** 记下这场会话最新的进度节点名（等待气泡里显示）。 */
@@ -428,90 +314,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   /** 新的一轮开始了：上一轮的横幅（比如「这场对话还有一条正在回答」）不再占着位置。 */
   function clearSessionWarning(sessionId: string) {
     setSessionWarning((current) => (current?.sessionId === sessionId ? null : current));
-  }
-
-  function stopPolling(sessionId: string) {
-    const stop = pollers.current.get(sessionId);
-    if (stop === undefined) {
-      return;
-    }
-    stop();
-    pollers.current.delete(sessionId);
-  }
-
-  function startPolling(sessionId: string, turnId: string, fallbackKey: string = '') {
-    stopPolling(sessionId);
-    const stop = startPartialPolling(
-      sessionId,
-      (partial) => {
-        // 200 ⇒ 服务器说还在写（接口只回答「还在写吗」）：补半截文字即可。
-        applyPartialText(sessionId, turnId, partial, fallbackKey);
-      },
-      (error?: ApiError) => {
-        // 404（服务器明确说没在写，或会话没了）或 401（会话过期）：轮询
-        // 到此为止，输入框解锁。404 去数据库核对并修正——结局标志（failed/aborted）
-        // 在消息上，脚注照标志渲染；401 交给 App 层的统一出口（带 reason
-        // 进入留在原页面的过期状态，不带的回退整页登录路径）。
-        stopPolling(sessionId);
-        clearPending(sessionId);
-        if (error !== undefined && error.status === 401) {
-          depsRef.current.onAuthError(error);
-          return;
-        }
-        void refreshThread(sessionId);
-      },
-    );
-    pollers.current.set(sessionId, stop);
-  }
-
-  function resumePartial(sessionId: string, messages: Message[]) {
-    const waiting = messages.find((message) => message.waiting === true);
-    if (waiting === undefined) {
-      return;
-    }
-    setPendingIds((current) => new Set(current).add(sessionId));
-    const turnId = waiting.turnId ?? '';
-    // 等待的气泡上没带轮次编号（比如是刷新线程带回来的）：拿消息 id 当保底定位键。
-    startPolling(sessionId, turnId, turnId === '' ? waiting.id : '');
-  }
-
-  /**
-   * 流断掉且没收到结局帧：问服务器「还在写吗」这一个问题。
-   *
-   * 还在写（200）→ 补上半截文字，接着轮询；明确说没在写（404，包括
-   * 「Redis 里追的是别的轮次」）→ 以数据库为准核对并修正：结局标志（failed/aborted）
-   * 已经在消息上，脚注照标志渲染；问不到服务器（网络错）→ 保留现场，
-   * 不删已收到的文字，归常驻的连接警示横幅，不替服务器下结论；
-   * 会话死了（401）→ 走统一的 401 出口（onAuthError），进入会话过期后
-   * 留在原页面的状态，不归连接横幅。
-   */
-  async function recoverReply(sessionId: string, turnId: string) {
-    const generation = loginGeneration.current;
-    const probe = await probePartial(sessionId);
-    if (generation !== loginGeneration.current) {
-      // 已经退出登录：不再恢复，免得补出等待气泡、开启轮询去接管新会话。
-      return;
-    }
-    if (probe.kind === 'unauthorized') {
-      // 会话死了：与 sendQuestion 的 401 同一个出口（带 reason 进入会话过期后
-      // 留在原页面的状态），不走连接横幅，也不静默忽略。
-      depsRef.current.onAuthError(probe.error);
-      return;
-    }
-    if (probe.kind === 'unreachable') {
-      depsRef.current.onConnectionWarning();
-      return;
-    }
-    if (
-      probe.kind === 'streaming' &&
-      (probe.partial.turnId === null || probe.partial.turnId === turnId)
-    ) {
-      applyPartialText(sessionId, turnId, probe.partial);
-      startPolling(sessionId, turnId);
-      return;
-    }
-    // idle（或 Redis 里追的是别的轮次）：这一轮已经不在写了，以数据库为准。
-    await refreshThread(sessionId);
   }
 
   async function sendQuestion(
@@ -599,7 +401,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       if (outcome === 'interrupted') {
         // 断流补回的回答一律立即全部显示，不走播放。
         endPresent(assistantId);
-        await recoverReply(sessionId, turnId);
+        await recovery.recoverReply(sessionId, turnId);
         return;
       }
       if (outcome === 'not-started') {
@@ -661,41 +463,16 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         stoppers.current.delete(sessionId);
         sendingRef.current.delete(sessionId);
         clearProgress(sessionId);
-        if (!pollers.current.has(sessionId)) {
+        if (!pollers.hasLivePoller(sessionId)) {
           clearPending(sessionId);
         }
       }
     }
   }
 
-  /** 重新读一次线程：这一轮是在别的页面发出去的，本页还不知道。 */
+  /** 重新读一次线程：本体在 use-thread-loader，这里给引擎的回调和流程一个统一入口。 */
   async function refreshThread(sessionId: string) {
-    const generation = loginGeneration.current;
-    try {
-      const thread = await loadThread(sessionId);
-      if (generation !== loginGeneration.current) {
-        // 已经退出登录：旧线程不再覆盖新登录会话的消息列表。
-        return;
-      }
-      depsRef.current.updateSession(sessionId, (session) => ({
-        ...session,
-        messages: thread.messages,
-        messagesKnown: true,
-      }));
-      if (thread.partial.kind === 'streaming') {
-        resumePartial(sessionId, thread.messages);
-      }
-    } catch (error) {
-      if (generation !== loginGeneration.current) {
-        // 已经退出登录：旧请求的 401 不再经 onAuthError 压到新登录的会话上。
-        return;
-      }
-      // 会话过期走统一的 401 出口（和历史加载同款）；其余读不到就算了，
-      // 页面照常用。
-      if (error instanceof ApiError && error.status === 401) {
-        depsRef.current.onAuthError(error);
-      }
-    }
+    await refreshThreadRef.current?.(sessionId);
   }
 
   /**
@@ -735,7 +512,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       (probe.partial.turnId === null || probe.partial.turnId === turnId)
     ) {
       // 服务器那边还在写：接着等，别骗用户说停了。
-      startPolling(sessionId, turnId, fallbackKey);
+      pollers.startPolling(sessionId, turnId, fallbackKey);
       setSessionWarning({sessionId, text: textRef.current.replyStopFailed});
       return;
     }
@@ -772,19 +549,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     await operation;
   }
 
-  function markThreadLoaded(sessionId: string) {
-    loadedThreads.current.add(sessionId);
-  }
-
-  /** 这个会话的线程既没加载过、也没有正在进行的加载：由调用方决定要不要触发重载。 */
-  function shouldReloadThread(sessionId: string): boolean {
-    return !loadedThreads.current.has(sessionId) && !threadFlight.current.has(sessionId);
-  }
-
-  function bumpThreadRetry() {
-    setThreadRetry((current) => current + 1);
-  }
-
   /**
    * 退出登录/被强制退回登录页：把进行中的加载、轮询和等待标记一次清干净，
    * 中止还在进行的发送请求，清空「正在发送」集合、取消器表和停止器表，
@@ -802,19 +566,9 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     setPendingIds(new Set());
     setPresentIds(new Set());
     setProgressBySession({});
-    setHistoryLoadingId(null);
-    loadedThreads.current.clear();
-    threadFlight.current.clear();
-    for (const stop of pollers.current.values()) {
-      stop();
-    }
-    pollers.current.clear();
+    loader.clearForLogin();
+    pollers.stopAll();
     setSessionWarning(null);
-  }
-
-  /** 这个会话的轮询器还活着吗：App 侧清理与引擎 finally 对齐锁语义用。 */
-  function hasLivePoller(sessionId: string): boolean {
-    return pollers.current.has(sessionId);
   }
 
   return {
@@ -825,18 +579,18 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     progressBySession,
     sessionWarning,
     setSessionWarning,
-    historyLoadingId,
+    historyLoadingId: loader.historyLoadingId,
     sendingRef,
     sendQuestion,
     stopSending,
     retryTurn,
     clearPending,
     clearSessionWarning,
-    stopPolling,
-    hasLivePoller,
-    markThreadLoaded,
-    shouldReloadThread,
-    bumpThreadRetry,
+    stopPolling: pollers.stopPolling,
+    hasLivePoller: pollers.hasLivePoller,
+    markThreadLoaded: loader.markThreadLoaded,
+    shouldReloadThread: loader.shouldReloadThread,
+    bumpThreadRetry: loader.bumpThreadRetry,
     resetForLogin,
   };
 }
