@@ -14,6 +14,10 @@ const statusIntervalMs = 30000;
 // 确认不通就一直重试，但不会把请求发得太密。
 const confirmStartMs = 1000;
 const confirmMaxMs = 15000;
+// 常规轮询失败后的快速复查间隔（毫秒）：单次失败先不挂「连不上」横幅，
+// 等这么一会儿再探一次，复查也失败才挂；复查成功就当无事发生。
+// 一次网络抖动不再换来最长 30 秒的横幅。
+const recheckDelayMs = 1500;
 
 export type ServiceState = 'ok' | 'unreachable' | 'database' | 'store';
 
@@ -46,6 +50,10 @@ type ServiceStatusDeps = {
 /**
  * 服务健康状态：30 秒轮询 /api/status，标记连不上/数据库/回复存储三档降级，
  * 以及服务器从「连不上」回来时补齐工作区（refreshWorkspace）的动作。
+ *
+ * 常规 30 秒轮询的单次失败先不挂横幅：等 1.5 秒做一次快速复查，复查也
+ * 失败才挂「连不上」，复查成功就当无事发生——横幅自愈不再要等下一拍
+ * 30 秒，网络抖动也不再闪报。
  *
  * 浏览器的网络事件也接在这里（N10）：offline 立刻挂「无法连接到服务器」
  * 常驻横幅，不用等最坏 30 秒的下一个周期；online 不轻信（网卡通了不代表
@@ -113,15 +121,18 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     // 加一，旧的确认循环的进行中探测回来后发现世代编号不匹配就退出，不会再设置自己的
     // 退避定时器——不会出现两条确认循环并存。
     let retryTimer = 0;
+    // 快速复查的等待定时器：效果清理时一并清掉。
+    let recheckTimer = 0;
     let confirming = false;
     let confirmGeneration = 0;
     let backoffMs = confirmStartMs;
 
     /**
-     * 探测一次 /api/status，返回服务器是否够得着；顺带按响应设好降级档位，
-     * 并在从「连不上」回到够得着的第一时间补齐工作区（refreshWorkspace）。
+     * 探测一次 /api/status，返回服务器是否够得着；成功就按响应设好降级
+     * 档位，并在从「连不上」回到够得着的第一时间补齐工作区
+     *（refreshWorkspace）。失败不动任何状态——挂不挂横幅由调用方决定。
      */
-    const probe = async (): Promise<boolean> => {
+    const probeOnce = async (): Promise<boolean> => {
       try {
         const status = await readStatus();
         if (stopped) {
@@ -141,11 +152,21 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
         }
         return true;
       } catch {
-        if (!stopped) {
-          markService('unreachable');
-        }
         return false;
       }
+    };
+
+    /**
+     * 探测一次，失败立即挂「连不上」横幅：online 确认链和可见性补查用，
+     * 两处的既有行为不变（确认链期间横幅本来就挂着；物理断网由 onOffline
+     * 立即挂，都不经过快速复查）。
+     */
+    const probe = async (): Promise<boolean> => {
+      const ok = await probeOnce();
+      if (!ok && !stopped) {
+        markService('unreachable');
+      }
+      return ok;
     };
 
     const check = async () => {
@@ -158,10 +179,27 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     const tick = async () => {
       // 确认循环正在进行（online 后的退避重试期间）：这个周期不探测，只把定时器排到下一个周期。
       // 确认成功后定时器会被整个清零后重新设置（见 confirm），不会剩半个周期在这等。
-      if (!confirming) {
-        await check();
+      if (!confirming && document.visibilityState !== 'hidden') {
+        const ok = await probeOnce();
+        // 单次失败先不挂横幅：等一拍快速复查，复查也失败才挂，复查成功就
+        // 当无事发生。等待期间 online 确认链启动了（confirming）或物理断网了
+        // 就让路——横幅归确认链和 onOffline 管，同一时刻只有一条探测链在跑。
+        if (!ok && !stopped && !confirming && navigator.onLine) {
+          await new Promise<void>((resolve) => {
+            recheckTimer = window.setTimeout(resolve, recheckDelayMs);
+          });
+          if (!stopped && !confirming) {
+            const recheckOk = await probeOnce();
+            if (!recheckOk && !stopped && !confirming) {
+              markService('unreachable');
+            }
+          }
+        }
       }
       if (!stopped) {
+        // 先清再设：等待复查期间 online 确认链可能已经重设过 timer
+        //（confirm 成功分支），这里清掉旧的，任何时刻只留一个 30 秒定时器。
+        window.clearTimeout(timer);
         timer = window.setTimeout(tick, statusIntervalMs);
       }
     };
@@ -242,6 +280,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
       confirmGeneration += 1;
       window.clearTimeout(timer);
       window.clearTimeout(retryTimer);
+      window.clearTimeout(recheckTimer);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('offline', onOffline);
       window.removeEventListener('online', onOnline);

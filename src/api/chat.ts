@@ -1,6 +1,13 @@
-import type {Locale} from '../type/locale.ts';
 import {ApiError, isRecord, readFailure} from './http.ts';
 import {probePartial} from './partial.ts';
+
+/**
+ * 流式回答的空闲超时（毫秒）：读取循环连续这么久没收到任何字节就中止。
+ * 判定放在 reader.read() 返回的原始层面——任何分块都算连接还活着，包括
+ * 服务器的 ": ping" 心跳注释帧，不等解析出内容帧。中止之后走既有的中断
+ * 恢复语义（aborted/interrupted 分支），不新造状态。
+ */
+const streamIdleTimeoutMs = 60000;
 
 export type ReplyOutcome =
   /** done 帧说 completed，或（老后端兼容期）收到了 [DONE]：这一轮写完了。 */
@@ -20,98 +27,113 @@ export type ReplyOutcome =
 export async function streamReply(
   chatId: string,
   message: string,
-  locale: Locale,
   turnId: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   retryOf?: string,
   onProgress?: (name: string, status: string) => void,
 ): Promise<ReplyOutcome> {
-  const outcome = await deliverReply(
-    chatId,
-    message,
-    locale,
-    turnId,
-    onDelta,
-    signal,
-    retryOf,
-    onProgress,
-  );
+  const outcome = await deliverReply(chatId, message, turnId, onDelta, signal, retryOf, onProgress);
   if (outcome !== 'not-started') {
     return outcome;
   }
   // 服务器说没有这一轮，说明请求没有生效，重发一次不会生成两遍。
-  return deliverReply(chatId, message, locale, turnId, onDelta, signal, retryOf, onProgress);
+  return deliverReply(chatId, message, turnId, onDelta, signal, retryOf, onProgress);
 }
 
 async function deliverReply(
   chatId: string,
   message: string,
-  locale: Locale,
   turnId: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   retryOf?: string,
   onProgress?: (name: string, status: string) => void,
 ): Promise<ReplyOutcome> {
-  let response: Response;
+  // 空闲超时要有自己的中止控制器。不用 AbortSignal.any 把外部信号和超时
+  // 合成一个：它需要 Chrome 116+/Safari 17.4+，超出 Vite 默认支持基线，
+  // 而打包器垫不平浏览器原生接口。外部信号原样转发到这个控制器上，行为
+  // 完全不变：两种来源都能中止请求和读取循环。
+  const controller = new AbortController();
+  const forwardAbort = () => {
+    controller.abort();
+  };
+  if (signal !== undefined) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', forwardAbort);
+    }
+  }
   try {
-    response = await fetch('/api/chat', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message, chatId, locale, turnId, retryOf}),
-      // signal 可以缺省：fetch 对 null 和 undefined 一视同仁（都不带中止信号）
-      signal: signal ?? null,
-    });
-  } catch {
-    if (signal?.aborted) {
-      return 'aborted';
+    let response: Response;
+    try {
+      response = await fetch('/api/chat', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {'Content-Type': 'application/json'},
+        // 请求体不带 locale：后端的 ChatRequest 已经删掉这个字段，
+        // 报错文案的三语化由前端按状态码映射负责（src/api/failure.ts）。
+        body: JSON.stringify({message, chatId, turnId, retryOf}),
+        signal: controller.signal,
+      });
+    } catch {
+      if (signal?.aborted) {
+        return 'aborted';
+      }
+      return await outcomeAfterFailure(chatId);
     }
-    return await outcomeAfterFailure(chatId);
-  }
 
-  if (response.status === 409) {
-    // 同一场会话已经有一轮在写。这一次没发出去，页面把问题放回输入框。
-    return 'busy';
-  }
-  if (!response.ok) {
-    // 会话类 401 把 reason 一起带上：一路透传到 sendQuestion 的统一出口。
-    const failure = await readFailure(response);
-    throw new ApiError(response.status, failure.detail, failure.reason);
-  }
+    if (response.status === 409) {
+      // 同一场会话已经有一轮在写。这一次没发出去，页面把问题放回输入框。
+      return 'busy';
+    }
+    if (!response.ok) {
+      // 会话类 401 把 reason 一起带上：一路透传到 sendQuestion 的统一出口。
+      const failure = await readFailure(response);
+      throw new ApiError(response.status, failure.detail, failure.reason, failure.code);
+    }
 
-  let delivered = false;
-  try {
-    const result = await readStream(
-      response,
-      (text) => {
-        delivered = true;
-        onDelta(text);
-      },
-      onProgress,
-    );
-    if (result.turnDone !== null) {
-      // 收到 done 帧：这一轮的结局随流明说，以它为准（authoritative）。
-      // done 帧是即时判断，服务器的数据库是最终事实：失败后服务器与上游核对并修正，
-      // 可能把存档改成 completed，页面不等待也不回改；刷新以后以数据库为准
-      // （/messages 消息上的标志）。
-      return outcomeFromTurnDone(result.turnDone);
-    }
-    if (result.streamEnd) {
-      // 没收到 done 帧但收到了 [DONE]（老后端兼容期）：照旧当写完了。
-      return 'completed';
-    }
-    // 流断掉且 done、[DONE] 都没收到：真断流，交给恢复流程去问服务器。
-    return 'interrupted';
-  } catch {
-    if (signal?.aborted) {
-      return 'aborted';
-    }
-    if (delivered) {
+    let delivered = false;
+    try {
+      const result = await readStream(
+        response,
+        (text) => {
+          delivered = true;
+          onDelta(text);
+        },
+        onProgress,
+        controller,
+      );
+      if (result.turnDone !== null) {
+        // 收到 done 帧：这一轮的结局随流明说，以它为准（authoritative）。
+        // done 帧是即时判断，服务器的数据库是最终事实：失败后服务器与上游核对并修正，
+        // 可能把存档改成 completed，页面不等待也不回改；刷新以后以数据库为准
+        // （/messages 消息上的标志）。
+        return outcomeFromTurnDone(result.turnDone);
+      }
+      if (result.streamEnd) {
+        // 没收到 done 帧但收到了 [DONE]（老后端兼容期）：照旧当写完了。
+        return 'completed';
+      }
+      // 流断掉且 done、[DONE] 都没收到：真断流，交给恢复流程去问服务器。
       return 'interrupted';
+    } catch {
+      if (signal?.aborted) {
+        return 'aborted';
+      }
+      // 空闲超时中止的进入下面两条既有分支：收到过内容算断流（interrupted），
+      // 一点内容都没有就去问服务器这一轮的下落，不新造状态。
+      if (delivered) {
+        return 'interrupted';
+      }
+      return await outcomeAfterFailure(chatId);
     }
-    return await outcomeAfterFailure(chatId);
+  } finally {
+    // 清掉外部信号上的转发监听，别让它跨请求泄漏。
+    if (signal !== undefined) {
+      signal.removeEventListener('abort', forwardAbort);
+    }
   }
 }
 
@@ -137,7 +159,8 @@ type StreamResult = {
 async function readStream(
   response: Response,
   onDelta: (text: string) => void,
-  onProgress?: (name: string, status: string) => void,
+  onProgress: ((name: string, status: string) => void) | undefined,
+  controller: AbortController,
 ): Promise<StreamResult> {
   const body = response.body;
   if (!body) {
@@ -149,9 +172,20 @@ async function readStream(
   let buffer = '';
   let streamEnd = false;
   let turnDone: TurnDone | null = null;
+  // 空闲超时：到点还没收到任何字节就中止这条流，读取循环随之抛出、进入
+  // 调用方既有的中断恢复分支。定时器在 finally 里清掉，防泄漏。
+  let idleTimer = window.setTimeout(() => {
+    controller.abort();
+  }, streamIdleTimeoutMs);
   try {
     for (;;) {
       const {done, value} = await reader.read();
+      // 读到任何东西（内容分块、心跳注释帧、流结束）都算连接还活着：
+      // 重置空闲定时器。
+      window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        controller.abort();
+      }, streamIdleTimeoutMs);
       buffer += decoder.decode(value, {stream: !done});
       // 事件边界同时认 \n\n 和 \r\n\r\n。
       const parts = buffer.split(/\r?\n\r?\n/);
@@ -184,6 +218,7 @@ async function readStream(
       }
     }
   } finally {
+    window.clearTimeout(idleTimer);
     reader.releaseLock();
   }
 }

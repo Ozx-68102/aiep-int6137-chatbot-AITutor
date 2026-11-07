@@ -37,7 +37,9 @@ const REACT_PACKAGES = new Set([
 ]);
 
 // markdown/公式家族：react-markdown 和 remark/rehype/micromark/mdast/
-// unist/unified/vfile/katex 整棵树，前缀匹配。
+// unist/unified/vfile/katex 整棵树。匹配带边界（见 isMarkdownFamily）：
+// 包名精确等于名单里的一项，或者以「名单项 + '-'」开头。纯 startsWith
+// 会让 'ms'、'debug'、'entities' 这类通用词把未来只是开头相同的包误划进来。
 const MARKDOWN_PREFIXES = [
   'react-markdown',
   'remark',
@@ -98,6 +100,15 @@ const SHARED_WITH_HIGHLIGHTER = new Set([
   'hastscript',
 ]);
 
+/**
+ * 包名是不是 markdown 家族的：精确命中名单，或命中「前缀 + '-'」的边界
+ * （remark-parse、mdast-util-from-markdown 这类真前缀展开）。
+ * '@scope/name' 形式的名单项（@ungap/structured-clone）走精确命中。
+ */
+function isMarkdownFamily(name: string): boolean {
+  return MARKDOWN_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}-`));
+}
+
 // 判断一个模块属于哪个 vendor 家族；不属于任何家族返回 undefined。
 function vendorFamilyOf(id: string): string | undefined {
   const name = packageNameOf(id);
@@ -108,7 +119,7 @@ function vendorFamilyOf(id: string): string | undefined {
   if (name.startsWith('react-syntax-highlighter')) return undefined;
   if (SHARED_WITH_HIGHLIGHTER.has(name)) return undefined;
   if (REACT_PACKAGES.has(name)) return 'vendor-react';
-  if (MARKDOWN_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+  if (isMarkdownFamily(name)) {
     return 'vendor-markdown';
   }
   return undefined;

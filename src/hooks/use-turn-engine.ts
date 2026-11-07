@@ -514,7 +514,6 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       const outcome = await streamReply(
         sessionId,
         question,
-        depsRef.current.locale,
         turnId,
         (chunk) => {
           // 第一个内容增量到达：进度文本完成使命（清空是幂等的，

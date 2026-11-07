@@ -4,6 +4,7 @@ import {connectionFailure, explain} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {deleteSession, pinSession, renameSession} from '../api/session.ts';
 import {translations} from '../i18n/index.ts';
+import {clearDraft} from '../session/drafts.ts';
 import type {Session} from '../type/chat.ts';
 import type {Locale} from '../type/locale.ts';
 
@@ -129,6 +130,9 @@ export function useSessionActions(deps: SessionActionsDeps) {
     onShowToast(translations[locale].deleteDone);
     onStopPolling(id);
     onClearPending(id);
+    // 会话删掉了，它自己的草稿也一起清掉：sessionStorage 里不给已经不存在的
+    // 会话留半截字。
+    clearDraft(id);
     if (!wasCurrent) {
       return true;
     }
