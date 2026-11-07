@@ -9,11 +9,11 @@ from fastapi import FastAPI
 from redis.exceptions import RedisError
 
 from server import chat_log, pushbus, reply_store, upstream
-from server.fastgpt import open_fastgpt
 from server.infra.redis_client import close_redis
 from server.security import sweep_expired_tokens_loop
 from server.settings import load_settings
 from server.streaming import registry, stopping
+from server.upstream import open_fastgpt
 
 logger = logging.getLogger("server.lifespan")
 

@@ -15,7 +15,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from server import chat_log
 from server.db import Account, ChatMessage, ChatSession, db_session
-from server.fastgpt import FastGPTError
 from server.history import backfill_session, merge_current_turn
 from server.log import set_turn_context
 from server.reply_store import (
@@ -43,7 +42,7 @@ from server.types import (
     SessionPin,
     SessionRename,
 )
-from server.upstream import require_client
+from server.upstream import FastGPTError, require_client
 
 logger = logging.getLogger("server.routes.sessions")
 

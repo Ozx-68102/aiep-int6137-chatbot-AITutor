@@ -44,7 +44,7 @@
 
 **2026-11-05 决定变更（同日，小组建议，维护者采纳）**：拿到上游该应用的编辑权限并分析工作流 DSL 后确认，整块返回是上游「放行前审查」管线的必然产物，逐字输出无解（引用锁＋出口锁＋审查需全文，根本原因详见 [FASTGPT_API.md](FASTGPT_API.md)「流式行为」）。原决定中「不向 FastGPT 那边提出」「按上游永远整块返回推进」维持不变，且由推断升级为实证；「不做逐字显示」推翻——**立项前端「打字机」播放**：前端拿到整块文本后在客户端渐进显示，后端零改动。默认规则：速度自适应（播放总时长控制在 1~3 秒，长文放快些）；只播放本轮新收到的回答，历史消息、刷新恢复、断线补回的一律立即全部显示；播放中点停止立刻全部显示；复制拿全文；点赞点踩照常；读屏只播里程碑、不逐字（aria 暴露全文，动画仅视觉层）；播放按块输出＋节流，控制重渲染。状态：**已实现（2026-11-06）**——实际参数：每个周期 60 毫秒；周期数按「目标总时长 = clamp(文本长度 × 15 毫秒, 1 秒, 3 秒)」折算、夹在 17~50；每条消息只播放一次（模块级登记，跨组件重挂载不重播）；`prefers-reduced-motion` 的用户直接全部显示；读屏一次拿到全文（渐显层 `aria-hidden` ＋ sr-only 全文节点），复制、点赞点踩拿 `message.text` 全文。机制与页面行为见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「打字机播放」。渲染合并批次两条（O1/O2）继续搁置，播放实现若性能不够再一并捡起。
 
-我们发给上游的请求带 `detail: true`（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py) 的 `events`），为的就是拿 `flowNodeStatus` 转成进度帧。**学生数据的红线**：上游的 `flowNodeResponse`（节点输出明细，含对话历史预览）和 `updateVariables`（工作流变量全量，实测带 academy_lesson_id、academy_progress、cls 等学生数据键）两类事件，任何级别（包括 debug）都不整行写进日志——只记事件名和字节数（`_SENSITIVE_EVENTS`），也绝不转发给页面。
+我们发给上游的请求带 `detail: true`（[server/src/server/upstream/chat_api.py](../server/src/server/upstream/chat_api.py) 的 `events`），为的就是拿 `flowNodeStatus` 转成进度帧。**学生数据的红线**：上游的 `flowNodeResponse`（节点输出明细，含对话历史预览）和 `updateVariables`（工作流变量全量，实测带 academy_lesson_id、academy_progress、cls 等学生数据键）两类事件，任何级别（包括 debug）都不整行写进日志——只记事件名和字节数（`_SENSITIVE_EVENTS`），也绝不转发给页面。
 
 ## 轮次编号：一个编号三个地方
 
@@ -156,7 +156,7 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 - **状态接口**：`GET /api/status` 报 `{"database": "ok"|"unavailable", "reply_store": "ok"|"unavailable"}`。不需要登录，只带 cookie 也不刷新登录有效期（它是心跳）。页面每 30 秒查一次、标签页重新可见时补查（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)）。
 - **上游记录的 5 秒缓存：已退出页面历史主路径，代码保留**。页面历史改为从我们自己的 `message` 表来之后（见「这一轮的历史从哪儿来」），主路径 `GET /api/sessions/{id}/messages` 直读数据库、不经过这份缓存，当初防「刷新风暴打垮上游」的进程内缓存（[FINDINGS.md](FINDINGS.md) 2026-10-30 那条）失去存在理由。缓存本体（`history.py` 的 `records_cache`，5 秒有效期）没有删除：`session_records` 每次读上游都无条件写入；现在唯一读它的地方是老会话首次打开时的补录（`backfill_session`，数据库里没有记录才从上游取一次、写进数据库）；删上游记录成功后的失效逻辑也还在（`routes/chat.py` 的 `records_cache.pop`，删成功就把这场会话的缓存条目去掉）。老会话回填一次写进数据库，之后不会重复问上游。
 - **非流式端点的上游失败一律 502，删会话例外**：要问上游的非流式端点，上游失败统一回 502——老会话补录（`GET /api/sessions/{id}/messages` 在表里没有记录时走 `backfill_session`）和点赞点踩反馈（`POST /api/sessions/{id}/feedback`）。删会话是例外：删除顺序重排成「先本地后上游」之后，上游删失败只记一行警告、照样回 204——会话已经从用户眼前消失，回错误码只会让页面把一场已经不存在的会话显示成「删除失败」（`routes/sessions.py` 的 `delete_session`，理由在它自己的注释里）。流式 `/api/chat` 的上游失败不走 HTTP 错误码，表现为「流提前结束」，done 帧如实报 failed（reason: upstream）。
-- **对上游的三个超时**（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py)）：连接 10 秒；读 30 秒（等第一个字节、两块字之间都是它，`.env` 里 `FASTGPT_READ_TIMEOUT_SECONDS` 可调）。原来 `read=None` 无限等，上游接了连接一直不吭声时这一轮会永远卡死。上游没有「这一轮还在不在跑」的查询接口，读超时是我们唯一的本地手段。
+- **对上游的三个超时**（[server/src/server/upstream/client.py](../server/src/server/upstream/client.py)）：连接 10 秒；读 30 秒（等第一个字节、两块字之间都是它，`.env` 里 `FASTGPT_READ_TIMEOUT_SECONDS` 可调）。原来 `read=None` 无限等，上游接了连接一直不吭声时这一轮会永远卡死。上游没有「这一轮还在不在跑」的查询接口，读超时是我们唯一的本地手段。
 
 ## 单进程前提
 

@@ -1,8 +1,8 @@
 import json
 
-from server.fastgpt import ProgressEvent
 from server.turn_status import DoneReason, DoneStatus
 from server.types import TurnDoneEvent
+from server.upstream import ProgressEvent
 
 # SSE 的公共响应头：no-store 不让任何一层缓存这条流；X-Accel-Buffering: no
 # 叫 nginx 这类反向代理别攒响应正文——攒住的话帧要等缓冲满才发得出去，

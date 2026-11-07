@@ -2,7 +2,7 @@
 
 业务实现分布在 routes/（端点）、streaming/（流式中继）、security/（账号、
 令牌、cookie）、history.py（上游历史缓存与合并）、errors.py（异常处理器
-与共享文案）、upstream.py（FastGPT 客户端持有点）；本文件只做装配。
+与共享文案）、upstream/（FastGPT 客户端持有点）；本文件只做装配。
 """
 
 from fastapi import FastAPI

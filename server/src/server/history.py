@@ -5,10 +5,10 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from server import chat_log, upstream
-from server.fastgpt import ChatRecord, FastGPT, FastGPTError
 from server.reply_store import PartialReply
 from server.turn_status import ABORTED, FAILED, STREAMING
 from server.types import HistoryMessageResponse
+from server.upstream import ChatRecord, FastGPT, FastGPTError
 
 RECORDS_CACHE_SECONDS = 5.0
 RECORDS_PAGE_SIZE = 100

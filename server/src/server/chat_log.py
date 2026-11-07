@@ -22,8 +22,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from server.db import ChatMessage, db_session
-from server.fastgpt import ChatRecord
 from server.turn_status import ABORTED, COMPLETED, FAILED, STREAMING
+from server.upstream import ChatRecord
 
 logger = logging.getLogger("server.chat_log")
 

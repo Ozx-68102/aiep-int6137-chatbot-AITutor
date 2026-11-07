@@ -55,7 +55,7 @@ turn_summary turn_id=… chat_id=… account_id=… outcome=… duration_ms=… 
 
 任何级别（包括 debug）都不进日志的：
 
-- 上游的 `flowNodeResponse`（节点输出明细，含对话历史预览）和 `updateVariables`（工作流变量全量，带学生数据）两类事件**不整行写进日志**，只记事件名和字节数（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py) 的 `_SENSITIVE_EVENTS` 分支）。
+- 上游的 `flowNodeResponse`（节点输出明细，含对话历史预览）和 `updateVariables`（工作流变量全量，带学生数据）两类事件**不整行写进日志**，只记事件名和字节数（[server/src/server/upstream/chat_api.py](../server/src/server/upstream/chat_api.py) 的 `_SENSITIVE_EVENTS` 分支）。
 
 INFO 级别（正常运行时）不含学生提问和回答的全文，只有长度和编号；全文只在 debug 开关打开时才写。配套的既有规矩不变：`logs/server.log` 的内容不要贴进提交说明、文档或 issue（[AGENTS.md](../AGENTS.md)、[server/AGENTS.md](../server/AGENTS.md)）；turn_dump 的输出带提问和回答的预览，同样别贴进公开渠道。
 

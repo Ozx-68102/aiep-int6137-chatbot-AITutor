@@ -4,10 +4,10 @@ import time
 from uuid import UUID
 
 from server import chat_log, history, reply_store
-from server.fastgpt import FastGPT, FastGPTError, ProgressEvent
 from server.streaming import framing, registry, stopping
 from server.streaming.relay import Relay
 from server.turn_status import ABORTED, COMPLETED, FAILED, TurnStatus
+from server.upstream import FastGPT, FastGPTError, ProgressEvent
 
 logger = logging.getLogger("server.streaming.turn")
 

@@ -14,7 +14,6 @@ from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 
 from server import chat_log
-from server.fastgpt import ChatRecord, FastGPT, FastGPTError
 from server.history import records_cache, session_records
 from server.log import set_turn_context
 from server.reply_store import (
@@ -33,7 +32,7 @@ from server.streaming.sse import empty_sse, sse_stream
 from server.streaming.turn import log_turn_summary, record_stopped_round, relay_turn
 from server.turn_status import ABORTED
 from server.types import ChatRequest
-from server.upstream import require_client
+from server.upstream import ChatRecord, FastGPT, FastGPTError, require_client
 
 logger = logging.getLogger("server.routes.chat")
 

@@ -15,8 +15,8 @@ from sqlalchemy import select
 
 from server import chat_log
 from server.db import ChatSession, db_session
-from server.fastgpt import FastGPT, FastGPTError, open_fastgpt
 from server.settings import load_settings
+from server.upstream import FastGPT, FastGPTError, open_fastgpt
 
 _PAGE_SIZE = 100
 
