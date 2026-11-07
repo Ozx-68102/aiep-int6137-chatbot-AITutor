@@ -147,7 +147,8 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 密码来自别人手的账号（预设密码、被控制台重置过密码），服务器带着 `must_change_password` 标记（迁移 0002），中间件对它请求非豁免路径一律回 403（code `must_change_password`）。前端对应的拦截（2026-11-06）：
 
 - **进入拦截的三个来源**：登录响应里标记为真；页面恢复时拉到的资料里标记为真；任何请求收到 403 且 code 为 `must_change_password`（[http.ts](../src/api/http.ts) 在唯一的响应体解析口广播全局事件，[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 监听后进入拦截）。
-- **拦截期间的行为**：只渲染强制修改密码页（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的强制模式：不显示取消/返回入口，顶部一条白底说明横幅解释为什么被拦），正常聊天主体一概不渲染；路径守卫把地址按在 `/password`——手输别的地址、用浏览器前进后退都会被送回。
+- **拦截期间的行为**：只渲染强制修改密码页（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的强制模式：顶部一条白底说明横幅解释为什么被拦），正常聊天主体一概不渲染；路径守卫把地址按在 `/password`——手输别的地址、用浏览器前进后退都会被送回。
+- **取消（2026-11-07 补上）**：被标记账号的登录不算登录成功——服务器发的只是一条能到豁免路径的受限会话。强制页的「取消」即放弃这次登录：尽力调用注销接口作废受限会话（服务器联系不上也照样回登录页，受限会话到不了聊天功能、会自行过期），清掉本地登录态回登录页，其他标签页经登出标记一起回登录界面；草稿按主动退出的规矩清空。标记仍留在账号上，下次登录照样被拦，直到改完密码。实现：[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的 `cancelGatedLogin`。
 - **解除**：改密成功后服务器在同一事务里吊销全部令牌并清 cookie，「改完接着用」物理上做不到——页面沿用既有成功路径回登录界面（提示「密码已修改，请用新密码重新登录」），用新密码重新登录；登录响应里标记已是 false，拦截解除。万一标记仍为真，拦截重新生效。
 - **控制台一侧**：服务器不做强制改密（维护者永久决定，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」）。控制台的「修改我的密码」入口（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）纯自助；修改成功后所有设备同样下线，回控制台登录界面用新密码重新登录。
 

@@ -185,6 +185,7 @@ function ChatApp() {
     handleAuthError,
     submitLogin,
     signOut,
+    cancelGatedLogin,
   } = authFlow;
   useMultiTabSync({enterLoginGuardedRef, setLocale, setUsername, setAvatarUrl});
   const {sendingNew, handleDraft, showSession, showNewChat, submitMessage} = useMessageSubmit({
@@ -404,8 +405,11 @@ function ChatApp() {
 
   // 「必须修改密码」拦截：标记为真就只渲染强制改密页，正常聊天主体一概不
   // 渲染；地址由登录状态机（use-auth-flow）里的守卫效果按在 /password。
-  // 改密成功后服务器吊销这个账号的全部登录（含当前设备），走 use-password-change
-  // 既有的成功路径回登录界面；重新登录后由登录响应里的标记解除拦截。
+  // 被标记的登录不算登录成功：服务器发的只是一条能到豁免路径的受限会话。
+  // 「取消」＝放弃这次登录（cancelGatedLogin 作废受限会话、回登录页），
+  // 标记不清除，下次登录仍会被拦；改密成功后服务器吊销这个账号的全部登录
+  // （含当前设备），走 use-password-change 既有的成功路径回登录界面；
+  // 重新登录后由登录响应里的标记解除拦截。
   if (mustChangePassword) {
     return (
       <ChangePasswordPage
@@ -415,6 +419,7 @@ function ChatApp() {
         busy={password.busy}
         forced
         onSubmit={password.submit}
+        onCancel={() => void cancelGatedLogin()}
       />
     );
   }

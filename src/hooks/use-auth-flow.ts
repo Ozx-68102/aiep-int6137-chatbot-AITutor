@@ -77,6 +77,7 @@ type AuthFlowDeps = {
 
 /**
  * 登录状态机：auth 三态、登录（submitLogin/openAccount）、退出（signOut）、
+ * 强制改密拦截的取消（cancelGatedLogin）、
  * 会话类 401 的统一入口（handleAuthError/enterLoginGuarded/enterLogin）、
  * 留在原页面的过期状态、强制修改密码标记与它的全局事件监听、路径守卫，
  * 以及推送通道的建连/关连接。
@@ -126,9 +127,11 @@ export function useAuthFlow(deps: AuthFlowDeps) {
   // 一条（旧连接在登录态失效后已经彻底死了，不复用）。
   const [pushEpoch, setPushEpoch] = useState(0);
   // 「必须修改密码」拦截：密码来自别人手的账号（预设密码、被控制台重置过
-  // 密码）被服务器打了标记，本人改出一个新密码之前不放行其他功能。来源
-  // 三个：登录响应、profile 响应，以及任何请求收到的 403（http.ts 的全局
-  // 保底事件）。契约见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」。
+  // 密码）被服务器打了标记，本人改出一个新密码之前不放行其他功能。被标记
+  // 的登录不算登录成功：服务器发的只是一条能到改密等豁免路径的受限会话，
+  // 拦截页的「取消」就是放弃它（cancelGatedLogin）。标记来源三个：登录响应、
+  // profile 响应，以及任何请求收到的 403（http.ts 的全局保底事件）。契约见
+  // docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」。
   const [mustChangePassword, setMustChangePassword] = useState(false);
   // sessionInvalid 的 ref 镜像：enterLoginGuarded 在异步回调里读，不捕获状态值。
   const sessionInvalidRef = useRef(sessionInvalid);
@@ -385,6 +388,34 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     }
   }
 
+  /**
+   * 强制改密页的「取消」＝放弃这次登录。被标记账号的登录不算登录成功：
+   * 服务器发的只是一条能到改密等豁免路径的受限会话，不改密码就用不了其他
+   * 任何功能。取消时尽力把这条会话作废（服务器联系不上也照样回登录页——
+   * 受限会话本来就到不了聊天功能，还会自行过期），清掉本地登录态、清
+   * 草稿、通知其他标签页一起回登录界面。标记还留在账号上，下次登录照样
+   * 被拦，直到改完密码为止。
+   */
+  async function cancelGatedLogin() {
+    if (loggingOut) {
+      return;
+    }
+    setLoggingOut(true);
+    try {
+      try {
+        await logout();
+      } catch {
+        // 尽力而为：作废请求没送到也不影响放弃本地登录态。
+      }
+      enterLogin(null);
+      clearUnsent();
+      clearAllDrafts();
+      writeLogoutMarker();
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return {
     auth,
     setAuth,
@@ -406,5 +437,6 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     handleAuthError,
     submitLogin,
     signOut,
+    cancelGatedLogin,
   };
 }

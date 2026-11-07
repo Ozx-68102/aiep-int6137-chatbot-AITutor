@@ -16,8 +16,10 @@ const MIN_PASSWORD_LENGTH = 6;
  * 组件随页面切换整个卸载后重新挂载，三个输入框天然清空，不用手写清理逻辑。
  *
  * 强制模式（forced）：账号被服务器标了「必须修改密码」时由 App.tsx 的拦截
- * 渲染——不显示取消/返回入口，顶部挂一条说明横幅解释为什么被拦，其余与
- * 普通模式完全一样。
+ * 渲染——顶部挂一条说明横幅解释为什么被拦，其余与普通模式完全一样。
+ * 「取消」两种模式都有，含义不同：普通模式返回来路；强制模式是放弃这次
+ * 登录（被标记的登录不算登录成功，见 use-auth-flow 的 cancelGatedLogin），
+ * 具体动作由调用方传入的 onCancel 决定。
  */
 export function ChangePasswordPage({
   locale,
@@ -34,7 +36,7 @@ export function ChangePasswordPage({
   busy: boolean;
   onSubmit: (oldPassword: string, newPassword: string, confirmPassword: string) => Promise<void>;
   onCancel?: (() => void) | undefined;
-  /** 强制模式：没有取消/返回入口，顶部挂说明横幅。 */
+  /** 强制模式：顶部挂说明横幅；「取消」＝放弃这次登录，由调用方的 onCancel 给。 */
   forced?: boolean | undefined;
 }) {
   const text = translations[locale];
@@ -136,8 +138,9 @@ export function ChangePasswordPage({
             </p>
           ) : null}
           <div className="card-actions justify-end">
-            {/* 强制模式没有取消/返回入口：不改完密码出不去。 */}
-            {forced || onCancel === undefined ? null : (
+            {/* 「取消」两种模式都有：普通模式返回来路；强制模式放弃这次登录、
+                作废受限会话回登录页（见 use-auth-flow 的 cancelGatedLogin）。 */}
+            {onCancel === undefined ? null : (
               <button type="button" className="btn btn-outline" onClick={onCancel}>
                 {text.cancel}
               </button>
