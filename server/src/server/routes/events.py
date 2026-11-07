@@ -88,7 +88,7 @@ async def account_events(
     # 客户端在响应体开流之前就断开时，生成器压根不会启动，也就不留
     # 悬空的订阅。
     return StreamingResponse(
-        _event_stream(account_id, username),
+        _event_stream(account_id, username, login_cookie),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
@@ -105,14 +105,36 @@ def _account_snapshot(login_cookie: str | None) -> tuple[UUID, str]:
         return account.id, account.username
 
 
-async def _event_stream(account_id: UUID, username: str) -> AsyncIterator[str]:
+async def _event_stream(
+    account_id: UUID, username: str, login_cookie: str | None
+) -> AsyncIterator[str]:
     """流本体：先发当前状态，再转发推送；哨兵或断开就收尾。
 
-    鉴权已经过了，登录态必然有效，所以连上的第一帧固定 valid:true
-    （设计稿：连上先发一次状态最要紧——重连补状态就靠它）。
+    订阅之后先复验一次令牌再发第一帧：复验通过发 valid:true
+    （设计稿：连上先发一次状态最要紧——重连补状态就靠它）；
+    复验不通过就发 valid:false（reason=expired）并结束流。
     """
     queue, unsubscribe = pushbus.subscribe(account_id)
     try:
+        # 订阅完成后再复验一次令牌。鉴权快照在端点函数里做，订阅在
+        # 这里才建立，两步之间隔着时间：这段时间里发出的「登录态没了」
+        # 推送会因为队列还没挂上而错过。订阅在先、复验在后，两边就把
+        # 窗口关死了——复验不通过就如实发失效帧；复验通过，之后的任何
+        # 推送必然已经进队列。复验复用鉴权那份查询（_account_snapshot），
+        # 丢进线程跑，不堵事件循环。
+        try:
+            await asyncio.to_thread(_account_snapshot, login_cookie)
+        except Exception:
+            # 令牌已过期/被吊销/不认识（account_from_cookie 抛 401）：
+            # 和收到过期推送同一待遇，如实发失效帧后结束流。
+            yield _state_frame(
+                {
+                    "valid": False,
+                    "reason": pushbus.REASON_EXPIRED,
+                    "message": _MESSAGES[pushbus.REASON_EXPIRED],
+                }
+            )
+            return
         yield _state_frame({"valid": True, "account": username})
         while True:
             try:

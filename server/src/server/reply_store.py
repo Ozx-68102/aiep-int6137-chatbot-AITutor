@@ -7,7 +7,7 @@ from uuid import UUID
 
 # redis.asyncio 的异常和同步客户端同在 redis.exceptions 这个模块里，
 # RedisError 照旧是基类，except 写法不变。
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
 from server.infra.redis_client import get_redis
 from server.settings import load_settings
@@ -88,6 +88,43 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
             exc_info=True,
         )
     return True
+
+
+# 启动探测用的键。也挂在 h2botapp-chat: 前缀底下（应用连的 Redis 用户
+# 的 ACL 只放行这一个前缀）；探测完立刻删掉，就算删不成也 10 秒过期。
+_PROBE_KEY = "h2botapp-chat:probe:set-get"
+
+
+async def probe_set_get_support() -> None:
+    """启动时真发一次 SET … GET，探测 Redis 版本（lifespan 调用）。
+
+    claim_round 靠 SET … GET 一步完成「检查＋占用」，这个写法 Redis
+    6.2 起才支持。版本低的 Redis 会对它回语法错误，claim_round 把语法
+    错误也归进「Redis 不通」的降级分支照样放行，单轮占用守卫就静默
+    失效了，页面上不会有任何报错。所以启动时探测一次：
+
+    - 命令成功：记一条 info，守卫正常。
+    - 收到 ResponseError（语法错误，说明版本低于 6.2）：记一条 error
+      高声报警，这种情况必须升级 Redis。
+    - Redis 整体不通：只记一条 warning，与全项目「Redis 不通就放行」
+      的降级方向一致，不阻止启动。
+
+    不用 INFO 命令探测：生产环境的 ACL 连 info 都不放行
+    （docs/FINDINGS.md 2026-11-06 有记录）。
+    """
+    try:
+        client = get_redis()
+        await client.set(_PROBE_KEY, "1", ex=10, get=True)
+        await client.delete(_PROBE_KEY)
+    except ResponseError:
+        logger.error(
+            "Redis 版本低于 6.2，SET … GET 不可用，"
+            "单轮占用守卫会静默失效，必须升级 Redis"
+        )
+    except RedisError:
+        logger.warning("Redis 不通，探测不了 SET … GET 是否可用", exc_info=True)
+    else:
+        logger.info("SET … GET 可用，单轮占用守卫正常")
 
 
 async def discard_reply(chat_id: UUID) -> None:

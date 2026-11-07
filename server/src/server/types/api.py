@@ -96,10 +96,9 @@ class ProfileResponse(BaseModel):
     # 头像的地址。默认头像由前端提供（/avatar-default.svg），
     # 自己传的头像走接口，地址后面带内容哈希：换了图地址就变，缓存自动失效。
     avatar_url: str
-    # 同 LoginResponse.must_change_password。默认 False 是过渡态：构造
-    # 这个模型的 routes/profile.py 还没把账号上的真值传进来，在那之前
-    # 这个接口先恒回 false；登录响应里的值是真的。
-    must_change_password: bool = False
+    # 同 LoginResponse.must_change_password：构造处（routes/profile.py 的
+    # _profile_response）传的就是账号上的真值，所以这里必填、不给默认值。
+    must_change_password: bool
 
 
 class ProfileUpdate(BaseModel):

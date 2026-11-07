@@ -7,7 +7,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.orm import Session
 
 from server.db import Account, LoginToken, db_session
@@ -121,14 +121,32 @@ def _sweep_expired_tokens() -> set[UUID]:
         return {row[0] for row in rows}
 
 
+def _account_has_live_token(account_id: UUID) -> bool:
+    """这个账号还有没有至少一张没过期的令牌（一条 SELECT EXISTS）。"""
+    with db_session() as session:
+        return bool(
+            session.scalar(
+                select(
+                    exists(
+                        select(LoginToken.id).where(
+                            LoginToken.account_id == account_id,
+                            LoginToken.expires_at > func.now(),
+                        )
+                    )
+                )
+            )
+        )
+
+
 async def sweep_expired_tokens_loop() -> None:
     """周期清扫：启动立刻跑一次，之后每 SWEEP_INTERVAL_SECONDS 一次。
 
     原来这一步挂在请求路径上（每个带令牌的请求都扫一遍全表），现在只在
     这里跑。失败只记一条、不中止循环：数据库恢复以后下一轮会补上。
-    每轮扫完，给命中的账号各推一帧「登录态没了」（reason=expired）：
-    挂着不动的页面不用再等下一次请求收到 401 才发现过期（总线见
-    server/pushbus.py）。
+    每轮扫完，对命中的账号逐个检查：只剩一个有效令牌都没有的账号，
+    才推一帧「登录态没了」（reason=expired）——令牌是每台设备一张，
+    一台设备的令牌过期，不能把同账号其它还在登录的设备踢下线
+    （总线见 server/pushbus.py）。
     """
     while True:
         try:
@@ -137,6 +155,10 @@ async def sweep_expired_tokens_loop() -> None:
             # 失败就不会误推「过期」；这里已在事件循环线程上，publish
             # 本身任何线程调都安全。
             for account_id in swept:
+                # 令牌是每台设备一张：这个账号还有没过期令牌就不推，
+                # 免得把其它还在登录的设备误踢下线；一个不剩才推。
+                if await asyncio.to_thread(_account_has_live_token, account_id):
+                    continue
                 publish(account_id, {"reason": REASON_EXPIRED})
         except Exception as exc:
             logger.warning("清扫过期令牌失败：%s", exc, exc_info=True)

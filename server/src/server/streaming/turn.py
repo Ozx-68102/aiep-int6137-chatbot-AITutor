@@ -92,12 +92,23 @@ async def relay_turn(
         relay.done_status = FAILED
         relay.done_reason = "internal"
     finally:
+        # 写失败状态期间收到的取消先记在这里，收尾走完再原样抛出去。
+        cleanup_cancel: asyncio.CancelledError | None = None
         try:
             if relay.failed:
-                if relay.sent:
-                    await reply_store.mark_failed(chat_id)
-                else:
-                    await reply_store.discard_reply(chat_id)
+                try:
+                    if relay.sent:
+                        await reply_store.mark_failed(chat_id)
+                    else:
+                        await reply_store.discard_reply(chat_id)
+                except asyncio.CancelledError as exc:
+                    # 写失败状态时任务又被取消了一次。不能让它穿透、
+                    # 跳过后面的叫停和写库收尾：那样 Redis 里的状态键
+                    # 会停在「还在写」，直到 600 秒后自然过期，这期间
+                    # 新一轮请求都被 409 拒掉。先把取消记下来，收尾
+                    # 照常走完，最后再抛出去（不吞取消的语义）。
+                    logger.info("写失败状态时又被取消 %s，继续收尾", chat_id)
+                    cleanup_cancel = exc
         finally:
             # 不能 await：任务被取消时再 await 会把取消吞掉。
             relay.queue.put_nowait(None)
@@ -110,6 +121,8 @@ async def relay_turn(
             stopping.ask_upstream_to_stop(chat_id, wait=True)
         # 这一轮结束以后写进我们自己的表。
         settle_round(chat_id, turn_id, relay, fastgpt)
+        if cleanup_cancel is not None:
+            raise cleanup_cancel
 
 
 def record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> bool:

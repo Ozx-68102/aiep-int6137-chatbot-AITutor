@@ -10,8 +10,10 @@ from redis.exceptions import RedisError
 
 from server import chat_log, pushbus, reply_store, upstream
 from server.fastgpt import open_fastgpt
+from server.infra.redis_client import close_redis
 from server.security import sweep_expired_tokens_loop
 from server.settings import load_settings
+from server.streaming import registry, stopping
 
 logger = logging.getLogger("server.lifespan")
 
@@ -41,6 +43,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("启动清理：清掉 Redis 里进程上次运行残留的 %d 个轮次键", removed)
     except RedisError:
         logger.warning("启动清理：Redis 不通，残留轮次键留给自然过期", exc_info=True)
+    # 单轮占用检查依赖 SET … GET 这个写法（Redis 6.2 起才支持）：
+    # 版本低的 Redis 会对它回语法错误，claim_round 会把它归进
+    # 「Redis 不通就放行」的降级分支，单轮守卫静默失效。这里探测
+    # 一次并记日志（版本不够时高声报警），探测结果不阻止启动。
+    await reply_store.probe_set_get_support()
     # 过期令牌的清扫从请求路径挪到这里：启动先跑一次，之后每
     # SWEEP_INTERVAL_SECONDS 一次。单进程假设，不需要分布式锁
     # （见 docs/CHAT_STREAM_PROTOCOL.md「单进程前提」一节）。
@@ -55,3 +62,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # 正常收尾结束流（不投的话它们只能等客户端断开或服务强行切断）。
         pushbus.shutdown()
         await upstream.shutdown()
+        # 等在进行的收尾任务完成：轮次结束后写进数据库的任务、叫停上游的
+        # 任务可能还在跑，它们还要用 Redis，所以排在关 Redis 之前。
+        # 最多等 5 秒；超时不卡死整个关停，记一条警告接着往下走。
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *registry.settle_tasks,
+                    *stopping.stop_tasks,
+                    return_exceptions=True,
+                ),
+                timeout=5.0,
+            )
+        except TimeoutError:
+            logger.warning("关停收尾：等在进行的写库/叫停任务超时，不再继续等")
+        # Redis 最后关：上面的写库和叫停还要用它。
+        await close_redis()

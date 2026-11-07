@@ -150,8 +150,9 @@ def _ensure_console_admin(session: Session) -> None:
             username=_CONSOLE_USERNAME,
             password_hash=PasswordHasher().hash(_CONSOLE_PASSWORD),
             role="admin",
-            # 同上：预设的 admin/admin 必须改掉。控制台那侧暂时不强制
-            # 这个标记（见 routes/admin.py 的注释），但标要照打。
+            # 同上：预设的 admin/admin 必须改掉。控制台那侧不强制
+            # 执行这个标记（维护者的永久决定，见 routes/admin.py 的
+            # 注释），但标要照打。
             must_change_password=True,
             language_setting=LanguageSetting(locale=_INITIAL_LOCALE),
         ),

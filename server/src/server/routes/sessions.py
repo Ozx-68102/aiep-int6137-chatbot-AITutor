@@ -266,6 +266,11 @@ async def read_session_messages(
             status.HTTP_503_SERVICE_UNAVAILABLE, _MESSAGES_READ_ERROR
         ) from None
 
+    # read_partial 读 Redis 在上面数据库 try 块的外面：Redis 不通时
+    # 整个接口回 500。这是维护者确认过的故意设计，与 /partial 端点同一
+    # 语义——读不通就如实报错，让页面分清「服务器没有正在写的这一轮」
+    # 和「问不到服务器」，不把读不通悄悄当成没有在写。依据见
+    # reply_store.read_partial 的 docstring 和 docs/CHAT_STREAM_PROTOCOL.md。
     messages = merge_current_turn(stored, await read_partial(session_id))
     return HistoryResponse(total=len(messages), messages=messages)
 

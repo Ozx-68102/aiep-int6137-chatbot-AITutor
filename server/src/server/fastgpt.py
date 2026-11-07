@@ -234,7 +234,7 @@ class FastGPT:
         if response.status_code != 200:
             logger.error("FastGPT 停止返回 %s", response.status_code)
             return False
-        body = _read_body(response)
+        body = _read_body(response, "stop_chat")
         if isinstance(body, dict):
             data = body.get("data")
             if isinstance(data, dict) and data.get("success") is True:

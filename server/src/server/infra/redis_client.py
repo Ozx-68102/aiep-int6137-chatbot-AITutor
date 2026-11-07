@@ -16,11 +16,15 @@ socket_connect_timeout / socket_timeout 都是 2 秒，Retry(NoBackoff(), 0)。
 （RedisError 照旧是基类），调用方 except RedisError 的降级写法不变。
 """
 
+import logging
+
 from redis.asyncio import Redis
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
 from server.settings import load_settings
+
+logger = logging.getLogger("server.infra.redis_client")
 
 _client: Redis | None = None
 
@@ -51,3 +55,13 @@ def get_redis() -> Redis:
     )
     _client = client
     return client
+
+
+async def close_redis() -> None:
+    """服务关停时关掉 Redis 客户端：单例建过才关，异常只记一条日志。"""
+    if _client is None:
+        return
+    try:
+        await _client.aclose()
+    except Exception:
+        logger.exception("Redis 客户端关闭失败")

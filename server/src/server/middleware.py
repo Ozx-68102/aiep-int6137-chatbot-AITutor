@@ -70,20 +70,6 @@ class RefreshLoginCookie:
             REQUEST_ACCOUNT.set(None)
         refresh = renewed is not None
 
-        # 被标记的账号请求豁免清单之外的 /api/ 路径：直接 403，不往端点走。
-        # 非 /api 路径（页面、静态资源）照常放行。
-        if (
-            must_change_password
-            and path.startswith("/api/")
-            and path not in _MUST_CHANGE_EXEMPT_PATHS
-        ):
-            blocked = JSONResponse(
-                status_code=403,
-                content={"detail": _MUST_CHANGE_DETAIL, "code": _MUST_CHANGE_CODE},
-            )
-            await blocked(scope, receive, send)
-            return
-
         async def send_with_refresh(message: Message) -> None:
             starting = message["type"] == "http.response.start"
             if starting and refresh and cookie is not None:
@@ -97,5 +83,22 @@ class RefreshLoginCookie:
                     set_cookie(fresh, COOKIE_NAME, cookie)
                     headers.append("set-cookie", fresh.headers["set-cookie"])
             await send(message)
+
+        # 被标记的账号请求豁免清单之外的 /api/ 路径：直接 403，不往端点走。
+        # 非 /api 路径（页面、静态资源）照常放行。
+        if (
+            must_change_password
+            and path.startswith("/api/")
+            and path not in _MUST_CHANGE_EXEMPT_PATHS
+        ):
+            blocked = JSONResponse(
+                status_code=403,
+                content={"detail": _MUST_CHANGE_DETAIL, "code": _MUST_CHANGE_CODE},
+            )
+            # 403 也走 send_with_refresh：这个请求已经在数据库里把令牌
+            # 有效期续过了，Set-Cookie 同样要在 http.response.start 阶段
+            # 注入，不能因为撞上拦截页就不续 cookie。状态码和响应体不变。
+            await blocked(scope, receive, send_with_refresh)
+            return
 
         await self._asgi_app(scope, receive, send_with_refresh)
