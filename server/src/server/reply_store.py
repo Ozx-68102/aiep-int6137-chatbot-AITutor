@@ -56,6 +56,11 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
     没抢到的一方也会把状态键写成同样的 streaming 值（TTL 顺延），
     无副作用。
 
+    状态键写着「在写」但轮次登记缺失时（Redis 中途掉线留下的残留），
+    运行期自愈：对编号键做 SET … NX，由 Redis 服务器裁决——NX 成功
+    的请求赢得这一轮、补齐登记后返回 True，NX 失败的照旧返回 False。
+    细节见 previous == STREAMING 分支里的注释。
+
     Redis 不通时按抢占成功放行——和 round_in_flight「读不到按没有在
     写」同一套降级原则：半截回复是可选加固，Redis 挂了聊天照常，
     大不了失去单轮保护。
@@ -73,7 +78,54 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
         )
         return True
     if previous == STREAMING:
-        return False
+        # 运行期自愈：状态键说「在写」，但轮次登记（编号键）可能已经缺失。
+        # 残留是这么来的：上面占用检查和下面的轮次登记是两步，登记失败
+        # 不回退占用（注释里写明了），Redis 在两步中间掉线就留下「状态键=
+        # 在写、登记缺失」的半残留；turn.py 的失败收尾撞上二次取消也可能
+        # 把状态键留在「在写」。残留会让这场会话之后的请求全部被 409 拒发，
+        # 直到状态键过期（600 秒）或进程重启——启动时有残留键清理，运行期
+        # 原先没有。所以这里补查一次：对编号键做 SET … NX（带同样的过期
+        # 时间），由 Redis 服务器裁决：
+        # - 登记还在（真有一轮在写）→ NX 失败，照旧 return False；
+        # - 登记缺失（是残留）→ NX 成功，本次请求赢得这一轮，往下补齐
+        #   其余登记后 return True。
+        # 为什么不用「先删状态键再重新抢」：两个并发请求同时判出残留时，
+        # 第二个人的删会把第一个人刚写的状态键抹掉，两个人都抢到，同一场
+        # 会话双重占用。SET … NX 只可能有一个请求成功，没有这个问题，
+        # 而且用的还是主检查同款原语（set 命令），不引入 ACL 放行范围外
+        # 的新命令（docs/FINDINGS.md 2026-11-02、2026-11-06 有记录）。
+        # 代价：真在写的轮次会多一次对编号键的写入尝试（NX 失败，不写
+        # 任何值、不改过期时间），一条命令的量，可以接受。
+        try:
+            won = await get_redis().set(
+                _turn_key(chat_id), _turn_value(turn_id, question), ex=ttl, nx=True
+            )
+        except RedisError:
+            # 确认不了是不是残留，就按真有一轮在写处理、拒掉本次请求：
+            # 宁可多一次 409，不能同一场会话开出两轮。
+            logger.warning(
+                "Redis 没法核实 %s 的在写状态是不是残留，按真有一轮在写处理",
+                chat_id,
+                exc_info=True,
+            )
+            return False
+        if not won:
+            # 编号键还在：要么真有一轮在写，要么并发的请求刚抢先补齐了
+            # 登记。两种情况都照旧拒发。
+            return False
+        # NX 成功，确认是残留：状态键刚才已被 SET … GET 置成 streaming
+        # 并续了过期时间，编号键刚写好，剩下删掉上一轮留下的半截文字，
+        # 登记就补齐了。删失败不回退，这一轮照常进行（与下面正常路径的
+        # 登记失败处理同方向）。
+        try:
+            await get_redis().delete(_text_key(chat_id))
+        except RedisError:
+            logger.warning(
+                "Redis 删除 %s 的残留半截文字失败，这一轮照常进行",
+                chat_id,
+                exc_info=True,
+            )
+        return True
     # 占用检查通过，补齐剩下的登记。这一步写失败不回退占用检查：这一轮照常
     # 进行，只是断线后的恢复和半截文字降级（与 _tolerate 同方向）。
     try:

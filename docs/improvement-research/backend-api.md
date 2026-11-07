@@ -282,6 +282,8 @@
 ### O4. 单轮占用检查是 check-then-act，不原子（新增）
 
 > **已完成（2026-11-06）**：「查＋占」合成 `reply_store.claim_round` 一个原子动作——`SET … GET` 单命令（写状态键同时原子拿回旧值，旧值 streaming 即没抢到、回 409；抢到当场完成原 begin_reply 的三键登记）。没按本节设想的 Lua 脚本做：生产环境 ACL 不放行 evalsha（docs/FINDINGS.md 2026-11-06 条目），脚本一降级守卫整个失效；`SET NX` 也不行（落定轮的状态键活到 TTL，NX 永远失败）。同轮次幂等预检、被停路径优先级（忙压过停）、Redis 降级放行全部保持。真实环境冒烟测试：进行中双发不同轮 409、同轮重发 409、落定后下一轮不误拦。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「同一场会话同时只跑一轮」。调研原文以 LayerFS 历史为准。
+>
+> **注记（2026-11-07）**：运行期残留自愈加固。原实现的占用检查（`SET … GET`）和轮次登记（pipeline）是两步，登记失败不回退占用，Redis 在两步中间掉线会留下「状态键=streaming、编号键缺失」的残留——这场会话之后的请求全部被 409 拒发，直到状态键过期（600 秒）或进程重启（启动时有残留键清理，运行期原先没有）。现在 `claim_round` 读到旧值是 streaming 时补查一次：对编号键做 `SET … NX`（带同样的过期时间），登记还在照旧拒发，登记缺失（残留）则 NX 成功的请求赢得这一轮、补齐登记后照常进行。并发请求同时判出残留时由 NX 裁决（只可能一个成功），不用「先删状态键再重新抢」——那样第二个人的删会把第一个人刚写的状态键抹掉，造成同一场会话双重占用。补查时 Redis 不通按真有一轮在写处理、拒掉本次请求。只用 set/get/del 这些既有命令，都在生产环境 ACL 放行范围内（docs/FINDINGS.md 2026-11-02、2026-11-06 两条有记录）。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「同一场会话同时只跑一轮」。
 
 - **位置**：`app.py:877`（`round_in_flight` 读）→ `app.py:900`（`begin_reply` 写）；`reply_store.py:44-58`（`begin_reply` 用 pipeline 但无条件 SET）。
 - **现状**：「同一场会话同时只跑一轮」靠先读 status 再写 status 实现，两步之间没有原子性。两个并发 `POST /api/chat`（不同 turn_id、同一 chat_id——比如两个标签页同时发、或前端重发时序错开）可以都通过 `round_in_flight` 检查，然后双双 `begin_reply`：后写的把先写的 turn 键覆盖，两轮的片段交错写进同一个 text 键——正是原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）「同一场会话同时只跑一轮」一节描述要防的事故，现在的防线在并发下有缝。turn_id 幂等检查（`app.py:866-873`）只防「同一请求来两次」，防不了「两个不同请求」。

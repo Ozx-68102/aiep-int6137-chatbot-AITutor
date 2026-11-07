@@ -142,7 +142,9 @@ async def chat(
     # claim_round 一个原子动作：原来先 round_in_flight 查、后 begin_reply
     # 登记，两步之间有缝——两个不同编号的请求同时到，能都通过检查、
     # 都去登记，同一场会话开出两轮（上游多出一轮、半截文字交错写）。
-    # 抢不到就是有一轮在写，照旧 409。Redis 不通时抢占降级放行
+    # 抢不到就是有一轮在写，照旧 409。状态键说在写、轮次登记却缺失的
+    # 残留由 claim_round 自己补查裁决（编号键 SET … NX），裁决输了的
+    # 请求同样走这个 409。Redis 不通时抢占降级放行
     # （见 claim_round 的注释）。
     if not await claim_round(body.chat_id, turn_id, body.message):
         raise HTTPException(status.HTTP_409_CONFLICT, _ROUND_BUSY)
