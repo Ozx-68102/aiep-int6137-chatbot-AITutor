@@ -19,8 +19,8 @@ socket_connect_timeout / socket_timeout 都是 2 秒，Retry(NoBackoff(), 0)。
 import logging
 
 from redis.asyncio import Redis
+from redis.asyncio.retry import Retry  # 必须用异步版：同步版在连接失败路径上不做清理
 from redis.backoff import NoBackoff
-from redis.retry import Retry
 
 from server.settings import load_settings
 

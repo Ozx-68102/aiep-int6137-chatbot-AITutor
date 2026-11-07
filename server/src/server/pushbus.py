@@ -54,7 +54,7 @@ _SHUTDOWN: None = None
 # 被主循环线程改到一半，迭代它不需要锁。前提是 subscribe/unsubscribe/
 # shutdown 只在事件循环线程上跑（分别由 async 端点的生成器和 lifespan
 # 调用），读-改-写不会和自己交错——事件循环是单线程的。
-_subscribers: dict[UUID, tuple[asyncio.Queue[dict | None], ...]] = {}
+_subscribers: dict[UUID, tuple[asyncio.Queue[dict[str, str] | None], ...]] = {}
 
 # subscribe 记下的事件循环：publish 靠它把入队动作丢回主循环线程。
 _loop: asyncio.AbstractEventLoop | None = None
@@ -62,7 +62,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 def subscribe(
     account_id: UUID,
-) -> tuple[asyncio.Queue[dict | None], Callable[[], None]]:
+) -> tuple[asyncio.Queue[dict[str, str] | None], Callable[[], None]]:
     """登记一个订阅：返回（队列，退订函数）。必须在事件循环线程上调。
 
     退订函数幂等（重复调用无害）；调用方要负责在 finally 里调它，
@@ -70,7 +70,7 @@ def subscribe(
     """
     global _loop
     _loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
+    queue: asyncio.Queue[dict[str, str] | None] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
     _subscribers[account_id] = (*_subscribers.get(account_id, ()), queue)
 
     def unsubscribe() -> None:
@@ -85,7 +85,7 @@ def subscribe(
     return queue, unsubscribe
 
 
-def publish(account_id: UUID, event: dict) -> None:
+def publish(account_id: UUID, event: dict[str, str]) -> None:
     """给这个账号的所有订阅者发一个事件。任何线程可调，永不阻塞。
 
     event 是业务载荷原样（现在都是 {"reason": 词表词}），帧的信封
@@ -106,7 +106,7 @@ def publish(account_id: UUID, event: dict) -> None:
         logger.debug("推送总线已停止，丢弃 %s 的事件", account_id)
 
 
-def _deliver(account_id: UUID, event: dict) -> None:
+def _deliver(account_id: UUID, event: dict[str, str]) -> None:
     """真正的入队动作。在事件循环线程上跑（publish 丢回来的）。"""
     for queue in _subscribers.get(account_id, ()):
         try:

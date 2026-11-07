@@ -9,6 +9,7 @@ server/pushbus.py：进程内存实现，依赖单 worker 硬性规定。
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
@@ -20,6 +21,8 @@ from server import pushbus
 from server.db import db_session
 from server.security import COOKIE_NAME, account_from_cookie
 from server.streaming.framing import SSE_HEADERS
+
+logger = logging.getLogger("server.routes.events")
 
 router = APIRouter()
 
@@ -150,6 +153,12 @@ async def _event_stream(
                 # 流结束交给 EventSource 自动重连。
                 break
             reason = item.get("reason")
+            if reason is None:
+                # 契约里 reason 必是词表词，三个发布点都带着它。这里防
+                # 万一漏带：发 null 出去就违反了帧契约，按最稳妥的
+                # 「过期」处理并记一条警告。
+                logger.warning("推送载荷缺 reason，按 expired 处理")
+                reason = pushbus.REASON_EXPIRED
             message = _MESSAGES.get(reason, _FALLBACK_MESSAGE)
             yield _state_frame({"valid": False, "reason": reason, "message": message})
             # 一次登录态只坏一回：推完「失效」就结束流（契约见端点
