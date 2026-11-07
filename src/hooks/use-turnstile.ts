@@ -6,6 +6,9 @@ import {type RefObject, useEffect, useRef, useState} from 'react';
  * 控制台登录两个表单各挂一个实例，action 值与后端约定一致
  *（server/src/server/turnstile.py）。
  *
+ * 挂载容器的 ref 由调用方建好传进来，不随返回值流出：ref 混进渲染期间
+ * 读取的值里，React Compiler 的 lint 会按「渲染中读 ref」拦下整个组件。
+ *
  * sitekey 是公开信息（随页面源码下发），写成常量不违反「密钥只放 .env」
  * 的规矩——那条说的是 secret key，只在服务端 siteverify 时使用。
  */
@@ -16,16 +19,16 @@ const scriptPollMs = 50;
 const scriptPollLimit = 400;
 
 export type TurnstileWidget = {
-  /** widget 的挂载容器：接到 JSX 里一个空 div 的 ref 上。 */
-  containerRef: RefObject<HTMLDivElement | null>;
   /** 当前可用的令牌；widget 未就绪或还没通过验证时是 null。 */
   token: string | null;
   /** 作废当前令牌并让 widget 重新出验证（每次提交尝试结束后调用）。 */
   reset: () => void;
 };
 
-export function useTurnstile(action: string): TurnstileWidget {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+export function useTurnstile(
+  action: string,
+  containerRef: RefObject<HTMLDivElement | null>,
+): TurnstileWidget {
   const widgetIdRef = useRef<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
 
@@ -95,7 +98,7 @@ export function useTurnstile(action: string): TurnstileWidget {
       }
       widgetIdRef.current = null;
     };
-  }, [action]);
+  }, [action, containerRef]);
 
   function reset() {
     setToken(null);
@@ -106,5 +109,5 @@ export function useTurnstile(action: string): TurnstileWidget {
     }
   }
 
-  return {containerRef, token, reset};
+  return {token, reset};
 }

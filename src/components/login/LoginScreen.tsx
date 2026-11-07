@@ -1,5 +1,5 @@
 import {CircleAlert} from 'lucide-react';
-import {useState} from 'react';
+import {useRef, useState} from 'react';
 import logoUrl from '../../assets/H-Squared_Bot_Vector.svg';
 import {useTurnstile} from '../../hooks/use-turnstile.ts';
 import {translations} from '../../i18n/index.ts';
@@ -35,7 +35,9 @@ export function LoginScreen({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   // Turnstile widget：令牌就绪前禁用按钮；每次登录尝试结束后 reset 换新令牌。
-  const turnstile = useTurnstile('login');
+  // 容器 ref 建在组件里传给 hook，不混进 hook 的返回值（渲染中不读 ref）。
+  const turnstileRef = useRef<HTMLDivElement | null>(null);
+  const turnstile = useTurnstile('login', turnstileRef);
   const blocked =
     offline || submitting || username.trim() === '' || password === '' || turnstile.token === null;
 
@@ -98,7 +100,7 @@ export function LoginScreen({
             {text.forgotPasswordHint}
           </p>
           {/* Turnstile 人机验证 widget：由 use-turnstile 显式渲染；令牌没就绪时按钮禁用。 */}
-          <div ref={turnstile.containerRef} className="flex justify-center" />
+          <div ref={turnstileRef} className="flex justify-center" />
           {error ? (
             <p
               className="m-0 flex items-center gap-1.5"
