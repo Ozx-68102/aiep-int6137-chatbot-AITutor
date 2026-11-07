@@ -150,6 +150,8 @@ unicorn 与 react-perf 规则面宽、风格类噪音多，本项目规模下收
 ### 9. 前后端检查没有统一入口
 
 > **已完成（2026-11-06）**：`scripts/check-all.sh`——前端规范（oxlint）、前端格式（oxfmt --check）、前端类型（tsc --noEmit）、后端两件套（复用 scripts/check-server.sh）四步连跑，失败点名是哪一步并给复验命令，开头检查 pnpm/uv 在不在。是 CI 的本地等价物（CI 只多一次构建）。真实环境实测四步全部通过、总共约 4 秒。
+>
+> **注记（2026-11-07）**：后端检查加了第三步 basedpyright（类型检查，standard 档，配置在 server/pyproject.toml）。接入前把存量错误清零：两处真问题修了代码（Redis 异步客户端拿了同步版重试类——失败路径的清理永远不会执行；推送队列载荷没写类型——reason 可能为 null 违反帧契约），三处「框架现实与类型标注不符」加了逐行豁免注释并写明理由（FastAPI 注册任意异常处理器是官方标准写法、pydantic-settings 从环境变量取值）。scripts/check-all.sh 第 [4/4] 步与 CI 后端作业同步加了这一步，五项检查实测总共约 3 秒。
 
 - **位置**：/scripts/check-server.sh（后端 ruff check + format --check）、package.json `check`（前端）。
 - **现状**：完整验收要记住两个入口：前端在根目录 `pnpm check`（+第 8 条后的 tsc），后端 `bash scripts/check-server.sh`。没有一键全查。
@@ -207,6 +209,8 @@ setup-hooks.sh 已经给 .githooks/ 下所有文件 chmod +x，零改动兼容�
 ### 11. 没有 CI：GitHub Actions 可行且正好覆盖现有盲区（建议）
 
 > **已完成（2026-11-06）**：`.github/workflows/ci.yml`——push main 与全部 PR 触发；前端作业（pnpm 12.16.1 显式固定并与 packageManager 字段对齐、Node 读 .nvmrc、冻结安装、`pnpm check`、构建并确认产物），后端作业（setup-uv、Python 3.13、冻结同步、ruff 两件套）。CI 不跑迁移不起服务（runner 无 PG/Redis），文件头注释写明。**注**：尚未在 GitHub 上实际运行过——push 权在维护者，首次 push 时第一次触发；action 标签均经 API 核实存在、YAML 经解析器验证。
+>
+> **注记（2026-11-07）**：上条「尚未实际运行」已过时——2026-11-06 晚维护者首次 push 即触发 GitHub 首跑，前端作业 29 秒、后端作业 11 秒，全部通过。后端作业此后加了第三步 basedpyright（见第 9 条注记），「ruff 两件套」的说法随之成为历史。
 
 - **位置**：仓库根（/.github 实测不存在）；仓库推送 GitHub（Ozx-68102/aiep-int6137-chatbot-AITutor，package.json 已配 repository/bugs URL）。
 - **现状**：所有检查只发生在本地。远端已开分支名 ruleset（AGENTS.md），但没有任何 check 类 ruleset。尤其关键：LayerFS 合并走 `git commit-tree` 复制写入，**复制出的提交不触发任何本地钩子**（AGENTS.md 自己写明 commit-msg 要手动逐条预检）——这条最主要的写入 git 路径目前完全绕过自动检查，CI 是唯一能接住它的位置。

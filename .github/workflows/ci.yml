@@ -72,7 +72,9 @@ jobs:
       # 严格按 server/uv.lock 安装依赖。只装依赖，不连数据库、不起服务。
       - run: uv sync --frozen
 
-      # ruff 两件套（与 scripts/check-server.sh 在本地跑的是同样两项）：
-      # ruff check 查代码规范，ruff format --check 只查格式、不改文件。
+      # 后端检查（与 scripts/check-server.sh 在本地跑的是同样三项）：
+      # ruff check 查代码规范，ruff format --check 只查格式、不改文件，
+      # basedpyright 做类型检查（standard 档，配置在 server/pyproject.toml）。
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run basedpyright

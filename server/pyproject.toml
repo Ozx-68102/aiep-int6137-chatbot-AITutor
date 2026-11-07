@@ -78,3 +78,10 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
+
+[tool.basedpyright]
+# 类型检查档位。standard 能拦住「函数少传一个参数」「变量没赋值就用」
+# 这类会在运行时炸的错误；更严的 recommended 档要求补大量类型标注
+#（2026-11-07 首跑评估：standard 存量清零，recommended 存量 238 条、
+# 九成是标注完整性要求），暂不起步。
+typeCheckingMode = "standard"

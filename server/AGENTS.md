@@ -18,6 +18,7 @@
 - `uv run ruff check .` — 检查
 - `uv run ruff format .` — 按 ruff 的规则改格式
 - `uv run ruff format --check .` — 只查格式，不改文件
+- `uv run basedpyright` — 类型检查（standard 档，配置在 `pyproject.toml` 的 `[tool.basedpyright]` 节）
 - 前后端一键全查在仓库根：`bash scripts/check-all.sh`（`.githooks/pre-commit` 跑的就是它）
 - `uv run server` — 起服务，等价于仓库根目录的 `pnpm run dev:backend`
 - `uv run python -m server.db.init` — 只补缺的表和列，建初始账号，不改已有密码。不要每次起服务都跑：只在项目维护者下令时，或改了数据库结构之后跑
@@ -25,7 +26,7 @@
 起服务前，本机 PostgreSQL 和 Redis 必须在运行。想一次跑完两项检查：在仓库根目录执行 `bash scripts/check-server.sh`。
 
 ## 验收
-- 改完后端代码：`uv run ruff check .` 和 `uv run ruff format --check .`
+- 改完后端代码：`uv run ruff check .`、`uv run ruff format --check .` 和 `uv run basedpyright`
 
 ## 迁移
 

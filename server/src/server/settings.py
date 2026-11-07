@@ -32,7 +32,7 @@ def load_settings() -> Settings:
     configure_logging()
     try:
         # noinspection PyArgumentList
-        settings = Settings()
+        settings = Settings()  # pyright: ignore[reportCallIssue]
     except ValidationError as exc:
         message = _validation_message(exc)
         logger.error("配置无效，进程无法启动：%s", message)

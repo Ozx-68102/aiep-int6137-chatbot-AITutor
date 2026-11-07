@@ -127,6 +127,15 @@ def _validation_text(error: ErrorDetails) -> str:
 
 def install_handlers(app: FastAPI) -> None:
     """注册三个全局异常处理器（对应原 app.py 的 @app.exception_handler 装饰器）。"""
-    app.add_exception_handler(RequestValidationError, validation_error_handler)
+    # Starlette 的类型标注只认 HTTPException/WebSocketException 两种处理器，
+    # 但 FastAPI 运行时支持任意异常类（官方文档的标准写法），下面两条注册
+    # 逐行豁免类型检查。
+    app.add_exception_handler(
+        RequestValidationError,
+        validation_error_handler,  # pyright: ignore[reportArgumentType]
+    )
     app.add_exception_handler(Exception, unhandled_error_handler)
-    app.add_exception_handler(SessionUnauthorized, session_unauthorized_handler)
+    app.add_exception_handler(
+        SessionUnauthorized,
+        session_unauthorized_handler,  # pyright: ignore[reportArgumentType]
+    )

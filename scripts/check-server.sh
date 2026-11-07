@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the backend checks: ruff lint and ruff format.
+# Run the backend checks: ruff lint, ruff format and basedpyright types.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,3 +12,4 @@ fi
 
 uv run ruff check .
 uv run ruff format --check .
+uv run basedpyright

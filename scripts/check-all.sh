@@ -38,7 +38,7 @@ pnpm fmt:check || fail "前端格式（pnpm fmt:check）"
 echo "check-all: [3/4] 前端类型检查（pnpm exec tsc --noEmit）"
 pnpm exec tsc --noEmit || fail "前端类型检查（pnpm exec tsc --noEmit）"
 
-echo "check-all: [4/4] 后端检查（scripts/check-server.sh，即 ruff check + ruff format --check）"
+echo "check-all: [4/4] 后端检查（scripts/check-server.sh，即 ruff check + ruff format --check + basedpyright 类型检查）"
 bash scripts/check-server.sh || fail "后端检查（scripts/check-server.sh）"
 
 echo "check-all: 全部通过"
