@@ -38,6 +38,7 @@ from server.security import (
     set_cookie,
     verified_account,
 )
+from server.turnstile import ACTION_ADMIN_LOGIN, ACTION_LOGIN, ensure_human
 from server.types import (
     AdminLoginResponse,
     LoginRequest,
@@ -56,6 +57,9 @@ _NEW_PASSWORD_MISMATCH = "两次输入的新密码不一致"
 async def login(
     body: LoginRequest, request: Request, response: Response
 ) -> LoginResponse:
+    # 人机验证在最前：没过 Turnstile 的尝试不碰锁定状态、数据库和 argon2，
+    # 也不计入失败计数（门槛本体见 server/turnstile.py 的模块说明）。
+    await ensure_human(body.turnstile_response, ACTION_LOGIN, request)
     # 先查锁定再进验证：锁定期间连密码哈希都不碰（argon2 是 CPU 活）。
     await raise_if_login_locked(body.username, request)
     # 端点从同步 def 改成 async def：限流计数要 await 异步 Redis 客户端。
@@ -86,6 +90,8 @@ async def admin_login(
     「用户名或密码不正确」；限流也是同一套。控制台界面是后面那批活，
     接口先立起来。
     """
+    # 人机验证在最前，与 /api/login 同一道门槛：不过就不碰锁定和数据库。
+    await ensure_human(body.turnstile_response, ACTION_ADMIN_LOGIN, request)
     await raise_if_login_locked(body.username, request)
     try:
         username, token = await asyncio.to_thread(

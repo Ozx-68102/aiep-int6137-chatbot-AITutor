@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     redis_key_ttl_seconds: int = Field(ge=1)
     redis_user: str = Field(min_length=1)
     redis_password: SecretStr = Field(min_length=1)
+    # Turnstile 人机验证（登录接口的门槛）。secret 只在服务端；hostnames 是
+    # siteverify 返回的前端主机名允许名单（逗号分隔）：开发填 localhost，
+    # 生产填真实域名、不得包含 localhost / 127.0.0.1。两项有任何一项没配，
+    # 登录一律 403（server/turnstile.py，宁可挡住不放开）。
+    turnstile_secret: SecretStr = SecretStr("")
+    turnstile_hostnames: str = ""
 
     @field_validator("debug", mode="before")
     @classmethod
@@ -67,6 +73,7 @@ class Settings(BaseSettings):
         "redis_host",
         "redis_user",
         "redis_password",
+        "turnstile_hostnames",
         mode="before",
     )
     @classmethod
