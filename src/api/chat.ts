@@ -142,10 +142,18 @@ async function deliverReply(
  * 明确说没在写（404）→ 请求没有生效，或这一轮已经有了最终结果：带同一个 turn_id
  * 重发一次是安全的——服务器按编号幂等（已有最终结果的轮次返回空流），不会生成
  * 两遍；还在写 / 问不到服务器 → 不知道或没写完，一律不重发，免得生成
- * 两遍，结局交给恢复流程按数据库核对并修正。
+ * 两遍，结局交给恢复流程按数据库核对并修正；会话死了（401）→ 抛出，
+ * 走发送流程既有的 401 出口（见下面函数体里的注释）。
  */
 async function outcomeAfterFailure(chatId: string): Promise<ReplyOutcome> {
   const probe = await probePartial(chatId);
+  if (probe.kind === 'unauthorized') {
+    // 401 是服务器明确说会话死了，不是「问不到服务器」的网络问题。原样抛出，
+    // 沿 streamReply 传回 use-turn-engine 的 sendQuestion 的 catch——那里已有
+    // 完整的 401 处理（把这句提问存起来 + 统一出口 onAuthError）。在这里吞掉
+    // 归成 interrupted，会话过期就会被错报成连接问题，走连接横幅。
+    throw probe.error;
+  }
   return probe.kind === 'idle' ? 'not-started' : 'interrupted';
 }
 

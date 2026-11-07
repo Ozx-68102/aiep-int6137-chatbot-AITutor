@@ -70,7 +70,7 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 - **断网即时感知与恢复确认**（2026-11-06 改写，[use-service-status.ts](../src/hooks/use-service-status.ts)）：`offline` 事件立即挂既有的服务横幅（`unreachable` 档、`connectionRetry` 文案），不用等最坏 30 秒的下一个周期。`online` 不轻信——网卡通了不代表服务器够得着——主动探测 `GET /api/status` 确认，失败按 1s/2s/4s…封顶 15s 指数退避重试；世代编号（`confirmGeneration`）作废旧的确认循环：offline 和新的 online 都把世代编号加一，不会出现两条确认循环并存；`navigator.onLine` 为假时暂停、等下一次 online。确认进行期间，常规 30 秒周期与可见性补查都让路——同一时刻只有一条探测链在请求 `/api/status`。确认成功后先 `clearTimeout` 再同步重挂 30 秒定时器（倒计时清零，任何时刻只有一个定时器），并广播 window 事件 `h2bot:network-ok`（[poll.ts](../src/session/poll.ts) 导出的 `networkOkEvent`）。
 - **谁在听 `h2bot:network-ok`**：① 500 毫秒续传轮询循环——提前结束这个周期的等待、立即以全新的周期开始（`finish` 幂等；唤醒后先发请求、请求回来才建下一个周期定时器，没有新旧定时器并存的窗口）。② 断线补查 catchUp（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts)）——不再直接听浏览器 raw `online`：那时补查多半白白失败一趟，还会和主动探测形成双份补查。补查行为不变：对每个还在等回答的会话挨个补查一次线程（`refreshThread`，里面带着续传逻辑），**跳过本页正在流式的会话**——那场让流自己收尾，别在这儿换掉消息列表。`visibilitychange` 回可见的常规补查与可见性提前结束轮询等待照旧。
 - **保底定位键**：从上游回填的老会话消息可能没有轮次编号。waiting 消息没有 turnId 时，轮询用 `message.id` 当定位键（只认还在等待中的那条），续传不再静默失效（`applyPartialText` 的 fallbackKey 分支）。
-- 服务器侧 `/partial` 的收窄语义（200 只回 streaming、其余一律 404）和 `probePartial` 三态见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「刷新续传与断流恢复」。
+- 服务器侧 `/partial` 的收窄语义（200 只回 streaming、其余一律 404）和 `probePartial` 四种结果见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「刷新续传与断流恢复」。
 
 ## 超时与重试
 
@@ -165,7 +165,7 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 
 ## 已知限制
 
-- **`probePartial` 把 401 归为 unreachable**：流断了去问「还在写吗」时如果会话已过期，401 被归进「问不到服务器」，走连接警示横幅而不是会话过期后留在原页面的状态。推送通道 2026-11-06 已接上；这个归类还没调整，认 reason 仍是后续待办。
+- **`probePartial` 把 401 归为 unreachable（原限制，2026-11-07 关闭）**：流断了去问「还在写吗」时如果会话已过期，401 曾被归进「问不到服务器」，走连接警示横幅而不是会话过期后留在原页面的状态。现在 401 单列为「会话已失效」（unauthorized）结果、带上 reason，四个调用点全部接入会话过期处理：引擎的断流恢复（`recoverReply`）和停止收尾（`finishStop`）直接走统一的 401 出口（`onAuthError`）；`chat.ts` 的 `outcomeAfterFailure` 和 `thread.ts` 的 `loadThread` 把 401 原样抛给调用方既有的 401 出口。
 - **留在原页面的过期状态里侧栏/设置操作的 401 静默失败**：`enterLoginGuarded` 保证不清页，但那些操作本身也没成功，用户看不到单独的解释（横幅是共用的那条）。
 - **`/password` 页提交收到 401 无可见反馈**：「会话过期后留在原页面的状态」的提示只挂在聊天页，独立路由的改密页收不到；提交失败只留在表单错误里，不说「会话已过期」。
 - **服务器侧失效已实时推送（原限制，2026-11-06 关闭）**：改密、控制台重置、令牌过期经 `/api/events` 推送通道推到所有开着的标签页、进入与带 reason 的 401 同一套留在原页面的过期状态，下一次请求的 401 作保底；主动退出照旧走 localStorage 标记（退出登录不推送，属设计决定）。

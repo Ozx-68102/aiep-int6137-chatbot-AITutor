@@ -56,6 +56,11 @@ export function useTurnEngine(deps: TurnEngineDeps) {
   const sendingRef = useRef<Set<string>>(new Set());
   const aborters = useRef(new Map<string, {controller: AbortController; turnId: string}>());
   const stoppers = useRef(new Map<string, Promise<void>>());
+  // 登录世代编号：resetForLogin 每次把它加一。跨 await 的流程出发时记下当时的
+  // 编号，回来写任何状态之前先核对编号没变；变了说明中间退出或重新登录过，
+  // 这段流程整个放弃，旧登录态的在途请求就不会把结果写进新登录的会话里。
+  // 与 use-service-status 里确认循环用的世代编号是两个各自独立的计数。
+  const loginGeneration = useRef(0);
   const pollers = useRef(new Map<string, () => void>());
   const loadedThreads = useRef(new Set<string>());
   const threadFlight = useRef(new Set<string>());
@@ -476,10 +481,23 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 还在写（200）→ 补上半截文字，接着轮询；明确说没在写（404，包括
    * 「Redis 里追的是别的轮次」）→ 以数据库为准核对并修正：结局标志（failed/aborted）
    * 已经在消息上，脚注照标志渲染；问不到服务器（网络错）→ 保留现场，
-   * 不删已收到的文字，归常驻的连接警示横幅，不替服务器下结论。
+   * 不删已收到的文字，归常驻的连接警示横幅，不替服务器下结论；
+   * 会话死了（401）→ 走统一的 401 出口（onAuthError），进入会话过期后
+   * 留在原页面的状态，不归连接横幅。
    */
   async function recoverReply(sessionId: string, turnId: string) {
+    const generation = loginGeneration.current;
     const probe = await probePartial(sessionId);
+    if (generation !== loginGeneration.current) {
+      // 已经退出登录：不再恢复，免得补出等待气泡、开启轮询去接管新会话。
+      return;
+    }
+    if (probe.kind === 'unauthorized') {
+      // 会话死了：与 sendQuestion 的 401 同一个出口（带 reason 进入会话过期后
+      // 留在原页面的状态），不走连接横幅，也不静默忽略。
+      depsRef.current.onAuthError(probe.error);
+      return;
+    }
     if (probe.kind === 'unreachable') {
       depsRef.current.onConnectionWarning();
       return;
@@ -503,6 +521,8 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     retryOf?: string,
     onRollback?: () => void,
   ) {
+    // 出发时的登录世代编号：后面每次写状态之前都核对它，退出/重新登录后整段放弃。
+    const generation = loginGeneration.current;
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
     aborters.current.set(sessionId, {controller, turnId});
@@ -516,6 +536,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         question,
         turnId,
         (chunk) => {
+          if (generation !== loginGeneration.current) {
+            // 已经退出登录：这条流的内容不再属于当前会话，放弃。
+            return;
+          }
           // 第一个内容增量到达：进度文本完成使命（清空是幂等的，
           // 后续增量拿到同一份引用，不再触发重渲染）。
           clearProgress(sessionId);
@@ -528,9 +552,17 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         controller.signal,
         retryOf,
         (name) => {
+          if (generation !== loginGeneration.current) {
+            return;
+          }
           setSessionProgress(sessionId, name);
         },
       );
+      if (generation !== loginGeneration.current) {
+        // 流的期间退出过登录：三张表已被 resetForLogin 清空，下面所有分支都
+        // 不再执行，免得旧一轮的结局写进刚登录的新会话。
+        return;
+      }
       // 流结束（五种结局都一样）：进度文本不再有意义。
       clearProgress(sessionId);
       if (outcome === 'busy') {
@@ -541,6 +573,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         saveUnsent(question);
         setSessionWarning({sessionId, text: textRef.current.roundBusy});
         await refreshThread(sessionId);
+        if (generation !== loginGeneration.current) {
+          // 读线程的期间退出过登录：回滚不再执行，免得把旧消息快照插进新会话。
+          return;
+        }
         // 重发（重试/编辑重发）没发出去：把旧轮次放回来。refreshThread 一般已经
         // 从服务器带回旧轮次，这里是读线程失败时的保底处理；恢复本身是幂等的。
         onRollback?.();
@@ -583,6 +619,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         depsRef.current.setNotice(textRef.current.connectionError);
       }
     } catch (error) {
+      if (generation !== loginGeneration.current) {
+        // 已经退出登录：不存草稿、不挂提示、也不调 401 出口，别弄脏新登录的会话。
+        return;
+      }
       endPresent(assistantId);
       if (error instanceof ApiError && error.status === 401) {
         // 发送时被强制下线：发送前草稿已经清了，这句提问存起来，
@@ -614,20 +654,29 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         explain(error, depsRef.current.locale, textRef.current.connectionError),
       );
     } finally {
-      aborters.current.delete(sessionId);
-      stoppers.current.delete(sessionId);
-      sendingRef.current.delete(sessionId);
-      clearProgress(sessionId);
-      if (!pollers.current.has(sessionId)) {
-        clearPending(sessionId);
+      // 世代编号变了就不清：resetForLogin 已经把三张表清空，重新登录后同一场
+      // 会话可能已经登记了新一轮，在这里误删会把新一轮的发送锁放开。
+      if (generation === loginGeneration.current) {
+        aborters.current.delete(sessionId);
+        stoppers.current.delete(sessionId);
+        sendingRef.current.delete(sessionId);
+        clearProgress(sessionId);
+        if (!pollers.current.has(sessionId)) {
+          clearPending(sessionId);
+        }
       }
     }
   }
 
   /** 重新读一次线程：这一轮是在别的页面发出去的，本页还不知道。 */
   async function refreshThread(sessionId: string) {
+    const generation = loginGeneration.current;
     try {
       const thread = await loadThread(sessionId);
+      if (generation !== loginGeneration.current) {
+        // 已经退出登录：旧线程不再覆盖新登录会话的消息列表。
+        return;
+      }
       depsRef.current.updateSession(sessionId, (session) => ({
         ...session,
         messages: thread.messages,
@@ -637,6 +686,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
         resumePartial(sessionId, thread.messages);
       }
     } catch (error) {
+      if (generation !== loginGeneration.current) {
+        // 已经退出登录：旧请求的 401 不再经 onAuthError 压到新登录的会话上。
+        return;
+      }
       // 会话过期走统一的 401 出口（和历史加载同款）；其余读不到就算了，
       // 页面照常用。
       if (error instanceof ApiError && error.status === 401) {
@@ -651,16 +704,32 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * 先让服务器记下停止（服务器写停止标记，再取消正在跑的任务），
    * 再问服务器「这一轮还在写吗」这一个问题：还在写就接着等；明确说
    * 没在写（404）就以数据库为准核对并修正，停了/写完/失败的标志在消息上，
-   * 气泡下方的脚注照标志渲染。页面不自己宣布停了。
+   * 气泡下方的脚注照标志渲染；会话死了（401）走统一的 401 出口。
+   * 页面不自己宣布停了。
    */
   async function finishStop(sessionId: string, turnId: string, fallbackKey: string = '') {
+    const generation = loginGeneration.current;
     try {
       await abortReply(sessionId, turnId);
     } catch {
       // 服务器那边收不到也不碍事：页面已经不等这一轮了。
     }
+    if (generation !== loginGeneration.current) {
+      // 已经退出登录：停止的收尾不再做，免得把旧轮次的状态写进新会话、开新轮询。
+      return;
+    }
 
     const probe = await probePartial(sessionId);
+    if (generation !== loginGeneration.current) {
+      return;
+    }
+    if (probe.kind === 'unauthorized') {
+      // 会话死了：走统一的 401 出口（与 recoverReply 同款）。不挂连接横幅，
+      // 也不就地标 aborted——会话已失效，服务器那边停没停成，页面不知道，
+      // 不替服务器下结论。
+      depsRef.current.onAuthError(probe.error);
+      return;
+    }
     if (
       probe.kind === 'streaming' &&
       (probe.partial.turnId === null || probe.partial.turnId === turnId)
@@ -716,8 +785,20 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     setThreadRetry((current) => current + 1);
   }
 
-  /** 退出登录/被强制退回登录页：把进行中的加载、轮询和等待标记一次清干净。 */
+  /**
+   * 退出登录/被强制退回登录页：把进行中的加载、轮询和等待标记一次清干净，
+   * 中止还在进行的发送请求，清空「正在发送」集合、取消器表和停止器表，
+   * 并把登录世代编号加一——还挂在 await 上的旧流程回来时发现编号变了，
+   * 会整段放弃，不再写任何状态（见 loginGeneration 的注释）。
+   */
   function resetForLogin() {
+    loginGeneration.current += 1;
+    for (const {controller} of aborters.current.values()) {
+      controller.abort();
+    }
+    aborters.current.clear();
+    stoppers.current.clear();
+    sendingRef.current.clear();
     setPendingIds(new Set());
     setPresentIds(new Set());
     setProgressBySession({});

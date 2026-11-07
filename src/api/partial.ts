@@ -18,15 +18,21 @@ export type PartialReply = {
 };
 
 /**
- * 问服务器「还在写吗」的三种结果。
+ * 问服务器「还在写吗」的四种结果。
  *
  * 「服务器明确说没在写」（idle，404）和「没问到服务器」（unreachable，
  * 网络错等）必须分开：前者可以安全地以数据库为准，后者什么都不知道，
  * 不能替服务器下结论。
+ *
+ * 401（unauthorized）同样不能归进 unreachable：401 是会话死了，服务器
+ * 够得着、也答了话，页面要走会话过期的处理（留在原页面的过期状态、
+ * 带 reason 的重新登录入口），不是「连不上服务器」的连接横幅。error
+ * 带上是为了调用方能读 reason。
  */
 export type PartialProbe =
   | {kind: 'streaming'; partial: PartialReply}
   | {kind: 'idle'}
+  | {kind: 'unauthorized'; error: ApiError}
   | {kind: 'unreachable'; error: unknown};
 
 export async function readPartial(sessionId: string): Promise<PartialReply> {
@@ -42,11 +48,15 @@ export async function readPartial(sessionId: string): Promise<PartialReply> {
   };
 }
 
-/** 不抛错的 readPartial：把结果分成三种，调用方按 kind 分支。 */
+/** 不抛错的 readPartial：把结果分成四种，调用方按 kind 分支。 */
 export async function probePartial(sessionId: string): Promise<PartialProbe> {
   try {
     return {kind: 'streaming', partial: await readPartial(sessionId)};
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      // 会话死了：单列一种结果，由调用方走会话过期的处理。
+      return {kind: 'unauthorized', error};
+    }
     if (error instanceof ApiError && error.status === 404) {
       // 服务器明确说：这一轮没在写。
       return {kind: 'idle'};

@@ -82,11 +82,19 @@ export function startPartialPolling(
       try {
         partial = await readPartial(sessionId);
       } catch (error) {
+        if (stopped) {
+          // 请求在途时循环被 stop() 停掉了（比如退出登录的清理）：不再触发任何回调。
+          return;
+        }
         if (error instanceof ApiError && (error.status === 404 || error.status === 401)) {
           onEnd?.(error);
           return;
         }
         continue;
+      }
+      if (stopped) {
+        // 请求回来时循环可能已经被停掉：半截文字不再写、onEnd（含 401）也不再触发。
+        return;
       }
       // 200 ⇒ 还在写，接着轮询；终止只从 404/401（onEnd）来。
       onPartial(partial);
