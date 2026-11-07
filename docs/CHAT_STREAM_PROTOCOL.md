@@ -107,7 +107,7 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 
 ## 刷新续传与断流恢复
 
-**服务器这边**：进行中的文字住在 Redis 里（`:text` 键，每转发一块就追加），页面断开不影响服务器写完这一轮。`GET /api/sessions/{id}/messages` 返回整场会话的线程：我们自己 `message` 表的历史，加上 Redis 里当前这一轮（`history.merge_current_turn` 按轮次编号对号——表里这一轮已落定就以表为准；编号对得上且还在写，用 Redis 里的半截文字补上；编号对不上就如实降级为 failed，不按文本比对做保底修正）。
+**服务器这边**：进行中的文字住在 Redis 里（`:text` 键，每转发一块就追加），页面断开不影响服务器写完这一轮。`GET /api/sessions/{id}/messages` 返回整场会话的线程：我们自己 `message` 表的历史，加上 Redis 里当前这一轮（`history.merge_current_turn` 按轮次编号对号——表里这一轮已落定就以表为准；编号对得上且还在写，用 Redis 里的半截文字补上；编号对不上就如实降级为 failed，不按文本比对做保底修正；唯一例外是「表里没有这一轮」时的补提问分支，仍按提问文本比对防止把同一条提问显示两遍——维护者已决定保留，2026-11-06）。
 
 **`/partial` 只回答一个问题——这一轮还在写吗**（`read_session_partial`）：
 
@@ -152,7 +152,8 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 
 - **Redis 不通时降级**：半截回复是可选的，Redis 写失败只记警告，聊天照常走（`reply_store` 的 `_tolerate`）；页面上会出现一条常驻横幅「半截回答功能不可用」。Redis 客户端连接不通要马上知道（连接、读写都是 2 秒超时，不重试——默认的连接重试会让一次失败的写入等 3.7 秒）。2026-11-06 起客户端换成 `redis.asyncio`：慢 Redis 卡的只是 await 它的那一个协程，不再阻塞事件循环（同步客户端时代一次慢调用会放大成全站卡顿）。
 - **状态接口**：`GET /api/status` 报 `{"database": "ok"|"unavailable", "reply_store": "ok"|"unavailable"}`。不需要登录，只带 cookie 也不刷新登录有效期（它是心跳）。页面每 30 秒查一次、标签页重新可见时补查（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)）。
-- **上游记录的 5 秒缓存：已退役**。页面历史改为从我们自己的 `message` 表来之后（见「这一轮的历史从哪儿来」），刷新根本不碰上游，当初防「刷新风暴打垮上游」的进程内缓存（[FINDINGS.md](FINDINGS.md) 2026-10-30 那条）失去存在理由，2026-11-05 结构整理时删除。老会话回填一次写进数据库，同样不会重复问上游。
+- **上游记录的 5 秒缓存：已退出页面历史主路径，代码保留**。页面历史改为从我们自己的 `message` 表来之后（见「这一轮的历史从哪儿来」），主路径 `GET /api/sessions/{id}/messages` 直读数据库、不经过这份缓存，当初防「刷新风暴打垮上游」的进程内缓存（[FINDINGS.md](FINDINGS.md) 2026-10-30 那条）失去存在理由。缓存本体（`history.py` 的 `records_cache`，5 秒有效期）没有删除：`session_records` 每次读上游都无条件写入；现在唯一读它的地方是老会话首次打开时的补录（`backfill_session`，数据库里没有记录才从上游取一次、写进数据库）；删上游记录成功后的失效逻辑也还在（`routes/chat.py` 的 `records_cache.pop`，删成功就把这场会话的缓存条目去掉）。老会话回填一次写进数据库，之后不会重复问上游。
+- **非流式端点的上游失败一律 502，删会话例外**：要问上游的非流式端点，上游失败统一回 502——老会话补录（`GET /api/sessions/{id}/messages` 在表里没有记录时走 `backfill_session`）和点赞点踩反馈（`POST /api/sessions/{id}/feedback`）。删会话是例外：删除顺序重排成「先本地后上游」之后，上游删失败只记一行警告、照样回 204——会话已经从用户眼前消失，回错误码只会让页面把一场已经不存在的会话显示成「删除失败」（`routes/sessions.py` 的 `delete_session`，理由在它自己的注释里）。流式 `/api/chat` 的上游失败不走 HTTP 错误码，表现为「流提前结束」，done 帧如实报 failed（reason: upstream）。
 - **对上游的三个超时**（[server/src/server/fastgpt.py](../server/src/server/fastgpt.py)）：连接 10 秒；读 30 秒（等第一个字节、两块字之间都是它，`.env` 里 `FASTGPT_READ_TIMEOUT_SECONDS` 可调）。原来 `read=None` 无限等，上游接了连接一直不吭声时这一轮会永远卡死。上游没有「这一轮还在不在跑」的查询接口，读超时是我们唯一的本地手段。
 
 ## 单进程前提
@@ -167,7 +168,6 @@ Redis 里这一轮相关的键（[server/src/server/reply_store.py](../server/sr
 - **停止标记按轮次编号认**：停止请求和对话请求谁先到都对。
 - **失败以后也去叫上游收手**：不叫停的话 token 白白消耗，那条记录还会晚到历史里。
 - **我们自己存了一份历史**：FastGPT 清空数据库、上游出故障，页面照样看得见。
-- **上游记录 5 秒缓存**：保护上游不被刷新打垮。
 - **页面断开时服务器继续写完**：写进 Redis，刷新能接上。
 - **结局随流明说**：done 帧让页面不靠「流怎么断的」反推结局；四份状态各管一段，不再互相猜。
 - **坏帧只丢自己**：前端解析器对每一帧独立解析，一帧坏 JSON 不拖累同事件里的其他行，done 帧字段不合就整帧忽略——宁可没收到结局，不能解出一个错误的结局。

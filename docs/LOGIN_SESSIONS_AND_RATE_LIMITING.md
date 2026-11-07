@@ -52,7 +52,7 @@
 - **两个维度，各自锁各自的**：账号维度 + 来源 IP 维度。任何一个满了就 429「尝试次数太多，请 15 分钟后再试」。
 - **参数**：窗口 15 分钟、5 次（`WINDOW_SECONDS` / `MAX_FAILURES`），第一次失败起算窗口、后续不续期。锁定期间连密码哈希都不碰（argon2 很耗 CPU）——先查锁定再进验证。
 - **账号维度的标识**：登录用**归一化用户名**（`strip().lower()`）——数据库里 `admin`、`Admin`、`"admin "` 是三个账号，限流键照原文用的话换个写法就把计数摊开，锁定形同虚设；改密用账号 id。两边的账号计数碰不到一起。
-- **IP 维度是共用的**：登录和改密合用同一个 IP 桶（scope `password:ip`），标识是 `request.client.host`。**维护者知情**：学校 NAT 场景下一个出口 IP 后面是一整批人，5 次/15 分钟的阈值会互相牵连（调研 backend-infra 第 3 条）。**反向代理后会升级成所有人共用同一个桶**：uvicorn 现在不信任代理头（未开 `proxy_headers`），按仓库内部署指南的「回环绑定 + nginx 前置」形态，所有用户 IP 都是 127.0.0.1——任何一人连错 5 次，15 分钟内**所有人**的登录与改密都收到 429（被动拒绝服务；429 目前也不带 `Retry-After`）。部署日必须处理：uvicorn `proxy_headers` + 信任 nginx 的 `X-Forwarded-For`（或把限流挪到 nginx 层），并给 429 补 `Retry-After`。
+- **IP 维度是共用的**：登录和改密合用同一个 IP 桶（scope `password:ip`），标识是 `request.client.host`。**维护者知情**：学校 NAT 场景下一个出口 IP 后面是一整批人，5 次/15 分钟的阈值会互相牵连（调研 backend-infra 第 3 条）。**反向代理下的信任边界是隐含前提，不是显式配置**：本仓 uvicorn 走默认的 `proxy_headers=True`，`forwarded_allow_ips` 默认只信回环地址；部署指南的「回环绑定 + nginx 前置」形态里，nginx 同机反向代理恰好在信任范围内，`request.client.host` 拿到的是 `X-Forwarded-For` 里的真实客户端 IP——「所有用户共用 127.0.0.1 一个桶」在默认部署下不成立，IP 维度真实剩余的误伤风险就是上面维护者知情的学校 NAT 共享出口 IP 场景。但这条链路完全建立在两个代码里没有写明的前提上（只听回环、前面必是正确设置 `X-Forwarded-For` 的 nginx）：谁把监听地址改成所有网卡，`X-Forwarded-For` 就成了客户端可伪造的头，IP 限流直接失效；哪层代理没设这个头，所有用户又会共享 nginx 的回环 IP（事实与方案详见调研 backend-infra 第 11 条）。429 目前不带 `Retry-After`。部署日必须处理：把隐含的信任边界写成显式配置（backend-infra 第 11 条的方案：`uvicorn.run` 里显式声明、启动脚本和部署文档写明、限流处发现回环地址时记一条警告），并给 429 补 `Retry-After`。
 - **计数语义**：登录只数 401——「查无此人」和「密码不对」是同一句 401、计数也不分这两种，不然「试几次以后是不是 429」会把用户名存不存在漏出去（防用户名枚举）；403（密码对了但 role 不属于这一边）说明密码已经验对，不记。成功登录清账号维度的计数，IP 维度的让它自然过期（同一个 IP 上还有别的账号在正常登录，不该跟着被清）。
 - **键空间**：`h2botapp-chat:ratelimit:{scope}:{identifier}`。前缀必须是 `h2botapp-chat:`——部署的 Redis ACL 只放行这一个前缀，别的前缀会静默失效（[FINDINGS.md](FINDINGS.md) 2026-11-02 那条）。计数键用 `SET NX + EX` 原子建键再 `INCR`，不会留下永不过期的计数。
 - **Redis 不通时放行**：计数是加固手段不是业务数据，Redis 不通就放行并记一条警告——不能因为 Redis 不通让人登不了、改不了密码。
@@ -75,13 +75,13 @@
 
 **服务端强制**：cookie 校验的续期语句顺带带回标记（见「每请求的成本」一节，不加数据库查询），中间件（`middleware.py`）对标记账号请求 `/api/` 且不在豁免集的路径直接回 403：`{"detail": "请先修改密码，然后才能继续使用", "code": "must_change_password"}`，不进端点。豁免集：`/api/login`（重新登录不拦，响应里带标记）、`/api/password`（改密本身）、`/api/logout`、`/api/profile`、`/api/status`、`/api/avatar`、`/api/events`（推送通道，只读）。非 `/api` 路径（静态资源）不受影响。
 
-**契约**：`LoginResponse` 和 `ProfileResponse` 都带 `must_change_password` 布尔字段（snake_case，与两个模型的既有字段同约定，无别名）。前端应做而**尚未做**（2026-11-06，后端先行）：登录见到 true 就强制进改密页、不改完不放行。当前被标记账号进页面的实际表现：业务请求收到 403（页面按状态码映射的报错会显示出来），只有豁免的改密/退出/资料路径可用。
+**契约**：`LoginResponse` 和 `ProfileResponse` 都带 `must_change_password` 布尔字段（snake_case，与两个模型的既有字段同约定，无别名）。前端已实现（2026-11-06）：登录或页面恢复时标记为真就强制进入修改密码拦截——只渲染强制修改密码页、路径守卫把地址按在 `/password`，不改完不放行；任何业务请求收到 403（code `must_change_password`）也经全局保底事件进入同一拦截。改密成功后服务器在同一事务里吊销全部令牌并清 cookie，页面回登录界面、用新密码重新登录（标记已清，拦截自然解除）。实现在 `src/App.tsx` 的拦截分支与路径守卫、`src/api/http.ts` 的保底事件、`src/components/settings/ChangePasswordPage.tsx` 的强制模式。
 
-**已知缺口**：控制台（`/api/admin/*`）一侧不强制执行——控制台还没有「改自己密码」的入口（前端待办），强制会把管理员锁死在控制台外。控制台重置打上的标记在聊天侧生效；等控制台有了自助改密入口再补上强制。代码里有对应注释。
+**永久决定（2026-11-06）**：服务器端不对控制台（`/api/admin/*`）一侧做强制改密，这是最终决定，不是等入口补上的过渡状态（维护者原话「服务器不做那么细」；当初的顾虑是控制台没有「改自己密码」的入口，强制会把管理员锁死在控制台外）。控制台重置打上的标记照旧在聊天侧生效。控制台的自助改密入口（前端另一批在做）只为管理员方便，不与强制联动。
 
 ## 推送通道 `/api/events`
 
-服务器侧的登录态失效，原来页面要等下一次请求收到 401 才知道；现在直接推给该账号所有开着的页面。2026-11-06 后端实施完成（进程内总线 `pushbus.py` ＋ `routes/events.py`），**前端尚未接**（EventSource 的挂接与处理是前端待办，设计脉络见 [ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」）。
+服务器侧的登录态失效，原来页面要等下一次请求收到 401 才知道；现在直接推给该账号所有开着的页面。2026-11-06 后端实施完成（进程内总线 `pushbus.py` ＋ `routes/events.py`），**前端已于同日接上**（`src/session/push-channel.ts` ＋ `src/App.tsx` 接线：登录后建连，失效帧进入与带 reason 的 401 同一套留在原页面的过期状态，重新登录后新建连接、不做手动重连；设计脉络见 [ACCOUNT_MANAGEMENT.md](ACCOUNT_MANAGEMENT.md)「会话状态通道」）。
 
 - **建立连接**：登录后 `new EventSource("/api/events")`，同源自动带 cookie，不需要也不能另设请求头。每个标签页各挂一条。未登录 401；控制台的 admin cookie 不认这条通道（也是 401）；admin 角色走聊天侧登录态来连回 403。本端点在「必须改密」豁免集里。
 - **帧**：命名事件 `state`。连上第一帧一定送达 `data: {"valid":true,"account":"<用户名>"}`——断线重连成功后也先收到它，状态天然补齐，前端不用另写补状态逻辑。登录态失效时推 `data: {"valid":false,"reason":"…","message":"…"}`，随后服务器主动结束这条流。心跳是 15 秒一帧的 `: ping` 注释帧（EventSource 自动忽略）。帧风格与聊天流一致（紧凑分隔符、不转义非 ASCII），响应头同一份（no-store ＋ X-Accel-Buffering: no）。
@@ -96,5 +96,5 @@
 - **`login_token` 没有 `revoked_at` 列**：服务器分不清「令牌不认识 / 被撤销 / 账号被停用」，会话类 401 一律 `expired`。列是 ACCOUNT_MANAGEMENT 的待办。
 - **IP 桶与改密路径共用**：学校 NAT 出口一批人共用一个 IP，互相牵连锁定（见「限流」一节，维护者知情）。
 - **cookie 无绝对上限**：被窃的 cookie 只要持续使用就一直续期；补救靠吊销路径，部署日必须配 HTTPS + Secure cookie。
-- **多标签页登录态不同步**：一个标签页退出/改密，另一个要等下一次请求收到 401 才知道。`/api/events` 推送通道的后端已于 2026-11-06 完成（见「推送通道」一节），改密/重置/令牌过期这类服务器侧失效从此有得推；前端接上 EventSource 后本条关闭。前端侧「主动退出」已于 2026-11-06 补上跨标签页联动：`signOut` 成功写 localStorage 标记 `h2bot-logout`，其他标签页听到 storage 事件立即回登录界面，不再等 401；改密/停用这类服务器侧吊销不写标记，仍走本条前半句的老路。机制见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「多标签页同步」。
+- **多标签页登录态（原「不同步」限制，2026-11-06 已关闭）**：前端「主动退出」跨标签页联动：`signOut` 写 localStorage 标记 `h2bot-logout`，其他标签页听到 storage 事件立即回登录界面、并各自清掉自己的草稿。服务器侧失效（改密、控制台重置、令牌过期）：`/api/events` 推送通道前端接上后实时推到所有开着的标签页、进入留在原页面的过期状态，不再等下一次请求的 401（401 仍作保底）。机制见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「多标签页同步」。
 - **`/password` 页提交收到 401 时没有可见反馈**：「留在原页面的过期状态」的提示到不了那个独立页面（见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「已知限制」）。

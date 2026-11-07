@@ -38,7 +38,7 @@ pnpm run dev:backend
 uv run python -m server.db.init
 ```
 
-这条命令只创建缺失的表和列。账号已存在时不改密码，也不清除已有会话。预设账号有两个，用户名和密码写在 `server/src/server/db/init.py`：学生 `test01`/`test01`（聊天页）和管理员 `admin`/`admin`（控制台，登录后应尽快改密码）。
+这条命令只创建缺失的表和列，不会给已有的表补新列：存量数据库缺 `account.must_change_password` 列时 init 不管，要跑迁移补上（在 `server/` 里执行 `uv run alembic upgrade head`）。账号已存在时不改密码，也不清除已有会话。预设账号有两个，用户名和密码写在 `server/src/server/db/init.py`：学生 `test01`/`test01`（聊天页）和管理员 `admin`/`admin`（控制台，登录后应尽快改密码）。
 
 Python 命令统一在 `server/` 目录下用 `uv run` 执行，不要在仓库根目录直接用 `python` 或 `pip`。
 

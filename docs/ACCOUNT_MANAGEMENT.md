@@ -66,10 +66,10 @@
 ## 强制改密码
 
 - [x] `account` 加 `must_change_password` 列（后端已实施：迁移 `0002_account_must_change_password`——原文记录的「init.py 里补」写法已被「表结构变更一律写迁移文件」的规矩取代，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「令牌表与定时清扫」）。`ProfileResponse` 已返回该字段，登录校验链路（`renew_login_token`）顺带把它带出来。
-- [ ] 登录时为真就跳改密码页。
-- [ ] 后端强制：除 `/api/profile` 和改密接口外，其余聊天接口返回 403「请先修改密码」。
+- [x] 登录时为真就跳改密码页。（2026-11-06 前端已实现：登录响应或资料响应里标记为真就进入强制拦截——只渲染强制修改密码页，路径守卫把地址按在 `/password`；任何请求收到 403 且 code 为 `must_change_password` 也会经全局保底事件进入同一拦截。改密成功后服务器吊销全部令牌并清 cookie，页面回登录界面、用新密码重新登录——标记已清，拦截解除。）
+- [x] 后端强制：被标记账号请求豁免清单之外的 `/api/` 路径回 403「请先修改密码」（code `must_change_password`）。实际豁免清单比原设计宽：登录、改密、退出、资料、状态、头像、推送七条（见 `middleware.py`）。聊天侧已强制；控制台一侧（`/api/admin/*`）不强制——维护者永久决定（2026-11-06，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」的「永久决定」段）。
 
-backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前端未消费——`parseProfile` 还不读这个字段，「首次登录强制改密」流程（含上面两条）待立项。
+注记（2026-11-06 更新）：「首次登录强制改密」流程已全链路实施——后端列与中间件 403（上面两条已勾）、前端读取标记并强制拦截（[src/App.tsx](../src/App.tsx) 的拦截分支与路径守卫）、403 保底事件（[src/api/http.ts](../src/api/http.ts)）、修改密码页强制模式（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的 `forced`）。控制台「修改我的密码」入口同日补上（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）：纯自助、不与强制联动（永久决定见上）；修改成功后该账号所有设备下线，回控制台登录界面用新密码重新登录。
 
 ## 忘记密码
 
@@ -136,10 +136,11 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 - **客户端预检**（[AvatarPicker.tsx](../src/components/settings/AvatarPicker.tsx)）：选文件当场拦下明显不合格的，省一次白费的上传——大小 ≤ 5MB；类型 PNG/JPG/JPEG/HEIC/HEIF，MIME 认全族（单图 `image/heic`、`image/heif` 与多帧 `image/heic-sequence`、`image/heif-sequence`；部分浏览器对 `.heic` 报空 `file.type`，退回按扩展名 png/jpg/jpeg/heic/heif 判）。不合格当场 `role=alert` 提示（`avatarTooLarge` / `avatarWrongType`，三语齐）、不发请求。服务端校验仍是权威——预检是提示不是门槛（与本文件「分工」原则一致）。
 - **头像数据缓存**（[profile-cache.ts](../src/session/profile-cache.ts)）：独立键 `h2bot-avatar` 存 `{url, dataUrl}`——`parseProfile` 拿到非默认头像 URL 即 fire-and-forget 抓取转 dataURL 写入（>5MB 跳过；离线、抓取失败、配额超限都静默降级，界面退回默认头像，不弹提示）。App 的 `avatarUrl` 惰性初始化读缓存，离线启动侧栏和设置弹窗显示本人头像、不闪默认图；退出登录随 `h2bot-profile` 一起清（`clearCachedProfile`）。键与 `h2bot-profile` 分开：dataURL 可能几 MB，混存会因超配额连用户名带语言一起写不进去。
 - **wire 字段修复**（2026-11-06）：后端 `ProfileResponse` 发的是 `avatar_url`（snake_case，不像 `ChatRequest` 那批请求模型带 camelCase 别名），前端 `parseProfile` 自 2026-11-02 引入起误读 `value.avatarUrl`——真头像永远退回默认图，离线头像缓存也从未生效；已改为读 `value.avatar_url`（[profile.ts](../src/api/profile.ts)，代码注释记录了原委）。全前端其余解析器（session/partial/messages/status）与请求/响应体核对过，没有第二处字段错位。
+- **服务器端的缓存协商**（`routes/profile.py` 的 `GET /api/avatar`）：响应带 ETag（图片字节 sha256 的前 16 位）和 `Cache-Control: private, max-age=86400`。浏览器带 `If-None-Match` 请求头再来问时，`_etag_matches` 做比对——去掉弱校验前缀 `W/` 和引号后逐值比（逗号分隔的多个值逐个看，`*` 按 HTTP 语义匹配任何当前表示），图没变就回 304、不重发图片。资料响应里的 `avatar_url` 也带 `?v=` 同一个哈希值，换图即换地址，和浏览器缓存两层互补。
 
 ## 基础安全
 
-- [ ] 登录失败限流：账号和 IP 两个维度，退避锁定，计数放 Redis（Redis 不通时放行并记一条警告）。（`ratelimit.py` 已经在了，改密这条路径已接；登录路径还没接。）
+- [x] 登录失败限流：账号和 IP 两个维度，达到阈值锁定（15 分钟窗口），计数放 Redis（Redis 不通时放行并记一条警告）。（已实施：登录与改密两条路径都接上了，共用同一个 IP 桶；参数与计数语义详见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)。）
 - [ ] 停用账号：`disabled` 列，登录时给明确提示，不跟「密码错」混成一句。
 - [x] 改密码后吊销该账号其它设备的 token。
 - [ ] 审计表 `audit_log`：登录成功、登录失败、注册、改密码、停用启用、建账号、重置密码。里面绝不能出现密码。失败明细留 30 天。
@@ -150,7 +151,7 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 
 > **2026-11-05：最小 HTTP 版已实现**（本节的推送通道仍未做）：会话类 401 的响应体在 `detail` 之外多带一个 `reason` 字段，词表 `expired`（带了 cookie 但令牌不认识/已过期/被吊销，无法也无需细分）/ `disabled`（账号被停用——`account.disabled` 列还没建，后端暂时发不出这个值，前端已按词表接好）。没带 cookie 的匿名请求不算会话类，401 维持现状（不带 reason）。前端收到带 reason 的 401 时聊天页在原页面保留：会话、消息、草稿、profile 缓存都不动，输入区禁用、输入区上方挂常驻警示条；`expired` 给「重新登录」按钮，在原页面弹出 Modal 里的 LoginScreen，成功后走 `openAccount` 在原页面恢复；`disabled` 不给登录按钮。没有 reason 的 401（老后端）回退旧的整页登录路径。下面的轮询保底处理和发送前预检仍未做。
 
-> **2026-11-06：后端推送通道已实现**（`GET /api/events`；进程内总线 `pushbus.py` ＋ 三个触发点：定时清扫扫掉过期令牌→`expired`、改密吊销→`password_changed`、控制台重置吊销→`admin_reset`）。协议按本节设计稿：`state` 命名事件、`{valid, reason, message}` 信封、连上先发一次状态、断线重连自然补齐。与设计稿的出入：reason 由单一 `revoked` 细化成上面三个词（`expired` 与会话类 401 的 reason 同词，前端可当一套词表用）；`disabled` 仍发不出（列没建，缺口同前）；**退出登录改为不推送**（用户自己的动作；跨标签退出感知已由前端 localStorage 标记承担，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「已知限制」）；推完 `valid:false` 服务器主动关流，客户端重新登录后新建连接而不依赖自动重连。**前端 EventSource 未接**；完整对接契约在 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道 `/api/events`」一节。
+> **2026-11-06：后端推送通道已实现**（`GET /api/events`；进程内总线 `pushbus.py` ＋ 三个触发点：定时清扫扫掉过期令牌→`expired`、改密吊销→`password_changed`、控制台重置吊销→`admin_reset`）。协议按本节设计稿：`state` 命名事件、`{valid, reason, message}` 信封、连上先发一次状态、断线重连自然补齐。与设计稿的出入：reason 由单一 `revoked` 细化成上面三个词（`expired` 与会话类 401 的 reason 同词，前端可当一套词表用）；`disabled` 仍发不出（列没建，缺口同前）；**退出登录改为不推送**（用户自己的动作；跨标签退出感知已由前端 localStorage 标记承担，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「已知限制」）；推完 `valid:false` 服务器主动关流，客户端重新登录后新建连接而不依赖自动重连。前端已于同日接上（`src/session/push-channel.ts`：登录后建连，失效帧进入与带 reason 的 401 同一套「留在原页面的过期状态」，重新登录后新建连接、不做手动重连；接线在 `src/App.tsx`）；完整对接契约在 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道 `/api/events`」一节。
 
 三层，各管一段：
 
@@ -191,18 +192,18 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 ### 服务器这边
 
 - [x] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」一节），进程内总线够用，不用 Redis pub/sub。（2026-11-06 后端已实现：`server/src/server/pushbus.py`，订阅队列有界 32、关停哨兵一定送达）
-- [x] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。（2026-11-06 后端已实现：`server/src/server/routes/events.py`；前端 EventSource 未接）
-- [ ] 每 15 秒发一个心跳注释帧（`: ping`），免得连接被中间的代理当空闲切断。
+- [x] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。（2026-11-06 后端已实现：`server/src/server/routes/events.py`；2026-11-06 前端已接：`src/session/push-channel.ts`）
+- [x] 每 15 秒发一个心跳注释帧（`: ping`），免得连接被中间的代理当空闲切断。（2026-11-06 后端已实现：`routes/events.py` 的 `_HEARTBEAT_SECONDS = 15.0`，15 秒没有动静就发一帧）
 - [ ] 吊销令牌的地方统一走一个函数 `revoke_tokens(account_id, reason)`：删/标记令牌 + 推事件。现在吊销散在改密码、控制台重置、退出登录三处；统一之后以后加新的强制下线方式不会漏掉推送。
 
 浏览器自带的 `EventSource` 就够用：同一源请求会自动带 cookie，断线自动重连，不用自己写 SSE 解析。
 
 ### 客户端这边
 
-- [ ] 多两个状态：`expired`（会话过期）和 `disabled`（账号被停用）。收到 `valid: false` → 聊天页**在原页面保留**，会话列表、正在打的那段字、页面状态全都不动；输入框上方挂一条常驻提示，输入框禁用。
-- [ ] `expired` 给一个「重新登录」按钮 → 弹登录框（不是把整页换成登录页）→ 登录成功后 `openAccount` 那套照旧重新拉会话列表和用户信息，页面状态原样恢复。
-- [ ] `disabled` **不给登录框**：登录了也没用，提示「账号已被停用，请联系管理员」。
-- [ ] 事件通道的连接管理：App 起来就连，掉线靠 `EventSource` 自己重连；重连时自动收到一次当前状态，天然完成状态同步。
+- [x] 多两个状态：`expired`（会话过期）和 `disabled`（账号被停用）。收到 `valid: false` → 聊天页**在原页面保留**，会话列表、正在打的那段字、页面状态全都不动；输入框上方挂一条常驻提示，输入框禁用。（2026-11-05 的最小 HTTP 版已实现这个状态（带 reason 的 401 触发）；2026-11-06 推送通道接上，`valid:false` 帧实时进入同一状态。reason 词表扩为 `expired`/`password_changed`/`admin_reset`，不认识的词保守按失效处理、横幅文案直接用帧里的 `message`。）
+- [x] `expired` 给一个「重新登录」按钮 → 弹登录框（不是把整页换成登录页）→ 登录成功后 `openAccount` 那套照旧重新拉会话列表和用户信息，页面状态原样恢复。（已实现：`logInAgain` 按钮与在原页面重新登录的弹窗俱在；`password_changed`/`admin_reset` 的失效帧走同一按钮同一流程。）
+- [x] `disabled` **不给登录框**：登录了也没用，提示「账号已被停用，请联系管理员」。（红色终态提示已实现；这个 reason 本身后端暂时还发不出——`account.disabled` 列没建，前端已按词表接好。）
+- [x] 事件通道的连接管理：App 起来就连，掉线靠 `EventSource` 自己重连；重连时自动收到一次当前状态，天然完成状态同步。（2026-11-06 已实现，与设计稿有两处小出入：连接在登录后建立而非 App 起来就连（未登录连上去也是 401）；失效帧后服务器关流，重连吃 401 彻底停止属预期，不做手动重连、重新登录后新建一条。断线重连成功时首帧 `valid:true` 天然补齐状态，与设计一致。）
 
 ### 和下一节的关系
 
@@ -210,7 +211,7 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 
 ## 会话过期时别把用户的东西弄丢
 
-- [x] 页面加 `expired` 状态：聊天页在原页面保留，输入框上方提示「会话已过期，请重新登录」+ 一个「重新登录」按钮，登录框弹出来；不清会话列表、不清草稿。（现在的 `enterLogin` 是一次性清空，[src/App.tsx](../src/App.tsx)）（2026-11-05 已实现最小 HTTP 版：401 带 `reason` 进入留在原页面的过期状态，触发靠请求收到 401 而不是推送；`enterLogin` 保留给主动退出和不带 reason 的 401 保底处理。见「会话状态通道」一节的注记）
+- [x] 页面加 `expired` 状态：聊天页在原页面保留，输入框上方提示「会话已过期，请重新登录」+ 一个「重新登录」按钮，登录框弹出来；不清会话列表、不清草稿。（现在的 `enterLogin` 是一次性清空，[src/App.tsx](../src/App.tsx)）（2026-11-05 已实现最小 HTTP 版：401 带 `reason` 进入留在原页面的过期状态；2026-11-06 推送通道接上后，服务器侧失效也实时进入同一状态；`enterLogin` 保留给主动退出和不带 reason 的 401 保底处理。见「会话状态通道」一节的注记）
 - [ ] 发送前预检：点发送先发一个轻量鉴权请求，401 就不发，把草稿保住。
 - [x] 被强制下线时把输入框里的内容存进 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsent.ts)），登录成功后放回输入框；主动退出登录要清掉这个缓存。（commit 6da0b34）
 - [ ] `login_token` 加 `revoked_at`：撤销的时候标记而不是删行，服务器才分得清「令牌不认识 / 被撤销 / 账号被停用」，页面也能给出对应的一句话。
@@ -224,7 +225,7 @@ backlog 注记（2026-11-06）：`must_change_password` 已由后端返回、前
 - [ ] `login_token`：`revoked_at`
 - [ ] 新表 `audit_log`
 
-每加一列，[server/src/server/db/init.py](../server/src/server/db/init.py) 里补一条（照抄 `_ensure_avatar_column` 的写法），改完跑 `uv run python -m server.db.init`。
+表结构变更（加列、加索引、改约束）一律写成迁移文件，不再往 `db/init.py` 里加 `_ensure_*_column` 那种手写字段补丁；规矩和命令见 [server/AGENTS.md](../server/AGENTS.md)「迁移」一节。（`uv run python -m server.db.init` 继续负责新数据库的建表和初始账号，不给已有的表补新列。）
 
 ## 改名
 

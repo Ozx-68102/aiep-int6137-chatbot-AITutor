@@ -60,6 +60,8 @@ npm install -g pnpm
 
 接口清单看 `server/src/server/routes/`（按域拆分的路由包；`app.py` 只做装配），字段和校验看 `server/src/server/types/api.py`。
 
+全局安全响应头（`server/src/server/security/headers.py` 的 `SecurityHeaders`）：纯 ASGI 中间件，在 `app.py` 最外层注册，给所有 HTTP 响应附加三条头（端点已设的不覆盖）——`X-Content-Type-Options: nosniff`（别让浏览器猜 MIME 类型）、`X-Frame-Options: DENY`（任何站点都不能把本应用嵌进 iframe）、`Referrer-Policy: same-origin`（跨源跳转不带 Referer）。CSP、HSTS 这类与加密和部署形态绑定的头留给 nginx 层统一发，避免两层各发一份互相覆盖（部署日批次，方案见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 9 条）。
+
 ## 本地启动
 
 仓库根目录没有 `pnpm dev`。页面和接口分开起：
