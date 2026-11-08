@@ -1,4 +1,4 @@
-import {CircleAlert, TriangleAlert} from 'lucide-react';
+import {CircleAlert, Eye, EyeOff, TriangleAlert} from 'lucide-react';
 import {useState} from 'react';
 import {format, translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
@@ -14,6 +14,10 @@ const MIN_PASSWORD_LENGTH = 6;
  * 离开只有「取消」按钮这一条显式的路。
  *
  * 组件随页面切换整个卸载后重新挂载，三个输入框天然清空，不用手写清理逻辑。
+ *
+ * 三个密码框右侧各有一个「显示密码」开关：点一下明文显示（图标换成睁开的
+ * 眼睛），再点一下恢复掩码。选点按切换而不是按住显示：键盘和触屏都能用，
+ * 也不用一直按着。
  *
  * 强制模式（forced）：账号被服务器标了「必须修改密码」时由 App.tsx 的拦截
  * 渲染——顶部挂一条说明横幅解释为什么被拦，其余与普通模式完全一样。
@@ -43,6 +47,10 @@ export function ChangePasswordPage({
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  // 三个密码框各自的「显示密码」开关：点一下明文显示，再点一下恢复掩码。
+  const [oldShown, setOldShown] = useState(false);
+  const [newShown, setNewShown] = useState(false);
+  const [confirmShown, setConfirmShown] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
   const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
   // 门槛错误优先于可能残留的服务端错误：它是最近一次提交尝试的结果。
@@ -51,6 +59,25 @@ export function ChangePasswordPage({
   // 消息（detail）固定是简体中文，标 zh-Hans 让浏览器按中文字体渲染。
   const localizedError = shownError === gateError || shownError === text.connectionError;
   const shownErrorLang = localizedError ? htmlLang[locale] : 'zh-Hans';
+
+  // 密码框右侧的「显示密码」开关。type=button：别把表单提交带出去。
+  function revealToggle(shown: boolean, toggle: () => void) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={shown ? text.hidePassword : text.showPassword}
+        aria-pressed={shown}
+        className="absolute inset-y-0 right-0 grid place-items-center px-3 text-stone-500 hover:text-stone-800"
+      >
+        {shown ? (
+          <EyeOff className="size-4" aria-hidden="true" />
+        ) : (
+          <Eye className="size-4" aria-hidden="true" />
+        )}
+      </button>
+    );
+  }
 
   return (
     <main className="flex h-full items-center justify-center bg-base-200 px-4">
@@ -94,26 +121,32 @@ export function ChangePasswordPage({
           ) : null}
           <label className="fieldset">
             <span className="fieldset-label">{text.oldPassword}</span>
-            <input
-              className="input w-full"
-              name="old-password"
-              type="password"
-              autoComplete="current-password"
-              value={oldPassword}
-              onChange={(event) => setOldPassword(allowedChars(event.target.value))}
-            />
+            <span className="relative block">
+              <input
+                className="input w-full pr-11"
+                name="old-password"
+                type={oldShown ? 'text' : 'password'}
+                autoComplete="current-password"
+                value={oldPassword}
+                onChange={(event) => setOldPassword(allowedChars(event.target.value))}
+              />
+              {revealToggle(oldShown, () => setOldShown((value) => !value))}
+            </span>
           </label>
           <fieldset className="fieldset gap-2">
             <label className="fieldset">
               <span className="fieldset-label">{text.newPassword}</span>
-              <input
-                className="input w-full"
-                name="new-password"
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(allowedChars(event.target.value))}
-              />
+              <span className="relative block">
+                <input
+                  className="input w-full pr-11"
+                  name="new-password"
+                  type={newShown ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(allowedChars(event.target.value))}
+                />
+                {revealToggle(newShown, () => setNewShown((value) => !value))}
+              </span>
             </label>
             <p className="m-0 text-xs text-stone-500" lang={htmlLang[locale]}>
               {text.passwordHint}
@@ -122,14 +155,17 @@ export function ChangePasswordPage({
           </fieldset>
           <label className="fieldset">
             <span className="fieldset-label">{text.confirmPassword}</span>
-            <input
-              className="input w-full"
-              name="new-password-confirm"
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(allowedChars(event.target.value))}
-            />
+            <span className="relative block">
+              <input
+                className="input w-full pr-11"
+                name="new-password-confirm"
+                type={confirmShown ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(allowedChars(event.target.value))}
+              />
+              {revealToggle(confirmShown, () => setConfirmShown((value) => !value))}
+            </span>
           </label>
           {shownError ? (
             <p className="m-0 flex items-center gap-1.5" role="alert" lang={shownErrorLang}>
