@@ -167,7 +167,6 @@ function ChatApp() {
   });
   const {
     auth,
-    loginOffline,
     loginNotice,
     loginSubmitting,
     loginError,
@@ -402,7 +401,6 @@ function ChatApp() {
         locale={locale}
         error={loginError}
         notice={loginNotice}
-        offline={loginOffline}
         submitting={loginSubmitting}
         onLocale={setLocale}
         onSubmit={(usernameValue, password, turnstileToken) =>
@@ -504,7 +502,6 @@ function ChatApp() {
       setLoginDetail={setLoginDetail}
       setLoginOffline={setLoginOffline}
       loginError={loginError}
-      loginOffline={loginOffline}
       loginSubmitting={loginSubmitting}
       setLocale={setLocale}
       addSession={addSession}

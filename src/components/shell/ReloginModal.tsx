@@ -1,3 +1,4 @@
+import type {LoginOutcome} from '../../api/failure.ts';
 import type {Locale} from '../../type/locale.ts';
 import {LoginScreen} from '../login/LoginScreen.tsx';
 import {Modal} from './Modal.tsx';
@@ -6,10 +7,13 @@ type ReloginModalProps = {
   open: boolean;
   locale: Locale;
   error: string | null;
-  offline: boolean;
   submitting: boolean;
   onLocale: (locale: Locale) => void;
-  onSubmit: (usernameValue: string, password: string, turnstileToken: string) => Promise<void>;
+  onSubmit: (
+    usernameValue: string,
+    password: string,
+    turnstileToken: string,
+  ) => Promise<LoginOutcome>;
   onClose: () => void;
 };
 
@@ -21,7 +25,6 @@ export function ReloginModal({
   open,
   locale,
   error,
-  offline,
   submitting,
   onLocale,
   onSubmit,
@@ -32,7 +35,6 @@ export function ReloginModal({
       <LoginScreen
         locale={locale}
         error={error}
-        offline={offline}
         submitting={submitting}
         embedded
         headingId="relogin-title"

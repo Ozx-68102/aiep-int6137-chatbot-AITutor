@@ -14,6 +14,8 @@ export type TurnstileRenderOptions = {
   'expired-callback'?: () => void;
   /** widget 出错（比如当前域名没登记在 widget 上）时回调。 */
   'error-callback'?: () => void;
+  /** 交互式挑战超时时回调。 */
+  'timeout-callback'?: () => void;
 };
 
 export type TurnstileApi = {

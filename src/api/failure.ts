@@ -81,3 +81,9 @@ export function sessionExpiredText(error: unknown, locale: Locale): string {
   }
   return translations[locale].sessionExpired;
 }
+
+/** 登录提交的三种结局，表单拿它决定按钮的下一步：'ok' 进应用；'failure' 是
+ * 服务器明确拒绝（密码不对、人机验证被拒、限流等）——按钮锁住，直到用户
+ * 改动用户名或密码；'connection' 是连不上服务器——与输入内容无关，按钮
+ * 保持可点，再点一次就是一轮全新验证。 */
+export type LoginOutcome = 'ok' | 'failure' | 'connection';

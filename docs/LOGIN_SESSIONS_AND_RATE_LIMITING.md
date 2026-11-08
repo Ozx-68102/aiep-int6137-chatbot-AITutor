@@ -92,11 +92,11 @@
 
 ## 人机验证（Turnstile）
 
-两个登录接口（`/api/login`、`/api/admin/login`）在执行既有逻辑之前先过一道 Cloudflare Turnstile 人机验证。登录表单渲染 widget（sitekey 是公开信息，写在前端 `src/hooks/use-turnstile.ts`），产生的一次性令牌放在请求体的 `cf-turnstile-response` 字段里；服务端 [server/src/server/turnstile.py](../server/src/server/turnstile.py) 拿密钥调 siteverify，三件事全对才放行：`success` 为真、`action` 与接口的约定值一致（`login` / `admin_login`）、`hostname` 在 `TURNSTILE_HOSTNAMES` 允许名单里。任何一项不对、配置缺失，或者 siteverify 本身调用失败，一律 403（宁可挡住不放开），detail 是「人机验证未通过，请确认后重试」。
+两个登录接口（`/api/login`、`/api/admin/login`）在执行既有逻辑之前先过一道 Cloudflare Turnstile 人机验证。登录表单平时不渲染 widget——点「登录」才现渲染（显式渲染，sitekey 是公开信息，写在前端 `src/hooks/use-turnstile.ts`），验证通过后立即带一次性令牌提交登录，令牌放在请求体的 `cf-turnstile-response` 字段里；点击到出结果之间登录按钮持续禁用并转圈，每一段都有终点（等脚本上限 10 秒、挑战超时由 widget 回调兜底、登录请求 15 秒超时）；服务端 [server/src/server/turnstile.py](../server/src/server/turnstile.py) 拿密钥调 siteverify，三件事全对才放行：`success` 为真、`action` 与接口的约定值一致（`login` / `admin_login`）、`hostname` 在 `TURNSTILE_HOSTNAMES` 允许名单里。任何一项不对、配置缺失，或者 siteverify 本身调用失败，一律 403（宁可挡住不放开），detail 是「人机验证未通过，请确认后重试」。
 
 - **位置**：门槛在锁定检查和密码验证之前——没过人机验证的登录尝试不碰数据库、不碰 argon2，也不计入限流的失败计数。
-- **令牌一次性**：siteverify 兑换一次即作废。前端在每次登录尝试结束后（不论成败）reset widget 换新令牌，再允许下一次提交。
-- **配置**：`.env` 的 `TURNSTILE_SECRET`（Cloudflare 控制台 widget 详情页的 Secret Key，只在服务端，绝不进前端）和 `TURNSTILE_HOSTNAMES`（siteverify 返回的前端主机名允许名单，逗号分隔；开发用 `localhost`，部署时换成真实域名，不得包含 localhost / 127.0.0.1）。widget 在 Cloudflare 控制台登记的前端域名必须覆盖实际访问的主机名：没登记时浏览器端 widget 直接报错，登录按钮保持禁用。
+- **令牌一次性**：siteverify 兑换一次即作废。因此 widget 从不复用：验证没通过或服务器拒绝（密码不对等）时现场原地保留、登录按钮锁住，直到用户改动用户名或密码——widget 随之移除、按钮解锁，再点「登录」渲染全新 widget 跑新一轮验证；连不上服务器不锁按钮，再点一次直接就是新一轮。
+- **配置**：`.env` 的 `TURNSTILE_SECRET`（Cloudflare 控制台 widget 详情页的 Secret Key，只在服务端，绝不进前端）和 `TURNSTILE_HOSTNAMES`（siteverify 返回的前端主机名允许名单，逗号分隔；开发用 `localhost`，部署时换成真实域名，不得包含 localhost / 127.0.0.1）。widget 在 Cloudflare 控制台登记的前端域名必须覆盖实际访问的主机名：没登记时浏览器端 widget 直接报错，表单按验证失败处理（按钮锁住，改动用户名或密码解锁）。
 - **其他接口不设门槛**：发消息、改密码、控制台操作都有登录 cookie 保护，不在人机验证范围内。
 
 ## 已知限制

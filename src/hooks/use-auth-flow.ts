@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {useLocation, useNavigate, type NavigateFunction} from 'react-router';
-import {connectionFailure, explain} from '../api/failure.ts';
+import {connectionFailure, explain, type LoginOutcome} from '../api/failure.ts';
 import {ApiError, mustChangePasswordEvent} from '../api/http.ts';
 import {logout, readProfile} from '../api/profile.ts';
 import {login, sessionsFromList} from '../api/session.ts';
@@ -306,10 +306,17 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     handlePushInvalidRef.current = handlePushInvalid;
   });
 
-  async function submitLogin(usernameValue: string, password: string, turnstileToken: string) {
-    if (loginOffline) {
-      return;
-    }
+  /**
+   * 登录提交。返回值给表单决定按钮的下一步：'ok' 进应用；'failure' 是
+   * 服务器明确拒绝（密码不对、人机验证被拒、限流等），表单锁按钮直到
+   * 用户改动用户名或密码；'connection' 是连不上服务器，与输入内容无关，
+   * 按钮保持可点，再点一次就是一轮全新验证。
+   */
+  async function submitLogin(
+    usernameValue: string,
+    password: string,
+    turnstileToken: string,
+  ): Promise<LoginOutcome> {
     setLoginSubmitting(true);
     setLoginOffline(false);
     setLoginDetail(null);
@@ -317,17 +324,21 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     try {
       const result = await login(usernameValue, password, turnstileToken);
       await openAccount(result);
+      return 'ok';
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setLoginDetail(error.detail);
-        return;
+        return 'failure';
       }
       if (connectionFailure(error)) {
+        // 离线文案由 loginError 送进表单错误槽；按钮不再因此禁用——曾经
+        // 禁掉且整页登录没有任何解禁路径（死胡同），现在再点一次就是重试。
         setLoginOffline(true);
         serviceRef.current?.showConnectionWarning();
-        return;
+        return 'connection';
       }
       setLoginDetail(explain(error, locale, text.connectionError));
+      return 'failure';
     } finally {
       setLoginSubmitting(false);
     }

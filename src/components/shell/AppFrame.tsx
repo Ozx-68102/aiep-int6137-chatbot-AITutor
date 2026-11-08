@@ -1,6 +1,6 @@
 import type {Dispatch, SetStateAction, SubmitEvent} from 'react';
 import type {NavigateFunction} from 'react-router';
-import {connectionFailure, explain} from '../../api/failure.ts';
+import {connectionFailure, explain, type LoginOutcome} from '../../api/failure.ts';
 import {sendFeedback} from '../../api/feedback.ts';
 import {ApiError} from '../../api/http.ts';
 import {defaultAvatarUrl} from '../../api/profile.ts';
@@ -56,7 +56,6 @@ type AppFrameProps = {
   setLoginDetail: Dispatch<SetStateAction<string | null>>;
   setLoginOffline: Dispatch<SetStateAction<boolean>>;
   loginError: string | null;
-  loginOffline: boolean;
   loginSubmitting: boolean;
   setLocale: Dispatch<SetStateAction<Locale>>;
   addSession: () => void;
@@ -70,7 +69,7 @@ type AppFrameProps = {
     usernameValue: string,
     passwordValue: string,
     turnstileToken: string,
-  ) => Promise<void>;
+  ) => Promise<LoginOutcome>;
   signOut: () => Promise<void>;
   handleAuthError: (error: ApiError) => void;
   navigate: NavigateFunction;
@@ -119,7 +118,6 @@ export function AppFrame({
   setLoginDetail,
   setLoginOffline,
   loginError,
-  loginOffline,
   loginSubmitting,
   setLocale,
   addSession,
@@ -288,7 +286,6 @@ export function AppFrame({
         open={sessionInvalid !== null && sessionInvalid.reason !== 'disabled' && reloginOpen}
         locale={locale}
         error={loginError}
-        offline={loginOffline}
         submitting={loginSubmitting}
         onLocale={setLocale}
         onSubmit={submitLogin}

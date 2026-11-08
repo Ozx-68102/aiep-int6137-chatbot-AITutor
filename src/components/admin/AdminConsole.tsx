@@ -8,7 +8,7 @@ import {
   type AdminAccount,
   type ResetPasswordResult,
 } from '../../api/admin.ts';
-import {explain} from '../../api/failure.ts';
+import {connectionFailure, explain, type LoginOutcome} from '../../api/failure.ts';
 import {ApiError} from '../../api/http.ts';
 import {useDocumentMeta} from '../../hooks/use-document-meta.ts';
 import {translations} from '../../i18n/index.ts';
@@ -152,9 +152,14 @@ export function AdminConsole() {
     };
   }, [accountsOpen]);
 
-  async function submitLogin(username: string, password: string, turnstileToken: string) {
+  async function submitLogin(
+    username: string,
+    password: string,
+    turnstileToken: string,
+  ): Promise<LoginOutcome> {
     if (loginBusy) {
-      return;
+      // 够不到：busy 期间按钮是禁用的。兜底返回值按锁表单处理，安全方向。
+      return 'failure';
     }
     setLoginBusy(true);
     setLoginError(null);
@@ -163,10 +168,12 @@ export function AdminConsole() {
       const session = await adminLogin(username, password, turnstileToken);
       setAdminUsername(session.username);
       setAccounts(await fetchAdminAccounts());
+      return 'ok';
     } catch (error) {
       // 401（密码不对）、403（这个账号不是管理员）都带着中文 detail：简中
       // 原样显示，英文/繁中优先按状态码映射（裁决规则见 src/api/failure.ts）。
       setLoginError(explain(error, locale, text.connectionError));
+      return connectionFailure(error) ? 'connection' : 'failure';
     } finally {
       setLoginBusy(false);
     }
