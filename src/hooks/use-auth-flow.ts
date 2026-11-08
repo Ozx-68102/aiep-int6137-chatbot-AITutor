@@ -133,6 +133,9 @@ export function useAuthFlow(deps: AuthFlowDeps) {
   // profile 响应，以及任何请求收到的 403（http.ts 的全局保底事件）。契约见
   // docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md「必须改密标记」。
   const [mustChangePassword, setMustChangePassword] = useState(false);
+  // mustChangePassword 的 ref 镜像：enterLoginGuarded 和 handlePushInvalid
+  // 在异步回调里读，不捕获状态值。
+  const mustChangePasswordRef = useRef(mustChangePassword);
   // sessionInvalid 的 ref 镜像：enterLoginGuarded 在异步回调里读，不捕获状态值。
   const sessionInvalidRef = useRef(sessionInvalid);
   // 多标签页的 storage 监听只注册一次，登出处理要读到最新的 enterLoginGuarded：
@@ -189,6 +192,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
 
   useEffect(() => {
     sessionInvalidRef.current = sessionInvalid;
+    mustChangePasswordRef.current = mustChangePassword;
   });
 
   function enterLogin(detail: string | null) {
@@ -247,19 +251,27 @@ export function useAuthFlow(deps: AuthFlowDeps) {
   /**
    * 推送通道收到 valid:false：与收到带 reason 的 401 完全同一套行为——
    * 会话、消息、草稿原地保留，输入区禁用、挂常驻警示条。不认识的 reason
-   * 词也按失效处理（文案退回帧里的 message）。
+   * 词也按失效处理（文案退回帧里的 message）。强制闸门是例外：拦截期间
+   * 聊天主体不渲染，「原地保留」的警示条根本看不见——登录态被判死就
+   * 直接带文案回登录页，重新登录后由登录响应决定要不要再进闸门。
    */
   function handlePushInvalid(reason: string, message: string | null) {
+    if (mustChangePasswordRef.current) {
+      enterLogin(message ?? text.sessionExpired);
+      return;
+    }
     setSessionInvalid({reason: toSessionInvalidReason(reason), message});
   }
 
   /**
    * 其余动作（侧栏、设置、改密、服务状态恢复）的 401 出口还是 enterLogin：
    * 已经在留在原页面的过期状态里时不再升级成整页清空——横幅已经挂着了，清空
-   * 反而把这个状态保住的东西弄丢。
+   * 反而把这个状态保住的东西弄丢。强制闸门是例外：拦截期间聊天主体和横幅
+   * 都不渲染，守卫在这里早退等于把人困死在登录态已死的闸门里（点「修改」
+   * 收 401、页面毫无反应）。闸门下不拦，直接带文案回登录页。
    */
   function enterLoginGuarded(detail: string | null) {
-    if (sessionInvalidRef.current !== null) {
+    if (sessionInvalidRef.current !== null && !mustChangePasswordRef.current) {
       return;
     }
     enterLogin(detail);

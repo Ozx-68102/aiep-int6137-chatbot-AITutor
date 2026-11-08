@@ -149,6 +149,7 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 - **进入拦截的三个来源**：登录响应里标记为真；页面恢复时拉到的资料里标记为真；任何请求收到 403 且 code 为 `must_change_password`（[http.ts](../src/api/http.ts) 在唯一的响应体解析口广播全局事件，[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 监听后进入拦截）。
 - **拦截期间的行为**：只渲染强制修改密码页（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的强制模式：顶部一条白底说明横幅解释为什么被拦），正常聊天主体一概不渲染；路径守卫把地址按在 `/password`——手输别的地址、用浏览器前进后退都会被送回。
 - **取消（2026-11-07 补上）**：被标记账号的登录不算登录成功——服务器发的只是一条能到豁免路径的受限会话。强制页的「取消」即放弃这次登录：尽力调用注销接口作废受限会话（服务器联系不上也照样回登录页，受限会话到不了聊天功能、会自行过期），清掉本地登录态回登录页，其他标签页经登出标记一起回登录界面；草稿按主动退出的规矩清空。标记仍留在账号上，下次登录照样被拦，直到改完密码。实现：[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的 `cancelGatedLogin`。
+- **拦截期间登录态死掉（2026-11-08 修正）**：拦截时聊天主体不渲染，「留在原页面的过期状态」的警示条看不见，此前推送失效帧和提交收到的 401 都被静默吞掉——点「修改」页面毫无反应，只有开发者工具里能看到 401。现在两条出口都直接带文案回登录页：推送失效帧走 handlePushInvalid 的闸门分支（帧里的 message，缺失时退「会话已过期，请重新登录」）；提交收到 401 先把原因写进表单错误，再由 enterLoginGuarded（闸门下跳过守卫）带回登录页（服务端 detail，如「未登录」）。重新登录后由登录响应决定要不要再进闸门。
 - **解除**：改密成功后服务器在同一事务里吊销全部令牌并清 cookie，「改完接着用」物理上做不到——页面沿用既有成功路径回登录界面（提示「密码已修改，请用新密码重新登录」），用新密码重新登录；登录响应里标记已是 false，拦截解除。万一标记仍为真，拦截重新生效。
 - **控制台一侧**：服务器不做强制改密（维护者永久决定，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」）。控制台的「修改我的密码」入口（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）纯自助；修改成功后所有设备同样下线，回控制台登录界面用新密码重新登录。
 
@@ -168,7 +169,7 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 
 - **`probePartial` 把 401 归为 unreachable（原限制，2026-11-07 关闭）**：流断了去问「还在写吗」时如果会话已过期，401 曾被归进「问不到服务器」，走连接警示横幅而不是会话过期后留在原页面的状态。现在 401 单列为「会话已失效」（unauthorized）结果、带上 reason，四个调用点全部接入会话过期处理：引擎的断流恢复（`recoverReply`）和停止收尾（`finishStop`）直接走统一的 401 出口（`onAuthError`）；`chat.ts` 的 `outcomeAfterFailure` 和 `thread.ts` 的 `loadThread` 把 401 原样抛给调用方既有的 401 出口。
 - **留在原页面的过期状态里侧栏/设置操作的 401 静默失败**：`enterLoginGuarded` 保证不清页，但那些操作本身也没成功，用户看不到单独的解释（横幅是共用的那条）。
-- **`/password` 页提交收到 401 无可见反馈**：「会话过期后留在原页面的状态」的提示只挂在聊天页，独立路由的改密页收不到；提交失败只留在表单错误里，不说「会话已过期」。
+- **`/password` 页提交收到 401 无可见反馈（原限制，2026-11-08 关闭）**：401 的原因现在先写进表单错误再走出口（[use-password-change.ts](../src/hooks/use-password-change.ts)）；强制闸门下出口不被守卫吞掉，直接带文案回登录页（见「强制修改密码的拦截」）。
 - **服务器侧失效已实时推送（原限制，2026-11-06 关闭）**：改密、控制台重置、令牌过期经 `/api/events` 推送通道推到所有开着的标签页、进入与带 reason 的 401 同一套留在原页面的过期状态，下一次请求的 401 作保底；主动退出照旧走 localStorage 标记（退出登录不推送，属设计决定）。
 - **滚动跟随只看消息列表和编辑框文本**：打字机播放的每个周期长高已持续跟随（2026-11-06，每个周期 `onReveal` 查贴底，见「打字机播放」）；其余纯高度变化（高亮懒加载迟到、KaTeX 排版完成、思考气泡进度文本）仍不会重新触发贴底判定，已贴底时跟随可能悄悄脱钩；「回到底部」按钮仍可用。
 - **其余 7 个组件「lang 属性按连接错误硬标 zh-Hans」的临时写法未收敛**：`error === text.connectionError ? htmlLang[locale] : 'zh-Hans'` 还留在 AdminConsole、AdminLoginForm、ConfirmAdminLogout、ConfirmResetPassword、LoginScreen、ConfirmLogout、SettingsModal 七个组件里——错误文案 i18n 映射（2026-11-06）之后，英/繁界面的错误多数已是本地化映射文案，内容正确，但这个写法会把它们的 `lang` 标成 `zh-Hans`，标注不准。另有同族变体第 8 处：ChangePasswordPage 的 `localizedError ? htmlLang[locale] : 'zh-Hans'`（判断条件从「是不是连接错误」换成「是不是本地化映射文案」），收敛时一并处理。归 frontend-app P4 后续收敛。

@@ -43,7 +43,13 @@ export function usePasswordChange(deps: PasswordChangeDeps) {
       current.onEnterLogin(null);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        current.onEnterLogin(error.detail);
+        // 先把 401 的原因写进表单错误再走出口。强制闸门下出口直接回登录页
+        // （页面随即卸载，这次写入无害）；普通 /password 页若已处在「留在
+        // 原页面的过期状态」，enterLoginGuarded 不会整页清空——没有这句，
+        // 401 就被静默吞掉，点提交毫无反应（原已知限制，2026-11-08 关闭）。
+        const detail = error.detail ?? text.sessionExpired;
+        setError(detail);
+        current.onEnterLogin(detail);
         return;
       }
       if (connectionFailure(error)) {
