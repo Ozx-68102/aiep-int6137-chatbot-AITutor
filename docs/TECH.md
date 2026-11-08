@@ -27,7 +27,7 @@ npm install -g pnpm
 
 - 构建：Vite 8.3.5，插件 @vitejs/plugin-react 6.1.2
 - UI：React 19.3.1、react-dom 19.3.1
-- 路由：react-router 8.5.1，BrowserRouter 真实路径：聊天 `/`、会话 `/chat/:id`、改密 `/password`、登录入口 `/login`、控制台 `/admin`。登录本身是状态不是路由：未登录时任何路径直接渲染登录屏，登录成功后路由自动认领原地址。不带 id 的 `/chat` 和未知路径归位到根路径
+- 路由：react-router 8.5.1，BrowserRouter 真实路径：聊天 `/`、会话 `/chat/:id`、强制改密 `/force-change-pwd`、自助改密 `/change-pwd`（旧 `/password` 是别名重定向）、登录入口 `/login`、控制台 `/admin`。登录本身是状态不是路由：未登录时任何路径直接渲染登录屏，登录成功后路由自动认领原地址（改密地址除外——一律归位根路径，见 CHAT_PAGE_BEHAVIOR「强制修改密码的拦截」）。不带 id 的 `/chat` 和未知路径归位到根路径
 - 图标：lucide-react 1.61.0
 - 样式：Tailwind CSS 4.3.3，插件 @tailwindcss/vite 4.3.3
 - 组件库：daisyUI 5.7.50（Tailwind 插件，`src/index.css` 里用 `@plugin` 接线）。内置主题已关掉，只用自定义 `aiep` 主题：语义变量（base-*、primary、error 等）与 stone/emerald 色板同值。组件类按需生成，源码里没出现的类不会进产物

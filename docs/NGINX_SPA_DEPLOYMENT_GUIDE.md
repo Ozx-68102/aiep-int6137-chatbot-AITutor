@@ -6,7 +6,7 @@
 
 `pnpm build` 的产物 `dist/` 是一堆纯静态文件：一个 `index.html`，加上 `assets/` 目录里带哈希文件名的 JS 和 CSS。服务器不需要运行任何 Node 进程就能把它们发出去。
 
-但本项目的页面用**真实路径路由**：会话页在 `/chat/<会话id>`，改密页在 `/password`，管理员控制台在 `/admin`，登录入口在 `/login`。这些路径在 `dist/` 里**没有对应的文件**——磁盘上只有 `index.html` 一个页面，"现在该显示哪个页"是由浏览器里的 JS 读地址决定的。
+但本项目的页面用**真实路径路由**：会话页在 `/chat/<会话id>`，自助改密页在 `/change-pwd`，强制改密页在 `/force-change-pwd`，管理员控制台在 `/admin`，登录入口在 `/login`。这些路径在 `dist/` 里**没有对应的文件**——磁盘上只有 `index.html` 一个页面，"现在该显示哪个页"是由浏览器里的 JS 读地址决定的。
 
 于是有了核心问题：用户在 `/chat/abc123` 上按刷新，浏览器会向服务器发 `GET /chat/abc123`。服务器在磁盘上找不到这个文件，默认就回 404。解决办法叫 **SPA 回落**（SPA fallback）：告诉服务器"任何找不到的路径，都把 `index.html` 发回去"，让浏览器里的 JS 接管剩下的事。
 
@@ -31,7 +31,7 @@ server {
 
     # ① SPA 回落：本文档的核心。
     #    先找真实文件（$uri）、再找目录（$uri/），都没有就返回 index.html，
-    #    让浏览器里的前端路由自己认领 /chat/xxx、/password 这些地址。
+    #    让浏览器里的前端路由自己认领 /chat/xxx、/change-pwd 这些地址。
     location / {
         try_files $uri $uri/ /index.html;
     }

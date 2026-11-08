@@ -59,14 +59,14 @@
 - [x] 吊销这个账号其它设备的登录 token；当前设备也强制下线，重新登录。
 - [x] 改密码这条路径也限流。
 - [x] 设置弹窗里加「修改密码」入口：[src/components/settings/SettingsModal.tsx](../src/components/settings/SettingsModal.tsx)。
-- [x] 表单本身是独立页面，不是弹窗：弹窗点一下背景就关，密码输一半全丢（密码框不进草稿缓存）。页面地址是 `/password`，能刷新、能用浏览器后退；「取消」就是后退、回到进入前的会话，直接贴地址打开时没有可退的历史，直接把路径换掉回聊天。2026-11-03 维护者定的；2026-11-04 地址从查询参数改成真实路径。
+- [x] 表单本身是独立页面，不是弹窗：弹窗点一下背景就关，密码输一半全丢（密码框不进草稿缓存）。页面地址 2026-11-04 起是真实路径，2026-11-08 与强制改密拆开：自助改密走 `/change-pwd`（旧 `/password` 自动重定向过去），强制改密走 `/force-change-pwd`。能刷新、能用浏览器后退；「取消」就是后退、回到进入前的会话，直接贴地址打开时没有可退的历史，直接把路径换掉回聊天。2026-11-03 维护者定的。
 - [x] 管理员改自己的密码也走这个端点（认 `admin_login` cookie，门槛按角色取 8 位；控制台里的界面入口是后续批次）。2026-11-03。
 - [x] 学生门槛放宽到 6 位：`check_password_policy` 加 `min_length` 关键字参数，`min_length_for_role` 按角色取值；极弱口令静态拒绝名单前后端各一份（改一处必须改两处）。客户端提交前硬门槛与后端消息逐字一致。2026-11-03。
 
 ## 强制改密码
 
 - [x] `account` 加 `must_change_password` 列（后端已实施：迁移 `0002_account_must_change_password`——原文记录的「init.py 里补」写法已被「表结构变更一律写迁移文件」的规矩取代，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「令牌表与定时清扫」）。`ProfileResponse` 已返回该字段，登录校验链路（`renew_login_token`）顺带把它带出来。
-- [x] 登录时为真就跳改密码页。（2026-11-06 前端已实现：登录响应或资料响应里标记为真就进入强制拦截——只渲染强制修改密码页，路径守卫把地址按在 `/password`；任何请求收到 403 且 code 为 `must_change_password` 也会经全局保底事件进入同一拦截。改密成功后服务器吊销全部令牌并清 cookie，页面回登录界面、用新密码重新登录——标记已清，拦截解除。2026-11-07 补上：强制页有「取消」——放弃这次登录（被标记的登录不算成功，服务器发的只是能到豁免路径的受限会话），尽力作废该会话、回登录页，标记不清除、下次登录仍被拦。）
+- [x] 登录时为真就跳改密码页。（2026-11-06 前端已实现：登录响应或资料响应里标记为真就进入强制拦截——只渲染强制改密页，路径守卫把地址按在 `/force-change-pwd`；任何请求收到 403 且 code 为 `must_change_password` 也会经全局保底事件进入同一拦截。改密成功后服务器吊销全部令牌并清 cookie：页面先就地亮「密码已修改，请用新密码重新登录」，随后回「记下的来路」（只记 `/chat/:id`，没有就根路径）就地渲染登录屏，用新密码重新登录——标记已清，拦截解除。2026-11-07 补上：强制页有「放弃本次登录」——放弃这次登录（被标记的登录不算成功，服务器发的只是能到豁免路径的受限会话），尽力作废该会话、回登录页，标记不清除、下次登录仍被拦。2026-11-08 拆分：强制改密与自助改密是两条 URL、两副面孔——标题、说明横幅、退出按钮文案都不同。）
 - [x] 后端强制：被标记账号请求豁免清单之外的 `/api/` 路径回 403「请先修改密码」（code `must_change_password`）。实际豁免清单比原设计宽：登录、改密、退出、资料、状态、头像、推送七条（见 `middleware.py`）。聊天侧已强制；控制台一侧（`/api/admin/*`）不强制——维护者永久决定（2026-11-06，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」的「永久决定」段）。
 
 注记（2026-11-06 更新）：「首次登录强制改密」流程已全链路实施——后端列与中间件 403（上面两条已勾）、前端读取标记并强制拦截（[src/App.tsx](../src/App.tsx) 的拦截分支与 [use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的路径守卫）、403 保底事件（[src/api/http.ts](../src/api/http.ts)）、修改密码页强制模式（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的 `forced`）。控制台「修改我的密码」入口同日补上（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）：纯自助、不与强制联动（永久决定见上）；修改成功后该账号所有设备下线，回控制台登录界面用新密码重新登录。强制页的「取消」（放弃这次登录、作废受限会话回登录页，标记不清除）2026-11-07 补上（[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的 `cancelGatedLogin`）。
