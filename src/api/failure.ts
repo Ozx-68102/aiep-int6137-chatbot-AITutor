@@ -68,3 +68,16 @@ export function explain(error: unknown, locale: Locale, connection: string): str
 export function connectionFailure(error: unknown): boolean {
   return !(error instanceof ApiError) || error.detail === null;
 }
+
+/**
+ * 会话类 401 的统一提示（2026-11 维护者决定）：后端 401 的 detail（如
+ * 「未登录」）是内部口径，不对用户显示——凭证被注销一律「会话已过期，
+ * 请重新登录」；disabled 是终态，保留「账号已被停用」。改密页与各动作的
+ * 401 出口（onEnterLogin）都传这里的结果，登录屏读到的就是这句。
+ */
+export function sessionExpiredText(error: unknown, locale: Locale): string {
+  if (error instanceof ApiError && error.reason === 'disabled') {
+    return translations[locale].accountDisabled;
+  }
+  return translations[locale].sessionExpired;
+}

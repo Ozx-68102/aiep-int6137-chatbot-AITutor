@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {connectionFailure, explain} from '../api/failure.ts';
+import {connectionFailure, explain, sessionExpiredText} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {updateProfile, uploadAvatar} from '../api/profile.ts';
 import {translations} from '../i18n/index.ts';
@@ -44,7 +44,8 @@ export function useProfileActions(deps: ProfileActionsDeps) {
       saveCachedProfile({username: profile.username, locale: profile.locale});
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        current.onEnterLogin(error.detail);
+        // 凭证被注销：统一文案，不透出后端 detail（「未登录」）。
+        current.onEnterLogin(sessionExpiredText(error, current.locale));
         return;
       }
       if (connectionFailure(error)) {
@@ -70,7 +71,8 @@ export function useProfileActions(deps: ProfileActionsDeps) {
       current.setAvatarUrl(profile.avatarUrl);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        current.onEnterLogin(error.detail);
+        // 凭证被注销：统一文案，不透出后端 detail（「未登录」）。
+        current.onEnterLogin(sessionExpiredText(error, current.locale));
         return;
       }
       if (connectionFailure(error)) {

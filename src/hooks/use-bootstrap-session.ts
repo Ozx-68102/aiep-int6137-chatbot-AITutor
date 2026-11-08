@@ -80,7 +80,10 @@ export function useBootstrapSession(deps: BootstrapSessionDeps) {
           return;
         }
         setSessions(next);
-        routingRef.current?.claimPath(next);
+        // restore=true：这是登录态恢复（刷新、深链），不是一次新登录——
+        // 自助改密页上刷新留在原页接着改；新登录（openAccount）不传 restore，
+        // 落在密码地址一律归位根路径，不认领（死循环的根治）。
+        routingRef.current?.claimPath(next, true);
         if (profile) {
           setUsername(profile.username);
           setLocale(profile.locale);

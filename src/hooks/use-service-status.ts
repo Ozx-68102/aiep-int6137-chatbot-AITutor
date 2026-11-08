@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {sessionExpiredText} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {readProfile} from '../api/profile.ts';
 import {listSessions, sessionsFromList} from '../api/session.ts';
@@ -38,6 +39,7 @@ export function serviceNoticeText(
 }
 
 type ServiceStatusDeps = {
+  locale: Locale;
   auth: 'checking' | 'anonymous' | 'ready';
   setSessions: (sessions: Session[]) => void;
   setUsername: (username: string) => void;
@@ -93,7 +95,8 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
       current.onClaimPath(next);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        current.onEnterLogin(error.detail);
+        // 凭证被注销：统一文案，不透出后端 detail（「未登录」）。
+        current.onEnterLogin(sessionExpiredText(error, current.locale));
       }
       return;
     }

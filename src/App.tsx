@@ -5,7 +5,7 @@ import {useDocumentMeta} from './hooks/use-document-meta.ts';
 import {useMessageSubmit} from './hooks/use-message-submit.ts';
 import {useMultiTabSync} from './hooks/use-multi-tab-sync.ts';
 import {usePasswordChange} from './hooks/use-password-change.ts';
-import {chatIdFromPath, usePathRouting} from './hooks/use-path-routing.ts';
+import {usePathRouting} from './hooks/use-path-routing.ts';
 import {useProfileActions} from './hooks/use-profile-actions.ts';
 import {useSessionActions} from './hooks/use-session-actions.ts';
 import {serviceNoticeText, useServiceStatus} from './hooks/use-service-status.ts';
@@ -18,6 +18,7 @@ import {AppFrame} from './components/shell/AppFrame.tsx';
 import {PageBoundary} from './components/shell/PageBoundary.tsx';
 import {Toast, type ToastItem} from './components/toast/Toast.tsx';
 import {translations} from './i18n/index.ts';
+import {chatIdFromPath, SELF_CHANGE_PWD} from './session/paths.ts';
 import {readCachedAvatarData, readCachedProfile} from './session/profile-cache.ts';
 import type {CachedProfile} from './session/profile-cache.ts';
 import {BrowserRouter, Route, Routes, useLocation, useNavigate} from 'react-router';
@@ -177,14 +178,15 @@ function ChatApp() {
     setAuth,
     setLoginOffline,
     setLoginDetail,
-    setLoginNotice,
     setReloginOpen,
     setMustChangePassword,
+    enterLogin,
     enterLoginGuardedRef,
     enterLoginGuarded,
     handleAuthError,
     submitLogin,
     signOut,
+    finishPasswordChange,
     cancelGatedLogin,
   } = authFlow;
   useMultiTabSync({enterLoginGuardedRef, setLocale, setUsername, setAvatarUrl});
@@ -221,6 +223,7 @@ function ChatApp() {
     setDraft,
   });
   const service = useServiceStatus({
+    locale,
     auth,
     setSessions,
     setUsername,
@@ -245,8 +248,14 @@ function ChatApp() {
   });
   const password = usePasswordChange({
     locale,
-    onPasswordChanged: () => setLoginNotice(text.passwordChanged),
-    onEnterLogin: enterLoginGuarded,
+    // 改密成功的收尾不走守卫（守卫会把它吞掉）：回记下的来路就地渲染登录屏，
+    // 登录屏带「密码已修改，请用新密码重新登录」的提示（finishPasswordChange）。
+    onFinish: finishPasswordChange,
+    // 401（会话已死）：表单错误已是统一文案，登录屏上带同句，不透出「未登录」。
+    onSessionExpired: (message) => {
+      enterLogin(null);
+      setLoginDetail(message);
+    },
     onConnectionWarning: service.showConnectionWarning,
   });
   const profileApi = useProfileActions({
@@ -403,13 +412,13 @@ function ChatApp() {
     );
   }
 
-  // 「必须修改密码」拦截：标记为真就只渲染强制改密页，正常聊天主体一概不
-  // 渲染；地址由登录状态机（use-auth-flow）里的守卫效果按在 /password。
-  // 被标记的登录不算登录成功：服务器发的只是一条能到豁免路径的受限会话。
-  // 「取消」＝放弃这次登录（cancelGatedLogin 作废受限会话、回登录页），
-  // 标记不清除，下次登录仍会被拦；改密成功后服务器吊销这个账号的全部登录
-  // （含当前设备），走 use-password-change 既有的成功路径回登录界面；
-  // 重新登录后由登录响应里的标记解除拦截。
+  // 「必须修改密码」拦截：标记为真就只渲染强制改密页（地址被守卫按在
+  // /force-change-pwd），正常聊天主体一概不渲染。被标记的登录不算登录成功：
+  // 服务器发的只是一条能到豁免路径的受限会话。「放弃本次登录」＝放弃这条
+  // 受限会话（cancelGatedLogin 作废会话、回记下的来路就地登录），标记不清
+  // 除，下次登录仍会被拦。改密成功后服务器吊销这个账号的全部登录（含当前
+  // 设备）：页面就地亮「密码已修改」提示（password.changed），片刻后收尾回
+  // 记下的来路就地渲染登录屏；重新登录后由登录响应里的标记解除拦截。
   if (mustChangePassword) {
     return (
       <ChangePasswordPage
@@ -417,6 +426,7 @@ function ChatApp() {
         username={username}
         error={password.error}
         busy={password.busy}
+        success={password.changed}
         forced
         onSubmit={password.submit}
         onCancel={() => void cancelGatedLogin()}
@@ -424,15 +434,18 @@ function ChatApp() {
     );
   }
 
-  // 修改密码是独立的一页，不是弹窗：没有背景可误点，密码输一半不会丢。
-  // 地址是 /password，刷新和后退都是页面的行为，不是弹窗的。
-  if (location.pathname === '/password') {
+  // 自助改密是独立的一页（/change-pwd），不是弹窗：没有背景可误点，密码输
+  // 一半不会丢。刷新和后退都是页面的行为，不是弹窗的。改密成功后就地亮
+  // 提示，收尾与闸门同一套：回记下的来路（markPasswordPushed 记下的）就地
+  // 登录，见 use-auth-flow 的 finishPasswordChange。
+  if (location.pathname === SELF_CHANGE_PWD) {
     return (
       <ChangePasswordPage
         locale={locale}
         username={username}
         error={password.error}
         busy={password.busy}
+        success={password.changed}
         onSubmit={password.submit}
         onCancel={() => {
           password.setError(null);
@@ -441,7 +454,7 @@ function ChatApp() {
             void navigate(-1);
             return;
           }
-          // 直接以 /password 打开（刷新、粘贴地址），历史里没有可退的：
+          // 直接以 /change-pwd 打开（刷新、粘贴地址），历史里没有可退的：
           // 就地把路径换掉回聊天。
           setView('chat');
           void navigate(activeId === null ? '/' : `/chat/${activeId}`, {

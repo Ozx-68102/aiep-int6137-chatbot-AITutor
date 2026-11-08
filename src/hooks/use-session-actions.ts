@@ -1,6 +1,6 @@
 import {useEffect, useRef} from 'react';
 import {useNavigate} from 'react-router';
-import {connectionFailure, explain} from '../api/failure.ts';
+import {connectionFailure, explain, sessionExpiredText} from '../api/failure.ts';
 import {ApiError} from '../api/http.ts';
 import {deleteSession, pinSession, renameSession} from '../api/session.ts';
 import {translations} from '../i18n/index.ts';
@@ -64,7 +64,8 @@ export function useSessionActions(deps: SessionActionsDeps) {
       return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        onEnterLogin(error.detail);
+        // 凭证被注销：统一文案，不透出后端 detail（「未登录」）。
+        onEnterLogin(sessionExpiredText(error, locale));
         return false;
       }
       if (connectionFailure(error)) {
@@ -86,7 +87,8 @@ export function useSessionActions(deps: SessionActionsDeps) {
         return false;
       }
       if (error instanceof ApiError && error.status === 401) {
-        onEnterLogin(error.detail);
+        // 凭证被注销：统一文案，不透出后端 detail（「未登录」）。
+        onEnterLogin(sessionExpiredText(error, locale));
         return false;
       }
       if (connectionFailure(error)) {
@@ -116,7 +118,8 @@ export function useSessionActions(deps: SessionActionsDeps) {
       await deleteSession(id);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        onEnterLogin(error.detail);
+        // 凭证被注销：统一文案，不透出后端 detail（「未登录」）。
+        onEnterLogin(sessionExpiredText(error, locale));
         return false;
       }
       if (connectionFailure(error)) {
@@ -174,8 +177,8 @@ export function useSessionActions(deps: SessionActionsDeps) {
         ),
       );
       if (error instanceof ApiError && error.status === 401) {
-        // 登录过期：登录界面会带着服务器给的说法接住，这里不再弹 toast。
-        onEnterLogin(error.detail);
+        // 凭证被注销：统一文案（「未登录」不透出），这里不再弹 toast。
+        onEnterLogin(sessionExpiredText(error, locale));
         return;
       }
       if (connectionFailure(error)) {

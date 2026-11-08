@@ -13,6 +13,8 @@ import {
   saveCachedProfile,
   writeLogoutMarker,
 } from '../session/profile-cache.ts';
+import {FORCE_CHANGE_PWD} from '../session/paths.ts';
+import {clearChatReturn, readChatReturn, rememberChatReturn} from '../session/password-return.ts';
 import {openPushChannel} from '../session/push-channel.ts';
 import {clearUnsent, readUnsent, saveUnsent} from '../session/unsent.ts';
 import type {Session} from '../type/chat.ts';
@@ -182,11 +184,16 @@ export function useAuthFlow(deps: AuthFlowDeps) {
   }, [auth, pushEpoch]);
 
   // 拦截期间的路径守卫：用户手输别的地址、用浏览器前进后退离开，都送回
-  // /password。渲染分支本身不看地址（拦截生效期间只渲染强制改密页），这里
-  // 把地址栏也按住，两边一致。
+  // /force-change-pwd。渲染分支本身不看地址（拦截生效期间只渲染强制改密页），
+  // 这里把地址栏也按住，两边一致。进闸门之前先记来路（只记 /chat/:id）：
+  // 改密成功后回那里就地重新登录。
   useEffect(() => {
-    if (auth === 'ready' && mustChangePassword && location.pathname !== '/password') {
-      void navigate('/password', {replace: true});
+    if (auth !== 'ready' || !mustChangePassword) {
+      return;
+    }
+    if (location.pathname !== FORCE_CHANGE_PWD) {
+      rememberChatReturn(location.pathname);
+      void navigate(FORCE_CHANGE_PWD, {replace: true});
     }
   }, [auth, mustChangePassword, location.pathname, navigate]);
 
@@ -195,7 +202,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     mustChangePasswordRef.current = mustChangePassword;
   });
 
-  function enterLogin(detail: string | null) {
+  function enterLogin(detail: string | null, landing: string | null = null) {
     // 被强制退回登录页时，正打到一半的字存起来，登录成功后放回输入框。
     // 主动退出不走这里存：signOut 成功之后会把这份缓存清掉。
     const typed = draftRef.current.trim();
@@ -210,14 +217,17 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     setUsername(null);
     clearCachedProfile();
     setView('chat');
-    // 主动退出（登出、改密成功强制回来）地址去规范登录入口 /login：
-    // 旧会话 id 不再留在地址栏、浏览器历史和复制出去的链接里，
-    // 重新登录后也不会又弹回改密页。被 401 强制退回登录页时地址不动：登录界面
-    // 就地渲染，重新登录后由路由自动认领回原会话。
+    // 主动退出（登出、被强制下线）地址去规范登录入口 /login：旧会话 id 不再
+    // 留在地址栏、浏览器历史和复制出去的链接里。被 401 强制退回登录页时地址
+    // 不动：登录界面就地渲染，重新登录后由路由自动认领回原会话。
+    // landing 是改密流程专用：改密成功/放弃本次登录回「记下的来路」
+    //（/chat/:id 或根路径）就地渲染登录屏，重新登录后认领回那个会话——
+    // 与就地渲染同一套机制（契约见 session/password-return.ts）。
     if (detail === null) {
-      void navigateRef.current('/login', {replace: true});
+      void navigateRef.current(landing ?? '/login', {replace: true});
     }
     routingRef.current?.resetPasswordEntry();
+    clearChatReturn();
     setComposingNew(false);
     setConfirmLogout(false);
     setSessionInvalid(null);
@@ -225,7 +235,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     // 回登录界面就解除拦截：标记还在不在，由下一次登录响应说了算。
     setMustChangePassword(false);
     profileApiRef.current?.setProfileError(null);
-    passwordRef.current?.setError(null);
+    passwordRef.current?.reset();
     sessionActionsRef.current?.titleSaves.current.clear();
     engineRef.current?.resetForLogin();
     setLoginOffline(false);
@@ -245,7 +255,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
       setSessionInvalid({reason: error.reason, message: null});
       return;
     }
-    enterLogin(error.detail);
+    enterLogin(text.sessionExpired);
   }
 
   /**
@@ -256,7 +266,13 @@ export function useAuthFlow(deps: AuthFlowDeps) {
    * 直接带文案回登录页，重新登录后由登录响应决定要不要再进闸门。
    */
   function handlePushInvalid(reason: string, message: string | null) {
-    if (mustChangePasswordRef.current) {
+    // 本页正在改密（提交中，或已成功正等收尾）：失效帧不抢先整页回登录——
+    // 成功收尾（finishPasswordChange）自己会清状态跳登录屏；抢先一步会把
+    // 「密码已修改」的成功反馈打断成一条报错。帧改记 sessionInvalid（闸门
+    // 期间横幅挂不出去，无副作用），收尾时一并清掉。
+    const password = passwordRef.current;
+    const changing = password !== null && (password.busy || password.changed);
+    if (mustChangePasswordRef.current && !changing) {
       enterLogin(message ?? text.sessionExpired);
       return;
     }
@@ -401,6 +417,17 @@ export function useAuthFlow(deps: AuthFlowDeps) {
   }
 
   /**
+   * 改密成功（或放弃本次登录）的收尾：回「记下的来路」（/chat/:id 或根路径）
+   * 就地渲染登录屏，带「密码已修改，请用新密码重新登录」的提示。地址不动地
+   * 渲染登录屏与被 401 顶回登录页是同一套机制：重新登录后 claimPath 自动
+   * 认领回那个会话。成功提示放在登录屏（notice），不再挂在聊天页的横幅上。
+   */
+  function finishPasswordChange() {
+    setLoginNotice(text.passwordChanged);
+    enterLogin(null, readChatReturn());
+  }
+
+  /**
    * 强制改密页的「取消」＝放弃这次登录。被标记账号的登录不算登录成功：
    * 服务器发的只是一条能到改密等豁免路径的受限会话，不改密码就用不了其他
    * 任何功能。取消时尽力把这条会话作废（服务器联系不上也照样回登录页——
@@ -419,7 +446,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
       } catch {
         // 尽力而为：作废请求没送到也不影响放弃本地登录态。
       }
-      enterLogin(null);
+      enterLogin(null, readChatReturn());
       clearUnsent();
       clearAllDrafts();
       writeLogoutMarker();
@@ -444,11 +471,13 @@ export function useAuthFlow(deps: AuthFlowDeps) {
     mustChangePassword,
     setMustChangePassword,
     loggingOut,
+    enterLogin,
     enterLoginGuardedRef,
     enterLoginGuarded,
     handleAuthError,
     submitLogin,
     signOut,
+    finishPasswordChange,
     cancelGatedLogin,
   };
 }

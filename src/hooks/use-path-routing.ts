@@ -1,13 +1,12 @@
 import {useEffect, useRef} from 'react';
-import {matchPath, useLocation, useNavigate} from 'react-router';
+import {useLocation, useNavigate} from 'react-router';
 import {readDraft} from '../session/drafts.ts';
+import {chatIdFromPath, FORCE_CHANGE_PWD, SELF_CHANGE_PWD} from '../session/paths.ts';
+import {rememberChatReturn} from '../session/password-return.ts';
 import type {Session} from '../type/chat.ts';
 
-/** /chat/:id 里的会话 id；其它路径（包括不带 id 的 /chat）返回 null。 */
-export function chatIdFromPath(pathname: string): string | null {
-  const matched = matchPath('/chat/:id', pathname);
-  return matched?.params.id ?? null;
-}
+/** 拆分前的旧自助改密地址：只认作别名，路径归位效果把它换成 /change-pwd。 */
+const LEGACY_PASSWORD_PWD = '/password';
 
 type PathRoutingDeps = {
   auth: 'checking' | 'anonymous' | 'ready';
@@ -24,7 +23,7 @@ type PathRoutingDeps = {
 
 /**
  * 真实路径路由的整个 URL 层：路径归位、路径驱动的会话切换、登录后的
- * 状态认领（claimPath），以及改密页的进入方式记录（passwordEntry）。
+ * 状态认领（claimPath），以及自助改密页的进入方式记录（passwordEntry）。
  *
  * 依赖按值传入、在效果里镜像进 ref：本 hook 的效果比主控制器的 ref 同步
  * 效果先跑，读主控制器的 ref 会拿到上一帧；读自己的 depsRef 永远是本帧。
@@ -32,9 +31,10 @@ type PathRoutingDeps = {
 export function usePathRouting(deps: PathRoutingDeps) {
   const location = useLocation();
   const navigate = useNavigate();
-  // 改密页是怎么进来的：'push' = 从设置里点进来（压入过一条历史记录，取消等于浏览器后退）；
+  // 自助改密页是怎么进来的：'push' = 从设置里点进来（压入过一条历史记录，取消等于浏览器后退）；
   // 'direct' = 刷新、粘贴地址或前进后退直接打开（没有可退的，取消就地替换路径）；
-  // null = 当前不在改密页。
+  // null = 当前不在自助改密页。强制改密页（/force-change-pwd）不走这套记录——
+  // 闸门的出口只有「改完」和「放弃」两条，都由 use-auth-flow 收尾。
   const passwordEntry = useRef<'push' | 'direct' | null>(null);
   // 上一次渲染时的路径：路径同步效果靠它判断「刚离开改密页」。
   const prevPathRef = useRef('');
@@ -47,11 +47,20 @@ export function usePathRouting(deps: PathRoutingDeps) {
     navigateRef.current = navigate;
   });
 
-  // 路径归位：只认 /、/login、/password、/chat/:id 四类地址，不带 id 的
-  // /chat 和未知路径一律送回根路径。
+  // 路径归位：只认 /、/login、两个改密地址、/chat/:id。不带 id 的 /chat、
+  // 未知路径一律送回根路径；旧 /password 只认作别名，就地换成 /change-pwd。
   useEffect(() => {
     const pathname = location.pathname;
-    if (pathname === '/' || pathname === '/login' || pathname === '/password') {
+    if (pathname === LEGACY_PASSWORD_PWD) {
+      void navigate(SELF_CHANGE_PWD, {replace: true});
+      return;
+    }
+    if (
+      pathname === '/' ||
+      pathname === '/login' ||
+      pathname === SELF_CHANGE_PWD ||
+      pathname === FORCE_CHANGE_PWD
+    ) {
       return;
     }
     if (chatIdFromPath(pathname) === null) {
@@ -68,16 +77,22 @@ export function usePathRouting(deps: PathRoutingDeps) {
       prevPathRef.current = pathname;
       return;
     }
-    if (pathname === '/password') {
+    if (pathname === SELF_CHANGE_PWD) {
       if (passwordEntry.current === null) {
-        // 浏览器前进后退回到改密页：历史里这一条本来就是压入的。
+        // 浏览器前进后退回到自助改密页：历史里这一条本来就是压入的。
         passwordEntry.current = 'push';
       }
       prevPathRef.current = pathname;
       return;
     }
+    if (pathname === FORCE_CHANGE_PWD) {
+      // 强制改密页不动聊天状态（拦截期间聊天主体不渲染）。
+      prevPathRef.current = pathname;
+      return;
+    }
     passwordEntry.current = null;
-    const leavingPassword = prevPathRef.current === '/password';
+    const leavingPassword =
+      prevPathRef.current === SELF_CHANGE_PWD || prevPathRef.current === FORCE_CHANGE_PWD;
     prevPathRef.current = pathname;
     if (leavingPassword) {
       current.setView('chat');
@@ -110,18 +125,31 @@ export function usePathRouting(deps: PathRoutingDeps) {
     }
   }, [location.pathname, navigate]);
 
-  /** 登录或引导完成后按当前路径认领状态：打开哪个会话、停在改密页还是回根路径。 */
-  function claimPath(list: Session[]): void {
+  /**
+   * 登录或引导完成后按当前路径认领状态：打开哪个会话、回根路径。
+   * 改密地址一概不认领——旧版 claimPath 会认领 /password，「登录后停在
+   * 密码页」正是改完密又被弹回改密页死循环的根。登录来自密码地址时一律
+   * 归位根路径；restore（刷新/深链恢复登录态）时只有自助改密页留在原页
+   * （改到一半刷新，应该能接着改）；强制页照旧归位——标记为真时渲染走
+   * 闸门分支，路径守卫马上把地址拉回 /force-change-pwd（拦截分支只看
+   * 标记不看地址，渲染不闪）。
+   */
+  function claimPath(list: Session[], restore: boolean = false): void {
     const {pathname} = locationRef.current;
     const current = depsRef.current;
-    if (pathname === '/password') {
-      // 直接以 /password 打开、或在改密页上刷新：留在改密页。
-      // 这种进入方式历史里没有我们压入的那一条，取消走就地替换的路。
+    if (pathname === SELF_CHANGE_PWD && restore) {
+      // 在自助改密页上刷新：留在本页接着改。这种进入方式历史里没有
+      // 我们压入的那一条，取消走就地替换的路。
       passwordEntry.current = 'direct';
       return;
     }
-    if (pathname === '/login') {
-      // 已经登录了，规范登录入口没有存在的意义：回根路径，
+    if (
+      pathname === LEGACY_PASSWORD_PWD ||
+      pathname === SELF_CHANGE_PWD ||
+      pathname === FORCE_CHANGE_PWD ||
+      pathname === '/login'
+    ) {
+      // 已经登录了，密码地址和规范登录入口都没有停留的意义：回根路径，
       // 聊天状态交给路径同步效果收拾。
       void navigateRef.current('/', {replace: true});
       return;
@@ -146,17 +174,21 @@ export function usePathRouting(deps: PathRoutingDeps) {
     current.setDraft(readDraft(found.id));
   }
 
-  /** 从设置里进改密页：压入了一条历史记录，取消等于浏览器后退。 */
+  /**
+   * 从设置里进自助改密页：压入一条历史记录（取消等于浏览器后退），并记下
+   * 来路——改密成功后回到这里就地重新登录（契约见 session/password-return.ts）。
+   */
   function markPasswordPushed() {
     passwordEntry.current = 'push';
+    rememberChatReturn(locationRef.current.pathname);
   }
 
-  /** 改密页是不是压入过历史记录进来的：决定取消走后退还是就地替换。 */
+  /** 自助改密页是不是压入过历史记录进来的：决定取消走后退还是就地替换。 */
   function isPasswordPushed(): boolean {
     return passwordEntry.current === 'push';
   }
 
-  /** 退出登录/被强制退回登录页：清掉改密页的进入方式记录。 */
+  /** 退出登录/被强制退回登录页：清掉改密页的进入方式记录（来路的清零在 enterLogin）。 */
   function resetPasswordEntry() {
     passwordEntry.current = null;
   }

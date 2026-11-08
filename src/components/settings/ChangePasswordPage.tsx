@@ -1,4 +1,4 @@
-import {CircleAlert, Eye, EyeOff, TriangleAlert} from 'lucide-react';
+import {CircleAlert, CircleCheck, Eye, EyeOff, TriangleAlert} from 'lucide-react';
 import {useState} from 'react';
 import {format, translations} from '../../i18n/index.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
@@ -19,17 +19,23 @@ const MIN_PASSWORD_LENGTH = 6;
  * 眼睛），再点一下恢复掩码。选点按切换而不是按住显示：键盘和触屏都能用，
  * 也不用一直按着。
  *
- * 强制模式（forced）：账号被服务器标了「必须修改密码」时由 App.tsx 的拦截
- * 渲染——顶部挂一条说明横幅解释为什么被拦，其余与普通模式完全一样。
- * 「取消」两种模式都有，含义不同：普通模式返回来路；强制模式是放弃这次
- * 登录（被标记的登录不算登录成功，见 use-auth-flow 的 cancelGatedLogin），
- * 具体动作由调用方传入的 onCancel 决定。
+ * 两种模式走两条 URL、两副面孔（2026-11 拆分，维护者决定）：强制改密
+ * （/force-change-pwd，重置密码后的闸门）标题「设置新密码」、顶部挂一条
+ * 说明横幅解释为什么被拦；自助改密（/change-pwd，从设置进来）标题
+ * 「修改密码」。退出按钮的文案也分开：强制模式的「放弃本次登录」是放弃
+ * 这条受限会话回登录页（use-auth-flow 的 cancelGatedLogin）；普通模式的
+ * 「取消」返回来路。同一个表单本体两处共用，区别只在这几处文案与横幅。
+ *
+ * 提交反馈（2026-11 补）：点击后按钮禁用加转圈直到请求完成；成功先就地
+ * 亮一条「密码已修改」的提示（success），片刻后由 App 收尾跳登录；失败就地
+ * 显示错误。成功期间按钮保持禁用，跳转不会被第二次提交打断。
  */
 export function ChangePasswordPage({
   locale,
   username,
   error,
   busy,
+  success = false,
   onSubmit,
   onCancel,
   forced = false,
@@ -38,9 +44,11 @@ export function ChangePasswordPage({
   username: string | null;
   error: string | null;
   busy: boolean;
+  /** 改密已生效：顶部亮成功提示、按钮保持转圈，等 App 收尾跳登录。 */
+  success?: boolean | undefined;
   onSubmit: (oldPassword: string, newPassword: string, confirmPassword: string) => Promise<void>;
   onCancel?: (() => void) | undefined;
-  /** 强制模式：顶部挂说明横幅；「取消」＝放弃这次登录，由调用方的 onCancel 给。 */
+  /** 强制模式：顶部挂说明横幅；「放弃本次登录」＝放弃这条受限会话，由调用方的 onCancel 给。 */
   forced?: boolean | undefined;
 }) {
   const text = translations[locale];
@@ -52,7 +60,8 @@ export function ChangePasswordPage({
   const [newShown, setNewShown] = useState(false);
   const [confirmShown, setConfirmShown] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
-  const blocked = busy || oldPassword === '' || newPassword === '' || confirmPassword === '';
+  const working = busy || success;
+  const blocked = working || oldPassword === '' || newPassword === '' || confirmPassword === '';
   // 门槛错误优先于可能残留的服务端错误：它是最近一次提交尝试的结果。
   const shownError = gateError ?? error;
   // 门槛错误和连接保底文案都是本地三语文案，按界面语言标注；其余的服务端
@@ -107,9 +116,18 @@ export function ChangePasswordPage({
       >
         <div className="card-body gap-4">
           <h1 className="card-title" lang={htmlLang[locale]}>
-            {text.changePassword}
+            {forced ? text.setNewPassword : text.changePassword}
           </h1>
-          {forced ? (
+          {success ? (
+            // 改密成功：就地先亮一条提示再收尾跳登录。白底黑字，语义色只在
+            // 图标上（docs/UI_WARNINGS.md）；role=status 让读屏也报得出「成了」。
+            <div className="alert bg-base-100" role="status">
+              <CircleCheck className="size-5 shrink-0 text-success" aria-hidden="true" />
+              <span className="min-w-0 flex-1 wrap-break-word" lang={htmlLang[locale]}>
+                {text.passwordChanged}
+              </span>
+            </div>
+          ) : forced ? (
             // 强制模式的说明横幅：说清楚为什么被拦在这里。白底黑字，
             // 语义色只在图标上（docs/UI_WARNINGS.md）。
             <div className="alert bg-base-100" role="status">
@@ -174,15 +192,34 @@ export function ChangePasswordPage({
             </p>
           ) : null}
           <div className="card-actions justify-end">
-            {/* 「取消」两种模式都有：普通模式返回来路；强制模式放弃这次登录、
-                作废受限会话回登录页（见 use-auth-flow 的 cancelGatedLogin）。 */}
+            {/* 退出按钮两种模式都有、文案分开：普通模式「取消」返回来路；
+                强制模式「放弃本次登录」作废受限会话回登录页（cancelGatedLogin）。
+                提交中/成功期间禁用——别把进行中的流程打断。 */}
             {onCancel === undefined ? null : (
-              <button type="button" className="btn btn-outline" onClick={onCancel}>
-                {text.cancel}
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={onCancel}
+                disabled={working}
+              >
+                {forced ? text.abandonLogin : text.cancel}
               </button>
             )}
-            <button type="submit" className="btn btn-primary" disabled={blocked}>
-              {text.changePassword}
+            {/* 提交按钮：点击即禁用加转圈直到请求完成（维护者 2026-11 要求的
+                最低反馈——不能让用户面对一个毫无反应的按钮连点两次）。 */}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={blocked}
+              aria-busy={working}
+            >
+              {working ? (
+                <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+              ) : forced ? (
+                text.setNewPassword
+              ) : (
+                text.changePassword
+              )}
             </button>
           </div>
         </div>

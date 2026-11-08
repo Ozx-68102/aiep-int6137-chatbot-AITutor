@@ -12,6 +12,7 @@ import type {useServiceStatus} from '../../hooks/use-service-status.ts';
 import type {useSessionActions} from '../../hooks/use-session-actions.ts';
 import type {useTurnEngine} from '../../hooks/use-turn-engine.ts';
 import type {Messages} from '../../i18n/index.ts';
+import {SELF_CHANGE_PWD} from '../../session/paths.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {ChatMain} from '../chat/ChatMain.tsx';
@@ -255,9 +256,10 @@ export function AppFrame({
         }}
         onChangePassword={() => {
           password.setError(null);
-          // 真页面：地址变成 /password，压入一条历史记录，浏览器后退就能回来。
+          // 真页面：地址变成 /change-pwd，压入一条历史记录，浏览器后退就能回来。
+          // markPasswordPushed 顺手记下来路——改密成功后回到这里就地重新登录。
           routing.markPasswordPushed();
-          void navigate('/password');
+          void navigate(SELF_CHANGE_PWD);
         }}
         onLogout={() => setConfirmLogout(true)}
         onClose={() => {
