@@ -14,6 +14,7 @@ RECORDS_CACHE_SECONDS = 5.0
 RECORDS_PAGE_SIZE = 100
 records_cache: dict[UUID, tuple[float, list[ChatRecord]]] = {}
 _UPSTREAM_ERROR = "暂时问不到上游，请稍后重试"
+_BACKFILL_WRITE_ERROR = "暂时读不到记录，请稍后再试"
 
 
 async def session_records(
@@ -74,9 +75,16 @@ async def backfill_session(session_id: UUID) -> list[chat_log.StoredMessage]:
             _UPSTREAM_ERROR,
         ) from None
 
-    await asyncio.to_thread(
+    copied = await asyncio.to_thread(
         chat_log.backfill, session_id, chat_log.rounds_from_records(records)
     )
+    if not copied:
+        # 抄进数据库失败：不能接着按「表里没有记录」回一份空历史，
+        # 那会把一次写入故障伪装成「这场会话没有消息」。
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _BACKFILL_WRITE_ERROR,
+        )
     return await asyncio.to_thread(chat_log.read_messages, session_id)
 
 

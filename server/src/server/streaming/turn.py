@@ -130,8 +130,9 @@ def record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> bool
 
     返回写进数据库成没成，摘要行用。
     """
-    chat_log.begin_round(session_id, turn_id, question)
-    return chat_log.finish_round(session_id, turn_id, "", ABORTED)
+    started = chat_log.begin_round(session_id, turn_id, question)
+    finished = chat_log.finish_round(session_id, turn_id, "", ABORTED)
+    return started and finished
 
 
 def settle_round(

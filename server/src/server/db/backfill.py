@@ -42,7 +42,9 @@ async def main() -> None:
             if records is None:
                 # 失败原因 _records 已经打印过了。
                 continue
-            chat_log.backfill(session_id, chat_log.rounds_from_records(records))
+            if not chat_log.backfill(session_id, chat_log.rounds_from_records(records)):
+                print(f"{session_id}: 写库失败，这一场没搬成")
+                continue
             print(f"{session_id}: 搬了 {len(records)} 条")
     finally:
         await fastgpt.aclose()

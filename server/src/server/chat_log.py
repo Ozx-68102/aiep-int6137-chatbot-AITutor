@@ -52,12 +52,15 @@ class StoredRound:
     status: str
 
 
-def begin_round(session_id: UUID, turn_id: UUID, question: str) -> None:
-    """记下这一轮开始。
+def begin_round(session_id: UUID, turn_id: UUID, question: str) -> bool:
+    """记下这一轮开始。返回提问和回答的占位行写进数据库成没成。
 
     提问先写进去，回答的位置先占着（状态是 streaming）：我们的进程要是
     中途死了，这一轮就留在 streaming 状态，读线程看得出来，
     还能按编号去上游把答案找回来。
+
+    返回值要一路传下去：这一下没写成，结束时就更正不到任何行（见
+    finish_round），摘要行得让人看得出这一轮根本没进表。
     """
 
     def action(session: Session) -> None:
@@ -84,19 +87,35 @@ def begin_round(session_id: UUID, turn_id: UUID, question: str) -> None:
             )
         )
 
-    _write("begin_round", session_id, action)
+    return _write("begin_round", session_id, action)
 
 
 def finish_round(session_id: UUID, turn_id: UUID, text: str, status: str) -> bool:
-    """这一轮结束：写上最后的状态和文字。返回写进数据库成没成（摘要行用）。"""
+    """这一轮结束：写上最后的状态和文字。返回写进数据库成没成（摘要行用）。
+
+    事务提交成功不等于这一轮写进去了：开始时写库失败过（begin_round 返回
+    假，提问和回答的占位行没建成），结束时更正匹配不到任何行——事务照样
+    成功提交，一行都没动。这里把「一行都没匹配到」也判为没写成，否则摘要
+    行会显示 db_written=true，而表里根本没有这一轮。
+    """
+    matched = 0
 
     def action(session: Session) -> None:
-        for row in _turn_rows(session, session_id, turn_id):
+        nonlocal matched
+        rows = _turn_rows(session, session_id, turn_id)
+        matched = len(rows)
+        for row in rows:
             row.status = status
             if row.role == ROLE_ASSISTANT:
                 row.text = text
 
-    return _write("finish_round", session_id, action)
+    written = _write("finish_round", session_id, action)
+    if written and matched == 0:
+        logger.warning(
+            "这一轮在表里找不到，开始时可能就没写进去 %s %s", session_id, turn_id
+        )
+        return False
+    return written
 
 
 def delete_round(session_id: UUID, turn_id: UUID) -> None:
@@ -218,10 +237,12 @@ def has_turn(session_id: UUID, turn_id: UUID) -> bool:
         return False
 
 
-def backfill(session_id: UUID, rounds: list[StoredRound]) -> None:
-    """把上游那一份抄一份过来。
+def backfill(session_id: UUID, rounds: list[StoredRound]) -> bool:
+    """把上游那一份抄一份过来。返回抄进数据库成没成。
 
     老会话还没有我们自己的记录，第一次读到的时候抄一份，抄完以我们这份为准。
+    返回值要一路传下去：抄失败时调用方不能把「表里还是空的」当成「这场会话
+    没有消息」照常回空历史，那会把一次数据库故障伪装成空会话。
     """
 
     def action(session: Session) -> None:
@@ -254,7 +275,7 @@ def backfill(session_id: UUID, rounds: list[StoredRound]) -> None:
                 )
                 seq += 1
 
-    _write("backfill", session_id, action)
+    return _write("backfill", session_id, action)
 
 
 def rounds_from_records(records: list[ChatRecord]) -> list[StoredRound]:
