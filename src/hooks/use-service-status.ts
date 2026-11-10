@@ -41,7 +41,7 @@ export function serviceNoticeText(
 type ServiceStatusDeps = {
   locale: Locale;
   auth: 'checking' | 'anonymous' | 'ready';
-  setSessions: (sessions: Session[]) => void;
+  setSessions: (updater: (current: Session[]) => Session[]) => void;
   setUsername: (username: string) => void;
   setLocale: (locale: Locale) => void;
   setAvatarUrl: (url: string | null) => void;
@@ -90,7 +90,21 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     try {
       const items = await listSessions();
       const next = sessionsFromList(items);
-      current.setSessions(next);
+      // 保留合并，不要整份替换：新列表里每条都是没读过历史的空壳（messages
+      // 为空、messagesKnown 为假），直接替换会把已经读出来、正在显示的消息抹
+      // 掉；而「线程已加载」的标记留在加载层（use-thread-loader 的
+      // loadedThreads），那个标记没有任何路径会清掉，于是也不会再有人去读一
+      // 次历史——聊天区就空着，只能刷新页面。标题、置顶这些元数据用服务端的
+      // 新值，消息和 messagesKnown 沿用本地的那一份；服务端已经不存在的会
+      // 话跟着消失（next 里没有它就不保留）。
+      current.setSessions((previous) =>
+        next.map((fresh) => {
+          const existing = previous.find((session) => session.id === fresh.id);
+          return existing === undefined
+            ? fresh
+            : {...fresh, messages: existing.messages, messagesKnown: existing.messagesKnown};
+        }),
+      );
       // 按当前地址重新认领状态：离线期间停在 /chat/<id> 的，把会话重新打开。
       current.onClaimPath(next);
     } catch (error) {
