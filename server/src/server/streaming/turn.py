@@ -78,7 +78,7 @@ async def relay_turn(
         relay.done_reason = "stop"
         # 停止端点在中止这个任务之前已经叫停了上游，摘要行照实记。
         relay.stop_sent = True
-        # 这里可以放心地 await Redis：取消已经投递过了，这一下写入带着
+        # 这里可以放心地 await Redis：取消已经投递过了，这次写入带着
         # 短超时，写完仍把 CancelledError 原样抛上去，停止的语义不变。
         await reply_store.mark_aborted(chat_id)
         raise
@@ -110,12 +110,12 @@ async def relay_turn(
                     logger.info("写失败状态时又被取消 %s，继续收尾", chat_id)
                     cleanup_cancel = exc
         finally:
-            # 不能 await：任务被取消时再 await 会把取消吞掉。
+            # 不能 await：任务被取消时再 await 会让取消丢失。
             relay.queue.put_nowait(None)
         # 失败以后也要叫上游收手。v2 不看连接断没断，不叫停的话
-        # 上游会把这一轮写完：token 白白消耗，那条记录还会晚到我们的历史里。
-        # 放在结束流以后叫：页面不用等这一下。
-        # 这一下要等它完成：那时候上游可能正卡着，请求过去得慢一些。
+        # 上游会把这一轮写完：token 被无谓消耗，那条记录还会晚到我们的历史里。
+        # 放在结束流以后叫：页面不用等这次调用。
+        # 这次要等它完成：那时候上游可能正忙，请求过去得慢一些。
         if relay.failed:
             relay.stop_sent = True
             stopping.ask_upstream_to_stop(chat_id, wait=True)
@@ -128,7 +128,7 @@ async def relay_turn(
 def record_stopped_round(session_id: UUID, turn_id: UUID, question: str) -> bool:
     """这一轮在开始之前就被按了停止：提问记下来，状态是 aborted。
 
-    返回写进数据库成没成，摘要行用。
+    返回是否写进数据库，摘要行用。
     """
     started = chat_log.begin_round(session_id, turn_id, question)
     finished = chat_log.finish_round(session_id, turn_id, "", ABORTED)
@@ -177,7 +177,7 @@ async def _write_round_end(
         await stopping.wait_for_stop(chat_id)
         answer = await _upstream_answer(chat_id, turn_id, fastgpt)
         if answer is not None and answer.startswith(text):
-            # 上游那份从我们收到的那段接着往下写：这一轮其实写完了，
+            # 上游那份从我们收到的那段接着往下写：这一轮实际上写完了，
             # 断的是我们的 [DONE]。存档用上游那份，数据库里状态改成写完了
             # （done 帧已经说过的 failed 不回改）。
             text = answer

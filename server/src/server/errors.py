@@ -24,7 +24,7 @@ NO_LANGUAGE = "账号没有语言设置"
 class SessionUnauthorized(HTTPException):
     """会话类 401：响应体在 detail 之外多带一个 reason 字段。
 
-    加字段是向后兼容的：老前端只读 detail，不受影响。reason 的词表见
+    加字段是向后兼容的：旧前端只读 detail，不受影响。reason 的词表见
     REASON_* 常量的注释；现在只会发出 expired（disabled 等停用列建好）。
     """
 
@@ -51,7 +51,7 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
 
-    # 这里只记一行。栈由 uvicorn 输出一遍就够，输出两遍会把日志撑爆。
+    # 这里只记一行。栈由 uvicorn 输出一遍就够，输出两遍会让日志超出容量。
     logger.error("请求失败 %s %s：%s", request.method, request.url.path, exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

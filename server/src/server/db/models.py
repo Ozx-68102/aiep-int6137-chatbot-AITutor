@@ -40,7 +40,7 @@ class Account(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     # 这个账号能进哪一边：chat 是聊天页，admin 是控制台。没有第三种。
-    # 默认 chat，所以已有的库跑一遍 init 之后，老账号都还是聊天账号。
+    # 默认 chat，所以已有的库跑一遍 init 之后，原账号都还是聊天账号。
     role: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'chat'")
     )

@@ -54,12 +54,12 @@ type ServiceStatusDeps = {
  * 以及服务器从「连不上」回来时补齐工作区（refreshWorkspace）的动作。
  *
  * 常规 30 秒轮询的单次失败先不挂横幅：等 1.5 秒做一次快速复查，复查也
- * 失败才挂「连不上」，复查成功就当无事发生——横幅自愈不再要等下一拍
+ * 失败才挂「连不上」，复查成功就当无事发生——横幅自动恢复不再要等下一个周期
  * 30 秒，网络抖动也不再闪报。
  *
  * 浏览器的网络事件也接在这里（N10）：offline 立刻挂「无法连接到服务器」
  * 常驻横幅，不用等最坏 30 秒的下一个周期；online 不轻信（网卡通了不代表
- * 服务器够得着），主动探测 /api/status 确认，失败按 1s/2s/4s…封顶 15s
+ * 服务器可以连通），主动探测 /api/status 确认，失败按 1s/2s/4s…封顶 15s
  * 指数退避重试。确认通过之后常规轮询的倒计时清零重新开始，并广播
  * networkOkEvent 唤醒进行中的半截回答轮询（src/session/poll.ts）和断线
  * 补查（use-turn-engine 的 catchUp），让它们也立刻以全新的周期开始。
@@ -145,8 +145,8 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     let backoffMs = confirmStartMs;
 
     /**
-     * 探测一次 /api/status，返回服务器是否够得着；成功就按响应设好降级
-     * 档位，并在从「连不上」回到够得着的第一时间补齐工作区
+     * 探测一次 /api/status，返回服务器是否可以连通；成功就按响应设好降级
+     * 档位，并在从「连不上」回到可以连通的第一时间补齐工作区
      *（refreshWorkspace）。失败不动任何状态——挂不挂横幅由调用方决定。
      */
     const probeOnce = async (): Promise<boolean> => {
@@ -198,7 +198,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
       // 确认成功后定时器会被整个清零后重新设置（见 confirm），不会剩半个周期在这等。
       if (!confirming && document.visibilityState !== 'hidden') {
         const ok = await probeOnce();
-        // 单次失败先不挂横幅：等一拍快速复查，复查也失败才挂，复查成功就
+        // 单次失败先不挂横幅：等一个周期做快速复查，复查也失败才挂，复查成功就
         // 当无事发生。等待期间 online 确认链启动了（confirming）或物理断网了
         // 就让路——横幅归确认链和 onOffline 管，同一时刻只有一条探测链在跑。
         if (!ok && !stopped && !confirming && navigator.onLine) {
@@ -232,7 +232,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
         return;
       }
       if (!navigator.onLine) {
-        // 物理网络又断了：探测必然失败，不白白发请求，等下一次 online 事件
+        // 物理网络又断了：探测必然失败，不无谓发请求，等下一次 online 事件
         // 重新启动确认。
         confirming = false;
         return;
@@ -270,7 +270,7 @@ export function useServiceStatus(deps: ServiceStatusDeps) {
     };
 
     const onOnline = () => {
-      // 浏览器报的 online 不轻信：网卡通了不代表服务器够得着，主动探测确认。
+      // 浏览器报的 online 不轻信：网卡通了不代表服务器可以连通，主动探测确认。
       // 已有确认循环正在进行就不开第二条（它的世代编号仍是当前值，继续跑）。
       if (confirming) {
         return;

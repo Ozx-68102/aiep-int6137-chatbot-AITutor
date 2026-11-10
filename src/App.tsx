@@ -44,7 +44,7 @@ const AdminConsole = lazy(() =>
 let chunkFailureNoticed = false;
 
 /**
- * 接住动态分块加载失败（发布期间新旧版本交错的窗口）：Vite 对动态 import 失败统一派
+ * 捕获动态分块加载失败（发布期间新旧版本交错的窗口）：Vite 对动态 import 失败统一派
  * vite:preloadError，这里弹 toast 提示刷新页面拿新版本。刻意渲染在
  * PageBoundary 外面：/admin 的分块加载失败时，lazy 的 rejection 会把整页
  * 送进错误边界，toast 得留在边界外才看得见。
@@ -247,7 +247,7 @@ function ChatApp() {
   });
   const password = usePasswordChange({
     locale,
-    // 改密成功的收尾不走守卫（守卫会把它吞掉）：回记下的来路就地渲染登录屏，
+    // 改密成功的收尾不走守卫（守卫会忽略它）：回记下的来路就地渲染登录屏，
     // 登录屏带「密码已修改，请用新密码重新登录」的提示（finishPasswordChange）。
     onFinish: finishPasswordChange,
     // 401（会话已死）：表单错误已是统一文案，登录屏上带同句，不透出「未登录」。
@@ -410,7 +410,7 @@ function ChatApp() {
     );
   }
 
-  // 「必须修改密码」拦截：标记为真就只渲染强制改密页（地址被守卫按在
+  // 「必须修改密码」拦截：标记为真就只渲染强制改密页（守卫把地址强制改到
   // /force-change-pwd），正常聊天主体一概不渲染。被标记的登录不算登录成功：
   // 服务器发的只是一条能到豁免路径的受限会话。「放弃本次登录」＝放弃这条
   // 受限会话（cancelGatedLogin 作废会话、回记下的来路就地登录），标记不清

@@ -24,7 +24,7 @@ import type {Message} from '../../type/chat.ts';
  *
  * 点赞点踩的状态是会话内组件级状态，不跨刷新持久：设计文档没要求持久化，
  * 上游也没有「读回我这一轮反馈」的接口给我们，刷新后按钮回到未选的样子
- * （上游那边其实记着）。
+ * （上游那边仍然记着）。
  */
 export function MessageActions({
   message,
@@ -70,7 +70,7 @@ export function MessageActions({
   likeLabel?: string;
   /** 「点踩」的文字（i18n dislike）。 */
   dislikeLabel?: string;
-  /** 发送一次点赞/点踩，返回成没成。失败时本组件把按钮状态回退。 */
+  /** 发送一次点赞/点踩，返回是否成功。失败时本组件把按钮状态回退。 */
   onFeedback?: (turnId: string, feedback: FeedbackValue) => Promise<boolean>;
 }) {
   const failed = message.failed === true;
@@ -107,10 +107,10 @@ export function MessageActions({
   // message.text 原始 Markdown（不序列化 DOM——复制渲染结果会把表格、
   // 公式的排版带走）。失败/被停的轮次不出 hover 区（内容矩阵）。
   const canCopy = message.role === 'user' || (!failed && !stopped);
-  // 点赞点踩只在助手气泡、正常轮（failed/aborted 不显示——没答完的东西
-  // 没什么可评价）、且 message.turnId 非空时显示：从上游回填的老会话消息
+  // 点赞点踩只在助手气泡、正常轮（failed/aborted 不显示——没答完的回答
+  // 没什么可评价）、且 message.turnId 非空时显示：从上游回填的旧会话消息
   // 没有我们的轮次编号，映射不到上游的 dataId（responseChatItemId 那条），
-  // 发过去也不会生效——干脆不出按钮。
+  // 发过去也不会生效——所以不显示按钮。
   const showFeedback =
     canFeedback &&
     onFeedback !== undefined &&

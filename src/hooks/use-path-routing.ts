@@ -13,7 +13,7 @@ const LEGACY_PASSWORD_PWD = '/password';
  * - login：刚登录成功。密码地址和 /login 都没有停留的意义，归位根路径。
  * - restore：刷新页面或直接打开深链，恢复登录态。自助改密页留在原页。
  * - recovery：服务从「连不上」恢复后补齐工作区。这不是一次新的登录，
- *   除会话地址外什么都不动——尤其是别把正在改密的人撵回首页。
+ *   除会话地址外什么都不动——尤其是别把正在改密的用户强制送回首页。
  */
 export type ClaimMode = 'login' | 'restore' | 'recovery';
 
@@ -154,7 +154,7 @@ export function usePathRouting(deps: PathRoutingDeps) {
         return;
       }
       if (mode === 'recovery') {
-        // 服务刚回来：用户正在改密，别把他从这一页撵走，也别动进入方式
+        // 服务刚回来：用户正在改密，别把他从这一页强制送走，也别动进入方式
         //（从设置里点进来的，取消仍该是后退）。
         return;
       }
@@ -172,7 +172,7 @@ export function usePathRouting(deps: PathRoutingDeps) {
       pathname === '/login'
     ) {
       // 已经登录了，密码地址和规范登录入口都没有停留的意义：回根路径，
-      // 聊天状态交给路径同步效果收拾。
+      // 聊天状态交给路径同步效果处理。
       void navigateRef.current('/', {replace: true});
       return;
     }

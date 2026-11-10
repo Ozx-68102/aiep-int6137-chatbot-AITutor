@@ -120,7 +120,7 @@ export function AdminConsole() {
   //   别把管理员正在做的事刷掉，等全部关上再说；
   // - 手动刷新正在进行：避免两个请求并发互相覆盖。
   // 静默合并：成功就整表替换数据，不弹提示；失败（包括 401）什么都不做，
-  // 等下一个周期或手动刷新——登录态真过期了，会由管理员下一次显式操作接住。
+  // 等下一个周期或手动刷新——登录态真过期了，会由管理员下一次显式操作处理。
   const accountsOpen = accounts !== null;
   useEffect(() => {
     if (!accountsOpen) {
@@ -158,7 +158,7 @@ export function AdminConsole() {
     turnstileToken: string,
   ): Promise<LoginOutcome> {
     if (loginBusy) {
-      // 够不到：busy 期间按钮是禁用的。兜底返回值按锁表单处理，安全方向。
+      // 不可达：busy 期间按钮是禁用的。保底返回值按锁表单处理，安全方向。
       return 'failure';
     }
     setLoginBusy(true);

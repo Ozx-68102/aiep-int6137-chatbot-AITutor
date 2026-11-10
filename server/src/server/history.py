@@ -61,9 +61,9 @@ def _drop_stale_records(now: float) -> None:
 
 
 async def backfill_session(session_id: UUID) -> list[chat_log.StoredMessage]:
-    """把上游那一份抄进我们自己的表。
+    """把上游那一份复制进我们自己的表。
 
-    我们有了这张表以后，老会话还没有记录。抄一份过来之后，
+    我们有了这张表以后，旧会话还没有记录。复制一份过来之后，
     页面的历史就从我们这份来了。
     """
     fastgpt = upstream.require_client()
@@ -79,7 +79,7 @@ async def backfill_session(session_id: UUID) -> list[chat_log.StoredMessage]:
         chat_log.backfill, session_id, chat_log.rounds_from_records(records)
     )
     if not copied:
-        # 抄进数据库失败：不能接着按「表里没有记录」回一份空历史，
+        # 复制进数据库失败：不能接着按「表里没有记录」回一份空历史，
         # 那会把一次写入故障伪装成「这场会话没有消息」。
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -99,7 +99,7 @@ def merge_current_turn(
     """
     # 轮次结局（还在写/失败/被停）只挂在回答行上：提问和回答共用一个
     # 状态，两边都显示的话页面脚注会把同一条提示显示两遍。只有提问、
-    # 没有回答的轮次（上游一个字没写出来就被停、从上游抄来的老会话）
+    # 没有回答的轮次（上游一个字没写出来就被停、从上游复制来的旧会话）
     # 留在提问行。
     turns_with_answer = {
         item.turn_id for item in stored if item.role == chat_log.ROLE_ASSISTANT
@@ -114,7 +114,7 @@ def merge_current_turn(
     messages: list[HistoryMessageResponse] = []
     for item in stored:
         # 读时保底修正：表里 streaming 的行，Redis 的 partial 为空（turn_id 是
-        # None）或对不上这一行，说明这一轮其实已经不在写了（进程死在半路、
+        # None）或对不上这一行，说明这一轮实际上已经不在写了（进程中途退出、
         # 键过期）——展示层降级为 failed，不写进数据库；启动核对
         # （chat_log.fail_stuck_rounds）会把它们一次标掉。编号对得上的行
         # 不降级：Redis 里那份状态更新，由下面的合并逻辑照实处理。
@@ -152,7 +152,7 @@ def merge_current_turn(
         return messages
 
     # 表里没有这一轮（写进数据库失败，或者这一轮比这张表还早）：
-    # 按老办法把 Redis 里这一轮接在后面。
+    # 按原有做法把 Redis 里这一轮接在后面。
     last = messages[-1] if messages else None
     if partial.question is not None and not (
         last is not None

@@ -70,7 +70,7 @@ function readAvatarEntry(): CachedAvatar | null {
   }
 }
 
-/** 本地缓存的头像 dataURL，没有就 null。离线启动时先用它撑住「我长什么样」。 */
+/** 本地缓存的头像 dataURL，没有就 null。离线启动时先用它维持「我长什么样」。 */
 export function readCachedAvatarData(): string | null {
   const entry = readAvatarEntry();
   return entry !== null && entry.dataUrl !== '' ? entry.dataUrl : null;

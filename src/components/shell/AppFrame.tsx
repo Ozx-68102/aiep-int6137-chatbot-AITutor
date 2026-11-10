@@ -255,7 +255,7 @@ export function AppFrame({
         onChangePassword={() => {
           password.setError(null);
           // 真页面：地址变成 /change-pwd，压入一条历史记录，浏览器后退就能回来。
-          // markPasswordPushed 顺手记下来路——改密成功后回到这里就地重新登录。
+          // markPasswordPushed 一并记下来路——改密成功后回到这里就地重新登录。
           routing.markPasswordPushed();
           void navigate(SELF_CHANGE_PWD);
         }}

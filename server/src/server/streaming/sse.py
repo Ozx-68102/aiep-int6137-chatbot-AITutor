@@ -13,7 +13,7 @@ async def sse_stream(relay: Relay) -> AsyncIterator[str]:
     心跳是 SSE 注释帧（": ping"）：前端解析器只认 data: 行，这一帧天然
     被忽略；作用是让中间层和页面知道流还活着。哨兵 None 的结束语义和
     取消语义都不变：wait_for 超时会把 queue.get 原样取消重挂，
-    asyncio.Queue 的唤醒不直接交接条目，超时不会吞掉已入队的帧。
+    asyncio.Queue 的唤醒不直接交接条目，超时不会丢弃已入队的帧。
 
     收尾先发结局帧再发 [DONE]：relay 带着结局信息（done_status 确定）
     时，在 yield "data: [DONE]" 之前先 yield event: done 帧；失败/被停

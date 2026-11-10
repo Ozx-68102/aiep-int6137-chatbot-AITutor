@@ -405,7 +405,7 @@ export function ChatMain({
           </button>
         ) : null}
       </div>
-      {/* 警示横幅：聊天滚动区与输入区之间的流内兄弟节点。分隔线固定在输入区顶上，
+      {/* 警示横幅：聊天滚动区与输入区之间的流内兄弟节点。分隔线固定在输入区上方，
           横幅坐在线的正上方，出现时压缩滚动区高度、不遮挡内容；多条纵向堆叠。 */}
       {warnings.length > 0 ? (
         <div className="px-4 pt-3">
@@ -443,7 +443,7 @@ export function ChatMain({
                 event.preventDefault();
                 if (pending) {
                   // pending 期间 Enter 不发送：弹和禁用发送按钮同一句轻提示。
-                  // 选「给提示」而不是静默：框里正打着字，静默会像键盘坏了。
+                  // 选「给提示」而不是静默：框里正打着字，静默会像键盘失灵。
                   onWaitHint();
                   return;
                 }

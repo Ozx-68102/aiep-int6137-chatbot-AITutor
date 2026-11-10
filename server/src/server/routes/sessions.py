@@ -70,7 +70,7 @@ def list_sessions(
             account = account_from_cookie(session, login_cookie)
             return session_items(account)
     except SQLAlchemyError:
-        # 数据库读不出来：如实报 503。吞掉的话页面会以为这个账号
+        # 数据库读不出来：如实报 503。忽略的话页面会以为这个账号
         # 一场会话都没有。
         logger.warning("会话列表读不出来", exc_info=True)
         raise HTTPException(
@@ -128,7 +128,7 @@ async def delete_session(
 ) -> Response:
     """删会话：先删本地，再删上游（维护者决定的顺序）。
 
-    老顺序是先删上游历史再删本地行：上游成功、本地失败时，会留下一个
+    原有顺序是先删上游历史再删本地行：上游成功、本地失败时，会留下一个
     用户看得见、却删不掉的会话。新顺序保证：会话从用户眼前消失时，
     本地一定已经删掉了；上游的残留用户看不见，删失败只记日志。
     """
@@ -247,7 +247,7 @@ async def read_session_messages(
     """一场会话的完整线程：我们自己存的记录，加上正在写的这一轮。
 
     历史来自我们自己的表，不是 FastGPT：它清库、上游挂掉，页面照样看得见。
-    老会话第一次读到的时候，把上游那一份抄一份过来。
+    旧会话第一次读到的时候，把上游那一份复制一份过来。
     """
     await asyncio.to_thread(authorize_session, session_id, login_cookie)
 
@@ -257,7 +257,7 @@ async def read_session_messages(
             stored = await backfill_session(session_id)
     except SQLAlchemyError:
         # read_messages 的数据库错误现在如实上抛（见 chat_log.read_messages
-        # 的 docstring）：这里接住回 503，不让数据库故障伪装成「空会话」。
+        # 的 docstring）：这里捕获后回 503，不让数据库故障伪装成「空会话」。
         # 上游失败由 backfill_session 自己转成 502（HTTPException），
         # 不会被这个 except 截住。
         logger.warning("会话 %s 记录读不出来", session_id, exc_info=True)
@@ -268,7 +268,7 @@ async def read_session_messages(
     # read_partial 读 Redis 在上面数据库 try 块的外面：Redis 不通时
     # 整个接口回 500。这是维护者确认过的故意设计，与 /partial 端点同一
     # 语义——读不通就如实报错，让页面分清「服务器没有正在写的这一轮」
-    # 和「问不到服务器」，不把读不通悄悄当成没有在写。依据见
+    # 和「问不到服务器」，不把读不通静默当成没有在写。依据见
     # reply_store.read_partial 的 docstring 和 docs/CHAT_STREAM_PROTOCOL.md。
     messages = merge_current_turn(stored, await read_partial(session_id))
     return HistoryResponse(total=len(messages), messages=messages)
@@ -286,7 +286,7 @@ async def update_feedback(
 
     反馈不存在我们数据库里：上游按 dataId（就是我们的轮次编号）记在那条
     回答上。没有轮次编号、或者这场会话的表里没有这一轮，都是 404——
-    映射不到上游的 dataId，发过去也是打空。上游没收到是 502。
+    映射不到上游的 dataId，发过去也不会生效。上游没收到是 502。
     """
     await asyncio.to_thread(authorize_session, session_id, login_cookie)
     # 配置检查放在鉴权之后（同 /api/chat 的理由）。

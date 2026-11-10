@@ -43,7 +43,7 @@ export function useReplyRecovery(deps: ReplyRecoveryDeps) {
         fallbackKey,
       );
       // 变换交回同一份数组时（拆分前 updater 里原样 return session 的几条路径）
-      // 这里也原样交回 session，不白白产生一个新对象。
+      // 这里也原样交回 session，不无谓产生一个新对象。
       if (messages === session.messages) {
         return session;
       }

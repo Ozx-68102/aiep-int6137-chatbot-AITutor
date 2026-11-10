@@ -33,7 +33,7 @@ class PartialReply:
 
 @asynccontextmanager
 async def _tolerate(operation: str, chat_id: UUID) -> AsyncIterator[None]:
-    """半截文字是可选的，Redis 写不通就记一条警告，不能把聊天整个弄挂。"""
+    """半截文字是可选的，Redis 写不通就记一条警告，不能让整个聊天功能中断。"""
     try:
         yield
     except RedisError:
@@ -46,7 +46,7 @@ async def _tolerate(operation: str, chat_id: UUID) -> AsyncIterator[None]:
 # 脚本失败一降级，单轮守卫就整个消失。为什么不用 SET NX：NX 只能表达
 # 「键不在才抢得到」，而上一轮结束之后状态键还会活到 TTL 到期——正常
 # 接着提问会永远 NX 失败；NX 失败再退回「先读后覆盖」，又回到
-# check-then-act 有缝的老路。set 命令在 ACL 的放行范围内（真实环境验证）。
+# check-then-act 存在间隙的旧做法。set 命令在 ACL 的放行范围内（真实环境验证）。
 async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
     """原子抢占这一轮：没有别的轮在写时，一步完成登记。
 
@@ -57,7 +57,7 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
     无副作用。
 
     状态键写着「在写」但轮次登记缺失时（Redis 中途掉线留下的残留），
-    运行期自愈：对编号键做 SET … NX，由 Redis 服务器裁决——NX 成功
+    运行期自动修复：对编号键做 SET … NX，由 Redis 服务器裁决——NX 成功
     的请求赢得这一轮、补齐登记后返回 True，NX 失败的照旧返回 False。
     细节见 previous == STREAMING 分支里的注释。
 
@@ -78,10 +78,10 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
         )
         return True
     if previous == STREAMING:
-        # 运行期自愈：状态键说「在写」，但轮次登记（编号键）可能已经缺失。
+        # 运行期自动修复：状态键说「在写」，但轮次登记（编号键）可能已经缺失。
         # 残留是这么来的：上面占用检查和下面的轮次登记是两步，登记失败
         # 不回退占用（注释里写明了），Redis 在两步中间掉线就留下「状态键=
-        # 在写、登记缺失」的半残留；turn.py 的失败收尾撞上二次取消也可能
+        # 在写、登记缺失」的不完整残留；turn.py 的失败收尾撞上二次取消也可能
         # 把状态键留在「在写」。残留会让这场会话之后的请求全部被 409 拒发，
         # 直到状态键过期（600 秒）或进程重启——启动时有残留键清理，运行期
         # 原先没有。所以这里补查一次：对编号键做 SET … NX（带同样的过期
@@ -90,7 +90,7 @@ async def claim_round(chat_id: UUID, turn_id: str, question: str) -> bool:
         # - 登记缺失（是残留）→ NX 成功，本次请求赢得这一轮，往下补齐
         #   其余登记后 return True。
         # 为什么不用「先删状态键再重新抢」：两个并发请求同时判出残留时，
-        # 第二个人的删会把第一个人刚写的状态键抹掉，两个人都抢到，同一场
+        # 第二个请求的删除会把第一个请求刚写的状态键删除，两个请求都成功，同一场
         # 会话双重占用。SET … NX 只可能有一个请求成功，没有这个问题，
         # 而且用的还是主检查同款原语（set 命令），不引入 ACL 放行范围外
         # 的新命令（docs/FINDINGS.md 2026-11-02、2026-11-06 有记录）。
@@ -201,7 +201,7 @@ async def append_chunk(chat_id: UUID, text: str) -> None:
 
 
 async def _mark(chat_id: UUID, value: str) -> None:
-    """把状态词写成 value，顺手给文字和轮次键续期。"""
+    """把状态词写成 value，同时给文字和轮次键续期。"""
     ttl = load_settings().redis_key_ttl_seconds
     pipe = get_redis().pipeline(transaction=False)
     pipe.set(_status_key(chat_id), value, ex=ttl)
@@ -314,7 +314,7 @@ async def clear_leftover_round_keys() -> int:
     见 lifespan.py 调用处的注释和 docs/CHAT_STREAM_PROTOCOL.md
     「单进程前提」一节。
     用 SCAN 不用 KEYS：KEYS 会把整个 Redis 堵住。Redis 不通就如实
-    抛错，调用方接住记警告、不阻止启动（Redis 是可选加固）。
+    抛错，调用方捕获后记警告、不阻止启动（Redis 是可选加固）。
     """
     client = get_redis()
     removed = 0

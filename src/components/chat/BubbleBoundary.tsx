@@ -3,7 +3,7 @@ import {Component, type ErrorInfo, type ReactNode} from 'react';
 type BubbleBoundaryState = {failed: boolean};
 
 /**
- * 气泡级的错误边界：Markdown 渲染坏了就把这一条降级成纯文本，
+ * 气泡级的错误边界：Markdown 渲染出错就把这一条降级成纯文本，
  * 不让一个坏气泡拖垮整个聊天页。
  *
  * failed 状态会一直保持：同一实例内不再自动重试。使用处给它一个随轮次有了最终结果

@@ -185,7 +185,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
 
   // 拦截期间的路径守卫：用户手输别的地址、用浏览器前进后退离开，都送回
   // /force-change-pwd。渲染分支本身不看地址（拦截生效期间只渲染强制改密页），
-  // 这里把地址栏也按住，两边一致。进闸门之前先记来路（只记 /chat/:id）：
+  // 这里把地址栏也一并固定，两边一致。进闸门之前先记来路（只记 /chat/:id）：
   // 改密成功后回那里就地重新登录。
   useEffect(() => {
     if (auth !== 'ready' || !mustChangePassword) {
@@ -247,7 +247,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
    * 会话类 401 的统一入口（轮次引擎、半截回答轮询和 App 自己的请求都走
    * 这里）：带着 reason（expired/disabled）就进入「留在原页面的过期状态」——
    * 聊天页、会话列表、草稿、profile 缓存全部原样保留，只禁用输入区、挂
-   * 常驻警示条；没有 reason（老后端）保守回退整页 enterLogin 路径。只在
+   * 常驻警示条；没有 reason（旧后端）保守回退整页 enterLogin 路径。只在
    * auth 是 ready 时有意义：checking/anonymous 阶段的 401 照旧走整页登录屏。
    */
   function handleAuthError(error: ApiError) {
@@ -282,8 +282,8 @@ export function useAuthFlow(deps: AuthFlowDeps) {
   /**
    * 其余动作（侧栏、设置、改密、服务状态恢复）的 401 出口还是 enterLogin：
    * 已经在留在原页面的过期状态里时不再升级成整页清空——横幅已经挂着了，清空
-   * 反而把这个状态保住的东西弄丢。强制闸门是例外：拦截期间聊天主体和横幅
-   * 都不渲染，守卫在这里早退等于把人困死在登录态已死的闸门里（点「修改」
+   * 反而把这个状态保住的内容丢掉。强制闸门是例外：拦截期间聊天主体和横幅
+   * 都不渲染，守卫在这里早退等于让用户一直停留在登录态已失效的闸门里（点「修改」
    * 收 401、页面毫无反应）。闸门下不拦，直接带文案回登录页。
    */
   function enterLoginGuarded(detail: string | null) {
@@ -332,7 +332,7 @@ export function useAuthFlow(deps: AuthFlowDeps) {
       }
       if (connectionFailure(error)) {
         // 离线文案由 loginError 送进表单错误槽；按钮不再因此禁用——曾经
-        // 禁掉且整页登录没有任何解禁路径（死胡同），现在再点一次就是重试。
+        // 禁掉且整页登录没有任何解禁路径（无路可走），现在再点一次就是重试。
         setLoginOffline(true);
         serviceRef.current?.showConnectionWarning();
         return 'connection';

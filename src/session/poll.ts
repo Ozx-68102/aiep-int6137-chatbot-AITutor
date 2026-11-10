@@ -5,7 +5,7 @@ import type {PartialReply} from '../api/partial.ts';
 const intervalMs = 500;
 
 /**
- * 服务器确认重新够得着之后广播的 window 事件名：浏览器 online 之后由
+ * 服务器确认重新可以连通之后广播的 window 事件名：浏览器 online 之后由
  * use-service-status 主动探测 /api/status 成功才派发。进行中的轮询循环收到
  * 它以全新的周期重新开始（见下面的 onNetworkOk）；断线补查（use-turn-engine
  * 的 catchUp）也以它为信号，不再直接监听 online。
@@ -24,7 +24,7 @@ export const networkOkEvent = 'h2bot:network-ok';
  * 「这一轮没在写了」（按数据库核对并修正）和「会话过期」（统一的 401 出口）。
  *
  * 页面切到后台（document.hidden）时不发请求，光等；回到前台立刻补查一次，
- * 不等下一个周期。服务器确认重新够得着（networkOkEvent）时同理：提前结束
+ * 不等下一个周期。服务器确认重新可以连通（networkOkEvent）时同理：提前结束
  * 这个周期的等待，倒计时清零，立刻以全新的周期开始。500 毫秒的节奏和
  * 终止语义都不变。
  */
@@ -34,7 +34,7 @@ export function startPartialPolling(
   onEnd?: (error?: ApiError) => void,
 ): () => void {
   let stopped = false;
-  // waitTick 挂着的唤醒钩子：页面回到可见、或服务器确认重新够得着时，
+  // waitTick 挂着的唤醒钩子：页面回到可见、或服务器确认重新可以连通时，
   // 把等待提前结束，好立刻补查。
   let wake: (() => void) | null = null;
 
@@ -45,7 +45,7 @@ export function startPartialPolling(
   }
 
   function onNetworkOk() {
-    // 服务器刚被确认够得着（online 之后 use-service-status 主动探测
+    // 服务器刚被确认可以连通（online 之后 use-service-status 主动探测
     // /api/status 成功）：与回到可见同款，提前结束这个周期的等待，让循环
     // 立刻以全新的周期开始，而不是把旧的 500 毫秒等完。
     // 不会叠定时器：循环里永远只有一个 waitTick 的定时器；finish 幂等

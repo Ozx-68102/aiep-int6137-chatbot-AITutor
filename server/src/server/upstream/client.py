@@ -71,7 +71,7 @@ def optional_client() -> FastGPT | None:
     """上游客户端没有就返回 None。
 
     停止是尽力而为：上游连不上不能让停止接口整个失败，
-    我们自己的状态（Redis 里的停止标记）才是页面要看的东西。
+    我们自己的状态（Redis 里的停止标记）才是页面要读的数据。
     """
     client = _client
     if not isinstance(client, FastGPT):

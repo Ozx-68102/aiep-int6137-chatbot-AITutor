@@ -33,7 +33,7 @@ def done_chunk(
     """跟前端钉死的结局帧：event: done + TurnDoneEvent JSON。
 
     与进度帧同款风格：命名事件、紧凑分隔符、ensure_ascii=False。
-    老前端的解析器把未知命名事件的 data 整帧忽略，加这一帧不破坏
+    旧前端的解析器把未知命名事件的 data 整帧忽略，加这一帧不破坏
     旧行为（2026-11-05 维护者决定：流里引入命名事件）。
     """
     event = TurnDoneEvent(

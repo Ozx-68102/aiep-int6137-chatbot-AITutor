@@ -26,7 +26,7 @@ export function saveDraft(sessionId: string | null, text: string): void {
       sessionStorage.setItem(draftKey(sessionId), text);
     }
   } catch {
-    // 存不下（隐私模式、配额满）就算了：草稿丢了不阻塞输入。
+    // 存不下（隐私模式、配额满）就跳过：草稿丢失不阻塞输入。
     return;
   }
 }

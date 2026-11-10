@@ -111,10 +111,10 @@ export function useTurnEngine(deps: TurnEngineDeps) {
     // pollers 是挂载时建一次的登记表，从不更换：放进依赖数组不会让效果重跑。
   }, [pollers]);
 
-  // 服务器确认够得着 / 页面回到可见：还在等回答的会话可能在断线期间有了
+  // 服务器确认可以连通 / 页面回到可见：还在等回答的会话可能在断线期间有了
   // 进展，挨个补查一次线程（refreshThread 里带着续传逻辑）。
   // 断线补查不再直接监听浏览器的 online：online 只说明网卡通了，服务器未必
-  // 够得着，那时补查多半白白失败一趟，还会和 use-service-status 的主动探测
+  // 可以连通，那时补查多半无谓失败一次，还会和 use-service-status 的主动探测
   // 形成双份补查。改为监听探测确认成功后广播的 networkOkEvent（见
   // src/session/poll.ts）：补查与横幅撤销发生在同一时刻。
   useEffect(() => {
@@ -216,7 +216,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
    * （409 繁忙、请求没有生效、后端没接下）时按 Gemini 的做法整轮回滚：新文字
    * 回输入框（busy 路径的 setDraft 负责），提问恢复原文，被去掉的回答连同
    * 状态提示恢复——动手改界面之前先把这一轮快照下来。请求已经生效的（流
-   * 中途断了）不回滚：服务器那边旧轮已经删了，回滚反而是骗人。
+   * 中途断了）不回滚：服务器那边旧轮已经删了，回滚反而与事实不符。
    */
   async function retryTurn(sessionId: string, turnId: string, editedText?: string) {
     if (sendingRef.current.has(sessionId)) {
@@ -422,7 +422,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       }
     } catch (error) {
       if (generation !== loginGeneration.current) {
-        // 已经退出登录：不存草稿、不挂提示、也不调 401 出口，别弄脏新登录的会话。
+        // 已经退出登录：不存草稿、不挂提示、也不调 401 出口，别污染新登录的会话。
         return;
       }
       endPresent(assistantId);
@@ -511,7 +511,7 @@ export function useTurnEngine(deps: TurnEngineDeps) {
       probe.kind === 'streaming' &&
       (probe.partial.turnId === null || probe.partial.turnId === turnId)
     ) {
-      // 服务器那边还在写：接着等，别骗用户说停了。
+      // 服务器那边还在写：接着等，不能误报成已停止。
       pollers.startPolling(sessionId, turnId, fallbackKey);
       setSessionWarning({sessionId, text: textRef.current.replyStopFailed});
       return;

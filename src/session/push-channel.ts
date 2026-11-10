@@ -67,7 +67,7 @@ export function openPushChannel(
 
   /**
    * 问一次「登录态还在吗」。401 是服务器明确说没了；其余（网络错、
-   * 5xx、响应读不懂）都算「这一趟问不出来」，退避后再问。
+   * 5xx、响应读不懂）都算「这次询问没有得到结果」，退避后再问。
    */
   async function sessionAlive(gen: number): Promise<boolean> {
     try {
@@ -99,7 +99,7 @@ export function openPushChannel(
       connect(gen);
       return;
     }
-    // 问不出来：本趟的重连已经排在退避里，或者已经被判定为失效、不再重连。
+    // 问不出来：本次的重连已经排在退避里，或者已经被判定为失效、不再重连。
   }
 
   function connect(gen: number): void {
@@ -114,7 +114,7 @@ export function openPushChannel(
       try {
         payload = typeof data === 'string' ? JSON.parse(data) : null;
       } catch {
-        // 坏帧丢掉，不影响后面的帧。
+        // 坏帧丢弃，不影响后面的帧。
         return;
       }
       if (!isRecord(payload) || payload.valid !== false) {

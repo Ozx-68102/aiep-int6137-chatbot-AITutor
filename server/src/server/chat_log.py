@@ -53,13 +53,13 @@ class StoredRound:
 
 
 def begin_round(session_id: UUID, turn_id: UUID, question: str) -> bool:
-    """记下这一轮开始。返回提问和回答的占位行写进数据库成没成。
+    """记下这一轮开始。返回提问和回答的占位行是否写进数据库。
 
     提问先写进去，回答的位置先占着（状态是 streaming）：我们的进程要是
     中途死了，这一轮就留在 streaming 状态，读线程看得出来，
     还能按编号去上游把答案找回来。
 
-    返回值要一路传下去：这一下没写成，结束时就更正不到任何行（见
+    返回值要一路传下去：这里没写成，结束时就更正不到任何行（见
     finish_round），摘要行得让人看得出这一轮根本没进表。
     """
 
@@ -91,7 +91,7 @@ def begin_round(session_id: UUID, turn_id: UUID, question: str) -> bool:
 
 
 def finish_round(session_id: UUID, turn_id: UUID, text: str, status: str) -> bool:
-    """这一轮结束：写上最后的状态和文字。返回写进数据库成没成（摘要行用）。
+    """这一轮结束：写上最后的状态和文字。返回是否写进数据库（摘要行用）。
 
     事务提交成功不等于这一轮写进去了：开始时写库失败过（begin_round 返回
     假，提问和回答的占位行没建成），结束时更正匹配不到任何行——事务照样
@@ -163,11 +163,11 @@ def fail_stuck_rounds() -> int:
 def read_messages(session_id: UUID) -> list[StoredMessage]:
     """一场会话的记录，按先后顺序。数据库错误如实上抛。
 
-    这里是 HTTP 读路径（GET messages；history.backfill_session 抄完也走
-    这里），SQLAlchemyError 由路由接住回 503。不能吞掉异常返回空列表：
+    这里是 HTTP 读路径（GET messages；history.backfill_session 复制完也走
+    这里），SQLAlchemyError 由路由捕获后回 503。不能忽略异常返回空列表：
     那样路由回 200 加空历史，把数据库故障伪装成「没有消息」，页面分不清
-    是库坏了还是这场会话真是空的。
-    对比下面的 _write：轮次进行中的写进数据库失败是故意吞的（归档降级，上游
+    是数据库出错还是这场会话真是空的。
+    对比下面的 _write：轮次进行中的写进数据库失败是故意忽略的（归档降级，上游
     还有一份保底）。读写两个方向语义不同，别强行对齐。
     """
     with db_session() as session:
@@ -197,7 +197,7 @@ def read_question(session_id: UUID, turn_id: UUID) -> str | None:
     请求体里带的可能是新文字（编辑重发），只有表里的原文才能和它对上。
     要在 delete_round 删行之前调用，行删了就查不到了。
 
-    吞掉数据库错误是有意的：这里是聊天重发路径，不是 HTTP 读端点，
+    忽略数据库错误是有意的：这里是聊天重发路径，不是 HTTP 读端点，
     读不到原文只是退化成「找不到悬空记录」，不该让重发整个失败。
     如实上抛的读路径见 read_messages。
     """
@@ -219,7 +219,7 @@ def has_turn(session_id: UUID, turn_id: UUID) -> bool:
     """这场会话的表里有没有这一轮（点赞点踩端点用）。
 
     读数据库失败按没有处理：宁可回 404，也不把一个查不到的轮次放去上游。
-    这个吞是有意的（失败方向保守）；如实上抛的读路径见 read_messages。
+    这里的忽略是有意的（失败方向保守）；如实上抛的读路径见 read_messages。
     """
     try:
         with db_session() as session:
@@ -238,16 +238,16 @@ def has_turn(session_id: UUID, turn_id: UUID) -> bool:
 
 
 def backfill(session_id: UUID, rounds: list[StoredRound]) -> bool:
-    """把上游那一份抄一份过来。返回抄进数据库成没成。
+    """把上游那一份复制一份过来。返回是否复制进数据库。
 
-    老会话还没有我们自己的记录，第一次读到的时候抄一份，抄完以我们这份为准。
-    返回值要一路传下去：抄失败时调用方不能把「表里还是空的」当成「这场会话
+    旧会话还没有我们自己的记录，第一次读到的时候复制一份，复制完以我们这份为准。
+    返回值要一路传下去：复制失败时调用方不能把「表里还是空的」当成「这场会话
     没有消息」照常回空历史，那会把一次数据库故障伪装成空会话。
     """
 
     def action(session: Session) -> None:
         if _has_rows(session, session_id):
-            # 这场会话已经有记录了（可能正好有一轮在写）：不抄。
+            # 这场会话已经有记录了（可能正好有一轮在写）：不复制。
             return
         seq = _next_seq(session, session_id)
         for item in rounds:
@@ -329,9 +329,9 @@ def _write(
     session_id: UUID,
     action: Callable[[Session], None],
 ) -> bool:
-    """写进数据库失败不能把聊天整个弄挂：这份记录只是我们自己留的一份，上游还有。
+    """写进数据库失败不能让整个聊天功能中断：这份记录只是我们自己留的一份，上游还有。
 
-    返回写没写成，需要知道结果的调用方（日志摘要行）用。
+    返回是否写成，需要知道结果的调用方（日志摘要行）用。
     """
     try:
         with db_session() as session:

@@ -63,7 +63,7 @@ def admin_reset_password(
             raise HTTPException(status.HTTP_404_NOT_FOUND, _ADMIN_ACCOUNT_NOT_FOUND)
         password = generate_password(10)
         # 写哈希、打「必须修改密码」标记和吊销令牌在同一个事务里：不留
-        # 「密码换了、旧令牌还活着」的缝，标记也不会落后半步。
+        # 「密码换了、旧令牌还活着」的间隙，标记也不会落后半步。
         account.password_hash = hash_password(password)
         account.must_change_password = True
         session.execute(delete(LoginToken).where(LoginToken.account_id == account.id))

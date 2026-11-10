@@ -76,7 +76,7 @@ function parseProfile(value: unknown): Profile {
     typeof value.avatar_url === 'string' && value.avatar_url !== ''
       ? value.avatar_url
       : defaultAvatarUrl;
-  // 拿到真头像地址就顺手把图片数据缓存一份到本地，离线启动时不闪现默认图。
+  // 拿到真头像地址就一并把图片数据缓存一份到本地，离线启动时不闪现默认图。
   // 默认头像是前端静态资源，离线也拿得到，不用缓存。缓存失败无所谓：
   // cacheAvatarData 内部静默降级，不挡住资料返回。
   if (avatarUrl !== defaultAvatarUrl) {

@@ -60,7 +60,7 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(stored_hash: str, password: str) -> bool:
-    """跟数据库里存的哈希对不对得上。对不上（包括哈希本身坏了）一律 False。"""
+    """跟数据库里存的哈希是否一致。不一致（包括哈希本身不可用）一律 False。"""
     try:
         _hasher.verify(stored_hash, password)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
@@ -70,7 +70,7 @@ def verify_password(stored_hash: str, password: str) -> bool:
 
 
 def needs_rehash(stored_hash: str) -> bool:
-    """哈希是不是落后于当前参数。落后的话，趁登录成功顺手重写一遍。"""
+    """哈希是不是落后于当前参数。落后的话，趁登录成功时一并重写一遍。"""
     try:
         return _hasher.check_needs_rehash(stored_hash)
     except InvalidHashError:

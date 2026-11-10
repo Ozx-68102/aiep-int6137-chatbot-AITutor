@@ -23,7 +23,7 @@ _ALLOWED_FORMATS = frozenset({"PNG", "JPEG", "HEIF"})
 
 
 class AvatarError(Exception):
-    """传上来的东西不是能用的头像。"""
+    """上传的内容不是能用的头像。"""
 
 
 def normalize(data: bytes) -> bytes:

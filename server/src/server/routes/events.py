@@ -88,7 +88,7 @@ async def account_events(
     # 鉴权丢线程：同步的 psycopg 不堵事件循环（与其它账号级端点一致）。
     account_id, username = await asyncio.to_thread(_account_snapshot, login_cookie)
     # 订阅放在生成器里、不放这里：生成器的 finally 才保证退订配对；
-    # 客户端在响应体开流之前就断开时，生成器压根不会启动，也就不留
+    # 客户端在响应体开流之前就断开时，生成器根本不会启动，也就不留
     # 悬空的订阅。
     return StreamingResponse(
         _event_stream(account_id, username, login_cookie),
@@ -144,7 +144,7 @@ async def _event_stream(
                 item = await asyncio.wait_for(queue.get(), _HEARTBEAT_SECONDS)
             except TimeoutError:
                 # 心跳注释帧。wait_for 超时会把 queue.get 原样取消重挂，
-                # Queue 的唤醒不直接交接条目，超时不会吞掉已入队的帧
+                # Queue 的唤醒不直接交接条目，超时不会丢弃已入队的帧
                 # （与 streaming/sse.py 同理）。
                 yield ": ping\n\n"
                 continue
@@ -166,5 +166,5 @@ async def _event_stream(
             break
     finally:
         # 客户端断开（CancelledError）、哨兵、正常结束，条条路都要退订：
-        # 没有这个 finally，队列会越攒越多（设计稿点名）。
+        # 没有这个 finally，队列会越积越多（设计稿点名）。
         unsubscribe()

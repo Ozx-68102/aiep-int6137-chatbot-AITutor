@@ -10,7 +10,7 @@ import {probePartial} from './partial.ts';
 const streamIdleTimeoutMs = 60000;
 
 export type ReplyOutcome =
-  /** done 帧说 completed，或（老后端兼容期）收到了 [DONE]：这一轮写完了。 */
+  /** done 帧说 completed，或（旧后端兼容期）收到了 [DONE]：这一轮写完了。 */
   | 'completed'
   /**
    * 真断流（结局帧和 [DONE] 都没收到），或 done 帧说 failed。页面走恢复
@@ -113,7 +113,7 @@ async function deliverReply(
         return outcomeFromTurnDone(result.turnDone);
       }
       if (result.streamEnd) {
-        // 没收到 done 帧但收到了 [DONE]（老后端兼容期）：照旧当写完了。
+        // 没收到 done 帧但收到了 [DONE]（旧后端兼容期）：照旧当写完了。
         return 'completed';
       }
       // 流断掉且 done、[DONE] 都没收到：真断流，交给恢复流程去问服务器。
@@ -150,7 +150,7 @@ async function outcomeAfterFailure(chatId: string): Promise<ReplyOutcome> {
   if (probe.kind === 'unauthorized') {
     // 401 是服务器明确说会话死了，不是「问不到服务器」的网络问题。原样抛出，
     // 沿 streamReply 传回 use-turn-engine 的 sendQuestion 的 catch——那里已有
-    // 完整的 401 处理（把这句提问存起来 + 统一出口 onAuthError）。在这里吞掉
+    // 完整的 401 处理（把这句提问存起来 + 统一出口 onAuthError）。在这里忽略
     // 归成 interrupted，会话过期就会被错报成连接问题，走连接横幅。
     throw probe.error;
   }
@@ -188,7 +188,7 @@ async function readStream(
   try {
     for (;;) {
       const {done, value} = await reader.read();
-      // 读到任何东西（内容分块、心跳注释帧、流结束）都算连接还活着：
+      // 读到任何数据（内容分块、心跳注释帧、流结束）都算连接还活着：
       // 重置空闲定时器。
       window.clearTimeout(idleTimer);
       idleTimer = window.setTimeout(() => {

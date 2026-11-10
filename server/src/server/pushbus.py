@@ -66,7 +66,7 @@ def subscribe(
     """登记一个订阅：返回（队列，退订函数）。必须在事件循环线程上调。
 
     退订函数幂等（重复调用无害）；调用方要负责在 finally 里调它，
-    不然队列会越攒越多（设计稿点名要 try/finally）。
+    不然队列会越积越多（设计稿点名要 try/finally）。
     """
     global _loop
     _loop = asyncio.get_running_loop()
@@ -122,7 +122,7 @@ def shutdown() -> None:
 
     订阅者收到哨兵就正常收尾：SSE 流结束，浏览器的 EventSource 会
     自动重连，彼时服务正在关停，重连也连不上，页面按断网处理。
-    哨兵必须投得进去：队列满了就挤掉最旧的一帧腾位。
+    哨兵必须投得进去：队列满了就移除最旧的一帧腾出位置。
     """
     global _loop
     for queues in _subscribers.values():
@@ -133,10 +133,10 @@ def shutdown() -> None:
 
 
 def _put_sentinel(queue: asyncio.Queue[dict | None]) -> None:
-    """队列满也要把哨兵投进去：挤掉最旧的一帧腾位。
+    """队列满也要把哨兵投进去：移除最旧的一帧腾出位置。
 
     shutdown 和 _deliver 都只在事件循环线程上跑、中间没有 await，
-    挤掉一帧之后不会再被填满；下面两个 suppress 是纯防御，理论上
+    移除一帧之后不会再被填满；下面两个 suppress 是纯防御，理论上
     走不到。
     """
     try:

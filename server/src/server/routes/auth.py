@@ -190,7 +190,7 @@ async def change_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, policy_error)
 
     # 写哈希和吊销令牌在同一个事务里（_apply_password_change）：不留
-    # 「密码改了、旧令牌还活着」的缝。所有设备都强制下线，含当前这一台，重新登录。
+    # 「密码改了、旧令牌还活着」的间隙。所有设备都强制下线，含当前这一台，重新登录。
     revoked_id = await asyncio.to_thread(
         _apply_password_change, login_cookie, admin_cookie, body.new_password
     )

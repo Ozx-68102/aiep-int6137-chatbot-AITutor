@@ -1,11 +1,11 @@
-"""把上游的历史搬进我们自己的 message 表。
+"""把上游的历史复制进我们自己的 message 表。
 
-我们有了这张表以后，新写的一轮当场就写进数据库了；表建之前那些老会话的记录
-还在 FastGPT 那边。这条命令把它们一次搬过来：
+我们有了这张表以后，新写的一轮当场就写进数据库了；表建之前那些旧会话的记录
+还在 FastGPT 那边。这条命令把它们一次复制过来：
 
     uv run python -m server.db.backfill
 
-搬完就不用再搬了。已经有记录的那场会话会跳过（不覆盖我们自己的）。
+复制完就不用再复制了。已经有记录的那场会话会跳过（不覆盖我们自己的）。
 """
 
 import asyncio
@@ -24,7 +24,7 @@ _PAGE_SIZE = 100
 async def main() -> None:
     fastgpt = open_fastgpt(load_settings())
     if fastgpt is None:
-        print("FastGPT 配置为空，搬不了")
+        print("FastGPT 配置为空，无法复制")
         return
 
     try:
@@ -32,8 +32,8 @@ async def main() -> None:
             targets = [item.id for item in session.scalars(select(ChatSession)).all()]
 
         for session_id in targets:
-            # read_messages 的数据库错误如实上抛：搬库命令读不了库就该
-            # 报错停下，不能当成「没有记录」继续往下搬。
+            # read_messages 的数据库错误如实上抛：复制命令读不了库就该
+            # 报错停下，不能当成「没有记录」继续往下复制。
             existing = chat_log.read_messages(session_id)
             if existing:
                 print(f"{session_id}: 已经有 {len(existing)} 条，跳过")
@@ -43,9 +43,9 @@ async def main() -> None:
                 # 失败原因 _records 已经打印过了。
                 continue
             if not chat_log.backfill(session_id, chat_log.rounds_from_records(records)):
-                print(f"{session_id}: 写库失败，这一场没搬成")
+                print(f"{session_id}: 写库失败，这一场没有复制成功")
                 continue
-            print(f"{session_id}: 搬了 {len(records)} 条")
+            print(f"{session_id}: 复制了 {len(records)} 条")
     finally:
         await fastgpt.aclose()
 

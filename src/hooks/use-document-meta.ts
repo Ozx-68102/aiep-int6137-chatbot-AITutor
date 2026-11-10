@@ -2,7 +2,7 @@ import {useEffect} from 'react';
 import {htmlLang, type Locale} from '../type/locale.ts';
 
 const appTitle = 'H^2 Bot';
-// 会话标题是学生随手输入的，可能很长：标签页标题截短，别把标签撑爆。
+// 会话标题是学生随手输入的，可能很长：标签页标题截短，避免超出标签宽度。
 const maxPageTitleLength = 30;
 
 /**

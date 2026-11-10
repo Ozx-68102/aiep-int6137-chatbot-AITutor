@@ -9,7 +9,7 @@ from server.turn_status import DoneReason, DoneStatus
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    # 上限挡住超大的正文：argon2 哈希按字节算成本，别拿它烤一炉大面包。
+    # 上限挡住超大的正文：argon2 哈希按字节计算成本，超长正文会显著增加开销。
     password: str = Field(min_length=1, max_length=128)
     # Turnstile 人机验证令牌：JSON 字段名是 cf-turnstile-response（Cloudflare
     # 的约定名，用 alias 接）。缺失时按空字符串走，登录接口的门槛会拦下

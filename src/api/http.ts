@@ -23,7 +23,7 @@ export const mustChangePasswordEvent = 'h2bot:must-change-password';
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string | null;
-  /** 只有 401 才可能有：会话失效的原因。其余状态、老后端的 401 都是 null。 */
+  /** 只有 401 才可能有：会话失效的原因。其余状态、旧后端的 401 都是 null。 */
   readonly reason: AuthFailureReason | null;
   /** 响应体里的业务标记（比如 403 的 must_change_password）；没有就是 null。 */
   readonly code: string | null;
@@ -46,7 +46,7 @@ export class ApiError extends Error {
 /**
  * 请求根本没到服务器，或者没等到回应（网络异常、跨域失败、超时中止）。
  * 只有这一类才是「连不上服务器」——服务端返回了错误状态码、或者返回了
- * 读不懂的内容，都说明服务器够得着，不该占用这个说法。
+ * 读不懂的内容，都说明服务器可以连通，不该占用这个说法。
  */
 export class TransportError extends ApiError {
   constructor() {
@@ -173,7 +173,7 @@ export async function requestJson(
       try {
         return await response.json();
       } catch {
-        // 状态码是成功的，正文却读不懂：服务器够得着，是内容用不了。
+        // 状态码是成功的，正文却读不懂：服务器可以连通，是内容用不了。
         throw new UnexpectedResponseError(response.status);
       }
     },
@@ -190,7 +190,7 @@ async function request(
       method: init?.method ?? 'GET',
       credentials: 'include',
       // FormData 的 Content-Type 由浏览器自己带（里面要带 boundary），
-      // 这里再硬编码成 json 就坏了。空对象占位与不传一样：浏览器照样自己带
+      // 这里再固定写成 json 就会出错。空对象占位与不传一样：浏览器照样自己带
       // multipart 头；exactOptionalPropertyTypes 下这里不能写显式 undefined。
       headers:
         init?.body === undefined || init.body instanceof FormData

@@ -44,7 +44,7 @@ def require_session(
 
 
 def authorize_session(session_id: UUID, login_cookie: str | None) -> str:
-    """确认这场会话是这个账号的，顺手把账号 id 带出来。
+    """确认这场会话是这个账号的，同时把账号 id 带出来。
 
     数据库是同步的，接口是异步的：这一步要放到线程里跑，
     别把事件循环卡住（卡住的时候，正在流式输出的那一轮也发不出去）。
@@ -57,7 +57,7 @@ def authorize_session(session_id: UUID, login_cookie: str | None) -> str:
 
 
 def verified_account(session: Session, username: str, password: str) -> Account:
-    """密码验过的账号。顺手把落后的哈希重写一遍。
+    """密码验过的账号。同时把落后的哈希重写一遍。
 
     没这个人、密码不对，都是同一句话：不给探测留线索。role 要等密码
     验对了才看（顺序见 docs/ACCOUNT_MANAGEMENT.md 的「role」一节）。
@@ -87,7 +87,7 @@ def login_account_key(username: str) -> str:
     """登录限流的账号维度键：归一化的用户名。
 
     数据库里 admin、Admin、"admin " 是三个账号；限流键照原文用的话，
-    换个写法就把计数摊到三个键上，锁定形同虚设。
+    换个写法就把计数分散到三个键上，锁定形同虚设。
     """
     return username.strip().lower()
 
@@ -117,7 +117,7 @@ async def register_login_failure(
     """登录没成时两个维度都记失败。只数 401。
 
     没这个人和密码不对是同一句 401，计数也不分这两种：不然「试几次以后
-    是不是 429」会把用户名存不存在漏出去。403（密码对了但 role 不属于
+    是不是 429」会把用户名存不存在泄露出去。403（密码对了但 role 不属于
     这一边）说明密码已经验对，不记。
     """
     if exc.status_code != status.HTTP_401_UNAUTHORIZED:

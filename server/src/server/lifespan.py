@@ -30,7 +30,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("启动核对：%d 行卡住的 streaming 已标为 failed", stuck)
     # 崩溃窗口清理（启动核对的 Redis 这一侧）：进程上次运行留下的状态、
     # 轮次编号、半截文字、停止标记，自然过期要 redis_key_ttl_seconds
-    # （现配置 600 秒），这期间 /partial 一直答「还在写」，页面会白等
+    # （现配置 600 秒），这期间 /partial 一直答「还在写」，页面会空等
     # 一个永远不会来的回答。这里可以无条件清：服务只允许单 worker 运行
     # （server/AGENTS.md「边界」一节），单进程前提（见
     # docs/CHAT_STREAM_PROTOCOL.md「单进程前提」一节）下进程刚启动时

@@ -7,7 +7,7 @@ import {matchPath} from 'react-router';
  * 的归位与认领）都从这里取值，不再散落字面量。
  */
 
-/** 强制改密（闸门）专用地址：登录标记为真时路径守卫把地址按在这里。 */
+/** 强制改密（闸门）专用地址：登录标记为真时路径守卫把地址固定在这里。 */
 export const FORCE_CHANGE_PWD = '/force-change-pwd';
 
 /** 自助改密页：设置里点「修改密码」进来改自己的密码。 */

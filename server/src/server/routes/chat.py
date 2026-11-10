@@ -65,7 +65,7 @@ async def _clear_failed_turn(
         logger.warning("读不到上游记录，重发的这一轮删不掉旧的 %s", chat_id)
         return
 
-    # 文本比对优先用表里的原文；表里查不到（老数据、写进数据库失败过）再退回
+    # 文本比对优先用表里的原文；表里查不到（旧数据、写进数据库失败过）再退回
     # 请求体的文字。
     match_text = question if stored_question is None else stored_question
     content_ids = _failed_turn_content_ids(records, str(turn_id), match_text)
@@ -139,7 +139,7 @@ async def chat(
 
     # 同一场会话同时只跑一轮。「查有没有一轮在写＋登记这一轮」合成
     # claim_round 一个原子动作：原来先 round_in_flight 查、后 begin_reply
-    # 登记，两步之间有缝——两个不同编号的请求同时到，能都通过检查、
+    # 登记，两步之间存在间隙——两个不同编号的请求同时到，能都通过检查、
     # 都去登记，同一场会话开出两轮（上游多出一轮、半截文字交错写）。
     # 抢不到就是有一轮在写，照旧 409。状态键说在写、轮次登记却缺失的
     # 残留由 claim_round 自己补查裁决（编号键 SET … NX），裁决输了的
@@ -186,7 +186,7 @@ async def chat(
     # 安全：叫停针对的是上一轮失败的生成，删的是历史记录，删记录碰不
     # 到停止标记；必须守住的时序（新轮调上游之前叫停已完成）由
     # relay_turn 里的等待保证。代价是上一轮若还被上游写着，这一删可能
-    # 扑空（悬空提问只在它是最后一条时才删），上游历史里多留一条短
+    # 没有删到（悬空提问只在它是最后一条时才删），上游历史里多留一条短
     # 答案——原代码等待 7 秒超时放行时本来就是同样的并发情形，删除本来
     # 就尽力而为（找不到就不删）。
     if body.retry_of is not None:
@@ -195,7 +195,7 @@ async def chat(
         except BaseException:
             # 删记录半路出错了（数据库读写在线程里，可能抛）：把刚抢下
             # 的这一轮退掉，别留下「登记了在写、任务却没建」的假占用，
-            # 不然这场会话要干等轮次键 TTL 到期才能再发问。
+            # 不然这场会话要空等到轮次键 TTL 到期才能再发问。
             await discard_reply(body.chat_id)
             raise
 
