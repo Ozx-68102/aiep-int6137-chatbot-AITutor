@@ -20,7 +20,8 @@
     "fmt:check": "oxfmt --check",
     "check": "oxlint && oxfmt --check && pnpm exec tsc --noEmit",
     "preview": "vite preview",
-    "test": "echo \"本项目不使用测试框架，见 AGENTS.md\" && exit 0"
+    "test": "echo \"本项目不使用测试框架，见 AGENTS.md\" && exit 0",
+    "deploy": "./scripts/deploy-upload.sh"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
