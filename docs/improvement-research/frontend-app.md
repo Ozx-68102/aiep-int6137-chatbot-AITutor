@@ -717,6 +717,8 @@
 
 ### P3. `ApiError(0, null)` 语义过载：「连不上」和「响应解析不了」混为一谈
 
+> **已完成（2026-11-11）**：实现形态与本节草图不同——不是给 detail 加哨兵值，而是分成两个错误类型：`TransportError`（请求没送到或没等到回应，含超时）和 `UnexpectedResponseError`（服务器答话了但内容用不了，保留真实状态码）。`connectionFailure` 只看 `TransportError`，以及非 2xx 又读不出 detail 的服务端错误（网关 502 错误页仍算连不上）；自动重试也只对 `TransportError` 生效，服务器已经答话的错误不再重发。三语新增 `responseUnexpected` 文案。八处响应形状校验点和两处正文解析点全部改完，`ApiError(0, null)` 只剩「请求没到服务器」一种含义。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「超时与重试」。
+
 - **位置**：`/src/api/http.ts`（网络错误、JSON 解析失败、`requestJson` 里 `response.json()` 失败都抛 `ApiError(0, null)`；各 `isXxx` 校验失败也抛它）、`/src/api/failure.ts`（`connectionFailure` 把 detail 为 null 的 ApiError 一律当连接失败）。
 - **现状**：同一个 `ApiError(0, null)` 至少表示四种情况：fetch 网络异常、响应体不是合法 JSON（比如 nginx 挂了返回 HTML 502 页）、JSON 合法但形状不对（后端改了字段名、版本不匹配）、以及 `withConnectionRetry` 保底处理时抛出的 `throw new ApiError(0, null)`。它们全部被 `connectionFailure()` 判真 → 界面显示「无法连接到服务器」、服务状态标 `unreachable`。
 - **影响**：后端升级导致响应形状变化时，用户和排查故障的人看到的是「无法连接到服务器」——方向完全错误的提示，会把排查引向网络层；`unreachable` 状态还会触发恢复后的 `refreshWorkspace`，掩盖真实病因。
