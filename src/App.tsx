@@ -228,7 +228,7 @@ function ChatApp() {
     setUsername,
     setLocale,
     setAvatarUrl,
-    onClaimPath: (list) => routingRef.current?.claimPath(list),
+    onClaimPath: (list) => routingRef.current?.claimPath(list, 'recovery'),
     onEnterLogin: enterLoginGuarded,
   });
   const engine = useTurnEngine({

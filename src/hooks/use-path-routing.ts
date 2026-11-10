@@ -8,6 +8,15 @@ import type {Session} from '../type/chat.ts';
 /** 拆分前的旧自助改密地址：只认作别名，路径归位效果把它换成 /change-pwd。 */
 const LEGACY_PASSWORD_PWD = '/password';
 
+/**
+ * 认领路径的三种来由，行为各不相同：
+ * - login：刚登录成功。密码地址和 /login 都没有停留的意义，归位根路径。
+ * - restore：刷新页面或直接打开深链，恢复登录态。自助改密页留在原页。
+ * - recovery：服务从「连不上」恢复后补齐工作区。这不是一次新的登录，
+ *   除会话地址外什么都不动——尤其是别把正在改密的人撵回首页。
+ */
+export type ClaimMode = 'login' | 'restore' | 'recovery';
+
 type PathRoutingDeps = {
   auth: 'checking' | 'anonymous' | 'ready';
   sessions: Session[];
@@ -134,16 +143,29 @@ export function usePathRouting(deps: PathRoutingDeps) {
    * 闸门分支，路径守卫马上把地址拉回 /force-change-pwd（拦截分支只看
    * 标记不看地址，渲染不闪）。
    */
-  function claimPath(list: Session[], restore: boolean = false): void {
+  function claimPath(list: Session[], mode: ClaimMode = 'login'): void {
     const {pathname} = locationRef.current;
     const current = depsRef.current;
-    if (pathname === SELF_CHANGE_PWD && restore) {
-      // 在自助改密页上刷新：留在本页接着改。这种进入方式历史里没有
-      // 我们压入的那一条，取消走就地替换的路。
-      passwordEntry.current = 'direct';
-      return;
+    if (pathname === SELF_CHANGE_PWD) {
+      if (mode === 'restore') {
+        // 在自助改密页上刷新：留在本页接着改。这种进入方式历史里没有
+        // 我们压入的那一条，取消走就地替换的路。
+        passwordEntry.current = 'direct';
+        return;
+      }
+      if (mode === 'recovery') {
+        // 服务刚回来：用户正在改密，别把他从这一页撵走，也别动进入方式
+        //（从设置里点进来的，取消仍该是后退）。
+        return;
+      }
     }
-    if (
+    if (mode === 'recovery') {
+      // 网络恢复不是一次新登录：除会话地址外，任何页面都保持原样。
+      // 地址与聊天状态的同步由路径驱动效果负责，这里不去改地址栏。
+      if (chatIdFromPath(pathname) === null) {
+        return;
+      }
+    } else if (
       pathname === LEGACY_PASSWORD_PWD ||
       pathname === SELF_CHANGE_PWD ||
       pathname === FORCE_CHANGE_PWD ||
@@ -156,6 +178,9 @@ export function usePathRouting(deps: PathRoutingDeps) {
     }
     const wanted = chatIdFromPath(pathname);
     if (wanted === null) {
+      if (mode === 'recovery') {
+        return;
+      }
       current.setComposingNew(true);
       current.setActiveId(null);
       current.setDraft(readDraft(null));
