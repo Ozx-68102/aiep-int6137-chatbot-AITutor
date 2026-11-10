@@ -1,4 +1,4 @@
-import {ApiError, isRecord, requestJson} from './http.ts';
+import {ApiError, isRecord, requestJson, UnexpectedResponseError} from './http.ts';
 
 /**
  * 「还在写吗」的半截回答（GET /api/sessions/{id}/partial）。
@@ -38,7 +38,7 @@ export type PartialProbe =
 export async function readPartial(sessionId: string): Promise<PartialReply> {
   const body = await requestJson(`/api/sessions/${sessionId}/partial`);
   if (!isPartialReply(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return {
     status: body.status,

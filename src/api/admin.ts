@@ -1,4 +1,4 @@
-import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
+import {isRecord, requestEmpty, requestJson, UnexpectedResponseError} from './http.ts';
 
 /** 账号的角色：学生用 chat，管理员用 admin。 */
 export type AdminRole = 'chat' | 'admin';
@@ -29,7 +29,7 @@ export async function adminLogin(
     body: JSON.stringify({username, password, 'cf-turnstile-response': turnstileToken}),
   });
   if (!isRecord(value) || typeof value.username !== 'string') {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return {username: value.username};
 }
@@ -37,7 +37,7 @@ export async function adminLogin(
 export async function fetchAdminAccounts(): Promise<AdminAccount[]> {
   const value = await requestJson('/api/admin/accounts');
   if (!isRecord(value) || !Array.isArray(value.accounts)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   const accounts: AdminAccount[] = [];
   for (const item of value.accounts) {
@@ -46,7 +46,7 @@ export async function fetchAdminAccounts(): Promise<AdminAccount[]> {
       typeof item.username !== 'string' ||
       (item.role !== 'chat' && item.role !== 'admin')
     ) {
-      throw new ApiError(0, null);
+      throw new UnexpectedResponseError();
     }
     accounts.push({username: item.username, role: item.role});
   }
@@ -64,7 +64,7 @@ export async function adminResetPassword(username: string): Promise<ResetPasswor
     typeof value.username !== 'string' ||
     typeof value.password !== 'string'
   ) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return {username: value.username, password: value.password};
 }

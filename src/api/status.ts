@@ -1,4 +1,4 @@
-import {ApiError, isRecord, requestJson} from './http.ts';
+import {isRecord, requestJson, UnexpectedResponseError} from './http.ts';
 
 export type BackendStatus = {
   database: 'ok' | 'unavailable';
@@ -8,7 +8,7 @@ export type BackendStatus = {
 export async function readStatus(): Promise<BackendStatus> {
   const body = await requestJson('/api/status');
   if (!isBackendStatus(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body;
 }

@@ -1,6 +1,6 @@
 import {cacheAvatarData} from '../session/profile-cache.ts';
 import {isLocale, type Locale} from '../type/locale.ts';
-import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
+import {isRecord, requestEmpty, requestJson, UnexpectedResponseError} from './http.ts';
 
 /** 默认头像在前端的静态资源里。接口服务给不出头像时就用这张。 */
 export const defaultAvatarUrl = '/avatar-default.svg';
@@ -66,7 +66,7 @@ function parseProfile(value: unknown): Profile {
     typeof value.locale !== 'string' ||
     !isLocale(value.locale)
   ) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   // 生产环境字段是 snake_case：ProfileResponse 不像 ChatRequest 那几个请求模型
   // 带 camelCase 别名，后端发的是 avatar_url。此前这里误读 value.avatarUrl，

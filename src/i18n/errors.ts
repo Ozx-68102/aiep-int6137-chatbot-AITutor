@@ -22,6 +22,7 @@ const zhCN = {
   rateLimited: '操作太频繁了，请稍后重试',
   serverError: '服务器出错了，请稍后重试',
   upstreamError: '上游服务出了故障，请稍后重试',
+  responseUnexpected: '服务器返回了看不懂的内容，请稍后重试或刷新页面',
 };
 
 export type ErrorsCopy = typeof zhCN;
@@ -38,6 +39,7 @@ const zhTW: ErrorsCopy = {
   rateLimited: '操作太頻繁了，請稍後重試',
   serverError: '伺服器出錯了，請稍後重試',
   upstreamError: '上游服務出了故障，請稍後重試',
+  responseUnexpected: '伺服器回傳了看不懂的內容，請稍後重試或重新整理頁面',
 };
 
 const en: ErrorsCopy = {
@@ -52,6 +54,8 @@ const en: ErrorsCopy = {
   rateLimited: 'Too many requests. Please try again later.',
   serverError: 'The server ran into a problem. Please try again later.',
   upstreamError: 'The upstream service failed. Please try again later.',
+  responseUnexpected:
+    'The server returned something we could not read. Please try again or reload the page.',
 };
 
 export const errors: Record<Locale, ErrorsCopy> = {'zh-CN': zhCN, 'zh-TW': zhTW, en};

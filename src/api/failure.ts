@@ -1,6 +1,6 @@
 import {translations, type Messages} from '../i18n/index.ts';
 import type {Locale} from '../type/locale.ts';
-import {ApiError} from './http.ts';
+import {ApiError, TransportError, UnexpectedResponseError} from './http.ts';
 
 /**
  * HTTP 状态码 → errors 域文案键的映射表。只收跨端点语义稳定的状态码：
@@ -8,10 +8,10 @@ import {ApiError} from './http.ts';
  * - 401 不在表里：同一个 401 可能是「密码不对」（登录端点自己的 401 不带
  *   reason）也可能是「会话过期/账号被停用」（带 reason），只按状态码分流会
  *   把前者误报成后者。mapError 里按 reason 单独分流。
- * - 状态 0 也不在表里：http.ts 把「连不上」和「客户端超时」都折叠成
- *   ApiError(0, null)，两种形态区分不了；而且连接类失败的保底文案由调用方
- *   自己定（多数传 connectionError，个别传 actionFailed），映射表拦截反而
- *   改掉调用方的选择。408 是服务器/网关报的超时，映射到 requestTimeout。
+ * - 状态 0 也不在表里：那是「请求没到服务器」（TransportError），连接类失败
+ *   的保底文案由调用方自己定（多数传 connectionError，个别传 actionFailed），
+ *   映射表拦截反而改掉调用方的选择。408 是服务器/网关报的超时，映射到
+ *   requestTimeout。
  */
 const statusCopy: Partial<Record<number, keyof Messages>> = {
   403: 'forbidden',
@@ -26,6 +26,11 @@ const statusCopy: Partial<Record<number, keyof Messages>> = {
 
 /** 按映射表取本地化的错误文案；映射不到返回 null，由 explain 退回 detail 或保底文案。 */
 function mapError(error: ApiError, locale: Locale): string | null {
+  if (error instanceof UnexpectedResponseError) {
+    // 服务器答话了，但答的内容用不了：说「服务器返回了看不懂的内容」，
+    // 不占用「连不上」这个说法——那会把人引去查网络。
+    return translations[locale].responseUnexpected;
+  }
   if (error.status === 401) {
     if (error.reason === 'expired') {
       return translations[locale].sessionExpired;
@@ -65,8 +70,29 @@ export function explain(error: unknown, locale: Locale, connection: string): str
   return connection;
 }
 
+/**
+ * 这次失败算不算「连不上服务器」——调用方据此决定挂服务横幅还是弹行内提示。
+ *
+ * 只有真的够不着才算：请求没送到、没等到回应、超时。
+ *
+ * 「服务器答话了但内容用不了」分两种：2xx 却读不懂正文（响应形状不对，
+ * 属于两边对不上版本），这不算连不上，如实说内容看不懂；非 2xx 却读不出
+ * detail（网关 502 的 HTML 错误页就是这种），仍然算连不上——服务确实用
+ * 不了，页面照旧挂「无法连接到服务器」的横幅。
+ */
 export function connectionFailure(error: unknown): boolean {
-  return !(error instanceof ApiError) || error.detail === null;
+  if (error instanceof TransportError) {
+    return true;
+  }
+  if (error instanceof UnexpectedResponseError) {
+    return false;
+  }
+  if (error instanceof ApiError) {
+    return error.status >= 500 && error.detail === null;
+  }
+  // 不是 ApiError 的异常来源不明（多半是代码自身的 bug）。维持旧行为按
+  // 连接类处理，不在这条修复里改它的去向。
+  return true;
 }
 
 /**

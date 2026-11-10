@@ -1,4 +1,4 @@
-import {ApiError, isRecord, requestJson} from './http.ts';
+import {isRecord, requestJson, UnexpectedResponseError} from './http.ts';
 import type {Message} from '../type/chat.ts';
 
 export type HistoryMessage = {
@@ -15,7 +15,7 @@ export type HistoryMessage = {
 export async function readMessages(sessionId: string): Promise<Message[]> {
   const body = await requestJson(`/api/sessions/${sessionId}/messages`);
   if (!isHistoryPage(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body.messages.map((message) => ({
     id: message.id,

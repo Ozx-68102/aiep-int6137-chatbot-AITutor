@@ -1,5 +1,5 @@
 import type {Session} from '../type/chat.ts';
-import {ApiError, isRecord, requestEmpty, requestJson} from './http.ts';
+import {isRecord, requestEmpty, requestJson, UnexpectedResponseError} from './http.ts';
 
 export type SessionItem = {
   id: string;
@@ -31,7 +31,7 @@ export async function login(
     body: JSON.stringify({username, password, 'cf-turnstile-response': turnstileToken}),
   });
   if (!isLoginResult(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body;
 }
@@ -39,7 +39,7 @@ export async function login(
 export async function listSessions(): Promise<SessionItem[]> {
   const body = await requestJson('/api/sessions');
   if (!isSessionList(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body;
 }
@@ -50,7 +50,7 @@ export async function renameSession(sessionId: string, title: string): Promise<S
     body: JSON.stringify({title}),
   });
   if (!isSessionItem(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body;
 }
@@ -65,7 +65,7 @@ export async function pinSession(
     body: JSON.stringify({pinned, pinned_at: pinnedAt}),
   });
   if (!isSessionItem(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body;
 }
@@ -92,7 +92,7 @@ export async function createSession(title: string | null = null): Promise<Sessio
     body: JSON.stringify({title}),
   });
   if (!isSessionItem(body)) {
-    throw new ApiError(0, null);
+    throw new UnexpectedResponseError();
   }
   return body;
 }
