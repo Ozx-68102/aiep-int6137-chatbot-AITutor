@@ -179,7 +179,7 @@
 
      ```tsx
      const MessageItem = memo(function MessageItem({message, entering, onRetry, onAnimationEnd, ...}: Props) {
-       // 现在 ChatMain L69-146 的分支逻辑原样搬进来
+       // 现在 ChatMain L69-146 的分支逻辑原样移进来
      });
      // ChatMain 里：
      {active.messages.map((m) => (
@@ -188,7 +188,7 @@
      ```
 
   2. **流式文本单独放**：给正在流式的那条消息的文本另开一个 state（如 `streamingTexts: Map<messageId, string>`，由 use-turn-engine 的 applyStreamText 改写这里而不是 `sessions`），渲染时 `MessageItem` 对 streaming 的那条叠加显示；流落定（completed/failed/aborted）时一次性写回 `sessions`。`sessions` 不再每 chunk 变 → Sidebar 完全不陪跑。
-  3. 顺手项：`enteringIds.includes`（ChatMain 四处）换成 `Set`（O4 一起改）；assistant 分支 L104 的 `textShown === '' ? null : ...` 是死代码（L70 已拦截），可删。
+  3. 顺带项：`enteringIds.includes`（ChatMain 四处）换成 `Set`（O4 一起改）；assistant 分支 L104 的 `textShown === '' ? null : ...` 是死代码（L70 已拦截），可删。
 - **第三方库**：无。若做完后长会话（数百条）仍然重，再考虑虚拟化，点名 `@tanstack/react-virtual` ^3（动态高度用 `estimateSize` + `measureElement`），但那一步要处理「贴底滚动」与虚拟列表的配合，建议单独立项。
 - **风险**：中。第 2 步动了 use-turn-engine 的状态归属，`applyPartialText`/`recoverReply` 等所有写文本的路径都要同步改；没有自动化测试，需要按原 INTERRUPTED_REPLY.md（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）的场景清单手测（刷新续传、停止、重试、busy）。可以先只做第 1 步观察收益。
 - **工作量**：第 1 步 S~M；第 2 步 M~L。
@@ -278,7 +278,7 @@
 - **位置**：`/src/App.tsx` `submitMessage` 内 `missingTitle` 分支（L570 附近）：`saveTitle` 失败 → `updateSession` 把 title 设回 null，无任何提示。
 - **现状**：FINDINGS.md「会话标题」条目记录了这个设计：标题为 NULL 的会话下次发消息会再补写一次。所以有自动补写的恢复路径，但当下用户看着侧栏标题从「首问原文」跳回「新对话」，没有任何解释。
 - **影响**：轻微困惑；标题反复写不上时（比如后端 500）用户完全无从知晓。自动补写机制降低了严重度。
-- **方案**：失败时弹已有的 Toast（`showToast(text.actionFailed)`）或干脆保持乐观标题不动、等下次补写——后者更符合「能自动补写」的现实：把 `updateSession(...title: null)` 的回退删掉，本地留着乐观标题，服务器没存上就下次再试。两种都是一行级改动，建议选后者（少一个提示、行为更符合直觉）。
+- **方案**：失败时弹已有的 Toast（`showToast(text.actionFailed)`）或直接保持乐观标题不动、等下次补写——后者更符合「能自动补写」的现实：把 `updateSession(...title: null)` 的回退删掉，本地留着乐观标题，服务器没存上就下次再试。两种都是一行级改动，建议选后者（少一个提示、行为更符合直觉）。
 - **第三方库**：无。
 - **风险**：低。选「保留乐观标题」后，刷新页面标题会退回「新对话」，与 FINDINGS 记录的「不出现看着有标题数据库里没有」原则相抵——维护者若坚持该原则，就用 Toast 方案。
 - **工作量**：S。
@@ -297,7 +297,7 @@
 
 ### P9. `applyPartialText` 的 startsWith 防护会静默丢弃服务器更新（记录性提醒）
 
-> **已随 done 事件批演化（2026-11-05）**：/partial 收窄成只回 streaming，这条防护的输入情况随之变化——applyPartialText 加了 fallbackKey 定位分支（P5 完成），startsWith 防护保留（仍防「页面文字倒退/不同源」）。本条的记录性提醒性质不变：改续传逻辑时别顺手拆掉这个防护。功能描述见 docs/CHAT_STREAM_PROTOCOL.md。调研原文以 LayerFS 历史为准。
+> **已随 done 事件批演化（2026-11-05）**：/partial 收窄成只回 streaming，这条防护的输入情况随之变化——applyPartialText 加了 fallbackKey 定位分支（P5 完成），startsWith 防护保留（仍防「页面文字倒退/不同源」）。本条的记录性提醒性质不变：改续传逻辑时别顺带拆掉这个防护。功能描述见 docs/CHAT_STREAM_PROTOCOL.md。调研原文以 LayerFS 历史为准。
 
 ---
 

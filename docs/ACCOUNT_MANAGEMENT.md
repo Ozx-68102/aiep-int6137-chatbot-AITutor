@@ -32,7 +32,7 @@
 
 - **唯一约束只挡一模一样的字符串**：`account.username` 列是 `character varying(64)`、默认排序规则，`'admin' = 'ADMIN'`、`'admin' = 'admin '`（多一个空格）都是 false。也就是说 `admin`、`Admin`、`admin ` 在数据库里是三个不同的账号，`UNIQUE (username)` 挡不住。
 - **前端归一化、后端没有**：登录时页面把用户名 `trim()` 了再发（`src/components/login/LoginScreen.tsx`），后端 `_login_account` 直接拿原样去比。真有账号叫 `admin ` 的话，页面永远登不进去：发过去的是 `admin`。以后加注册接口，两边必须用同一套归一化。
-- **重名现在会变成 500，不是 409**：插入时违反唯一约束抛 IntegrityError，被 `app.py` 里那个通用异常处理器接住，返回 `{"detail": "服务器错误"}`。应用层没有先查一遍重复，全靠数据库拦。（现在数据库里两个账号：`test01`/chat 和 `admin`/admin。）
+- **重名现在会变成 500，不是 409**：插入时违反唯一约束抛 IntegrityError，被 `app.py` 里那个通用异常处理器捕获，返回 `{"detail": "服务器错误"}`。应用层没有先查一遍重复，全靠数据库拦。（现在数据库里两个账号：`test01`/chat 和 `admin`/admin。）
 
 ## 注册
 
@@ -118,7 +118,7 @@
 
 - [x] 账号表空态行（`noAccounts` 三语，跨三列居中）。
 - [x] 表头手动刷新按钮（`refreshAccounts` 键，lucide `RotateCw`，busy 时 `aria-busy` ＋转圈）：401 带服务器说法回登录表单；其余错误在表格上方一行 `role=alert` 警示。
-- [x] 30 秒静默轮询：仅列表视图打开（即已登录）时跑；`document.hidden`、任何对话框/面板开着（退出确认、重置确认、新密码面板，跳过状态在效果里镜像进 `pollSkipRef`）、手动刷新进行中，都跳过这个周期；成功静默整表替换，失败（含 401）静默——登录态真过期了，由管理员下一次显式操作接住。分页未做，代码注释记「账号数上百再考虑后端分页」。
+- [x] 30 秒静默轮询：仅列表视图打开（即已登录）时跑；`document.hidden`、任何对话框/面板开着（退出确认、重置确认、新密码面板，跳过状态在效果里镜像进 `pollSkipRef`）、手动刷新进行中，都跳过这个周期；成功静默整表替换，失败（含 401）静默——登录态真过期了，由管理员下一次显式操作处理。分页未做，代码注释记「账号数上百再考虑后端分页」。
 - [x] 重置密码面板精修（原列在「后续批次」）：密码行右侧复制按钮（clipboard 失败静默，面板 `select-all` 仍可手动选中；「已复制」2 秒复位，`copy`/`copied` 键复用）；点背景、按 Esc 都不关——给 Modal 传 no-op `onClose` 占位，面板的显式关闭按钮直接调用真 `onClose`（Modal 自身的「点背景关」没改，其余弹窗不受影响）。
 
 后续批次（未排期）：
@@ -149,7 +149,7 @@
 
 「改密码或被禁用之后，客户端要立刻知道并刷新状态，不能等用户输入、发送之后才发现。」这是这块最核心的一条，做法是给客户端一条常驻的通道。
 
-> **2026-11-05：最小 HTTP 版已实现**（本节的推送通道仍未做）：会话类 401 的响应体在 `detail` 之外多带一个 `reason` 字段，词表 `expired`（带了 cookie 但令牌不认识/已过期/被吊销，无法也无需细分）/ `disabled`（账号被停用——`account.disabled` 列还没建，后端暂时发不出这个值，前端已按词表接好）。没带 cookie 的匿名请求不算会话类，401 维持现状（不带 reason）。前端收到带 reason 的 401 时聊天页在原页面保留：会话、消息、草稿、profile 缓存都不动，输入区禁用、输入区上方挂常驻警示条；`expired` 给「重新登录」按钮，在原页面弹出 Modal 里的 LoginScreen，成功后走 `openAccount` 在原页面恢复；`disabled` 不给登录按钮。没有 reason 的 401（老后端）回退旧的整页登录路径。下面的轮询保底处理和发送前预检仍未做。
+> **2026-11-05：最小 HTTP 版已实现**（本节的推送通道仍未做）：会话类 401 的响应体在 `detail` 之外多带一个 `reason` 字段，词表 `expired`（带了 cookie 但令牌不认识/已过期/被吊销，无法也无需细分）/ `disabled`（账号被停用——`account.disabled` 列还没建，后端暂时发不出这个值，前端已按词表接好）。没带 cookie 的匿名请求不算会话类，401 维持现状（不带 reason）。前端收到带 reason 的 401 时聊天页在原页面保留：会话、消息、草稿、profile 缓存都不动，输入区禁用、输入区上方挂常驻警示条；`expired` 给「重新登录」按钮，在原页面弹出 Modal 里的 LoginScreen，成功后走 `openAccount` 在原页面恢复；`disabled` 不给登录按钮。没有 reason 的 401（旧后端）回退旧的整页登录路径。下面的轮询保底处理和发送前预检仍未做。
 
 > **2026-11-06：后端推送通道已实现**（`GET /api/events`；进程内总线 `pushbus.py` ＋ 三个触发点：定时清扫扫掉过期令牌→`expired`、改密吊销→`password_changed`、控制台重置吊销→`admin_reset`）。协议按本节设计稿：`state` 命名事件、`{valid, reason, message}` 信封、连上先发一次状态、断线重连自然补齐。与设计稿的出入：reason 由单一 `revoked` 细化成上面三个词（`expired` 与会话类 401 的 reason 同词，前端可当一套词表用）；`disabled` 仍发不出（列没建，缺口同前）；**退出登录改为不推送**（用户自己的动作；跨标签退出感知已由前端 localStorage 标记承担，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「已知限制」）；推完 `valid:false` 服务器主动关流，客户端重新登录后新建连接而不依赖自动重连。前端已于同日接上（`src/session/push-channel.ts`：登录后建连，失效帧进入与带 reason 的 401 同一套「留在原页面的过期状态」，重新登录后新建连接、不做手动重连；接线在 `src/hooks/use-auth-flow.ts`）；完整对接契约在 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「推送通道 `/api/events`」一节。
 
@@ -192,7 +192,7 @@
 ### 服务器这边
 
 - [x] 一个进程内的事件总线：`account_id → 一组订阅队列`。服务器本来就必须单进程跑（见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「单进程前提」一节），进程内总线够用，不用 Redis pub/sub。（2026-11-06 后端已实现：`server/src/server/pushbus.py`，订阅队列有界 32、关停哨兵一定送达）
-- [x] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越攒越多）。（2026-11-06 后端已实现：`server/src/server/routes/events.py`；2026-11-06 前端已接：`src/session/push-channel.ts`）
+- [x] 新接口 `GET /api/events`：用 cookie 认证 → 拿到账号 → 注册一条队列 → 保持连接 → 有推送就写出去 → 断开就注销（用 `try/finally`，不然队列会越积越多）。（2026-11-06 后端已实现：`server/src/server/routes/events.py`；2026-11-06 前端已接：`src/session/push-channel.ts`）
 - [x] 每 15 秒发一个心跳注释帧（`: ping`），免得连接被中间的代理当空闲切断。（2026-11-06 后端已实现：`routes/events.py` 的 `_HEARTBEAT_SECONDS = 15.0`，15 秒没有动静就发一帧）
 - [ ] 吊销令牌的地方统一走一个函数 `revoke_tokens(account_id, reason)`：删/标记令牌 + 推事件。现在吊销散在改密码、控制台重置、退出登录三处；统一之后以后加新的强制下线方式不会漏掉推送。
 
@@ -207,9 +207,9 @@
 
 ### 和下一节的关系
 
-下一节讲「过期时别把用户的东西弄丢」，这一节讲「怎么让客户端立刻知道」。两块要一起做：通道负责通知，丢东西的那些措施负责善后。
+下一节讲「过期时别把用户的数据丢失」，这一节讲「怎么让客户端立刻知道」。两块要一起做：通道负责通知，防丢失的那些措施负责善后。
 
-## 会话过期时别把用户的东西弄丢
+## 会话过期时别把用户的数据丢失
 
 - [x] 页面加 `expired` 状态：聊天页在原页面保留，输入框上方提示「会话已过期，请重新登录」+ 一个「重新登录」按钮，登录框弹出来；不清会话列表、不清草稿。（现在的 `enterLogin` 是一次性清空，[src/hooks/use-auth-flow.ts](../src/hooks/use-auth-flow.ts)）（2026-11-05 已实现最小 HTTP 版：401 带 `reason` 进入留在原页面的过期状态；2026-11-06 推送通道接上后，服务器侧失效也实时进入同一状态；`enterLogin` 保留给主动退出和不带 reason 的 401 保底处理。见「会话状态通道」一节的注记）
 - [ ] 发送前预检：点发送先发一个轻量鉴权请求，401 就不发，把草稿保住。

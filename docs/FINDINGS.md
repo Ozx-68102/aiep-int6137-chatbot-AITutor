@@ -60,14 +60,14 @@
 
 现在改成：每一轮有自己的编号，Redis 里连着提问一起存着，服务器把「正在写的那一轮」接在历史后面一起返回，页面按编号认消息，不再靠文字猜。详见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)。
 
-## 2026-10-30 刷新得太急，上游会被打垮，日志会被撑爆
+## 2026-10-30 刷新得太急，上游承受不住压力，日志会超出容量
 
 21:18 的一次实测：发出提问以后连着刷新了十来次，每次刷新都问一次 FastGPT 要整段历史。上游（maas.eduhk.hk）从 21:18:18 起连不上了 —— 报的是 `httpx2.ConnectTimeout`，也就是 TCP 连接根本没完成握手，不是响应慢。紧接着 21:18:24 连聊天本身也失败了（「FastGPT 读取失败」）。
 
 三个后果，都改掉了：
 
-1. **上游被打垮**：每一次页面加载都要问一次上游要历史，刷新得急了就是几十个并发请求。现在服务器留五秒的缓存，刷新多少次上游就只被问一次（实测：连着刷新十次，上游被问两次）。
-2. **日志被撑爆**：一次失败打 250 行。`app.py` 的通用异常处理器打一遍栈，Starlette 处理完还会把异常再抛一次，uvicorn 又打一遍栈。现在网络错误（连接超时、读超时）在 FastGPT 客户端就被转换成 `FastGPTError`，接口回一个 502 和一行字，不打栈；通用处理器也只记一行。
+1. **上游承受不住压力**：每一次页面加载都要问一次上游要历史，刷新得急了就是几十个并发请求。现在服务器留五秒的缓存，刷新多少次上游就只被问一次（实测：连着刷新十次，上游被问两次）。
+2. **日志超出容量**：一次失败打 250 行。`app.py` 的通用异常处理器打一遍栈，Starlette 处理完还会把异常再抛一次，uvicorn 又打一遍栈。现在网络错误（连接超时、读超时）在 FastGPT 客户端就被转换成 `FastGPTError`，接口回一个 502 和一行字，不打栈；通用处理器也只记一行。
 3. **错误信息对用户没有意义**：上游出故障时页面只说「暂时问不到上游，请稍后重试」。
 
 ## 2026-10-30 Safari 的网站图标
@@ -158,7 +158,7 @@ Markdown 里没有公式。`$a^2 + b^2 = c^2$` 这种写法，Markdown 只会当
 实测出来的几点：
 
 - **KaTeX 的样式可以直接在 `src/index.css` 里 `@import 'katex/dist/katex.min.css';`**：Tailwind v4 能解析包里的路径，不用改 `tsconfig.json`。
-- **公式写错不会让页面崩溃**。`rehype-katex` 自己接住 KaTeX 的报错，改用宽松模式再排一次，出错时把原文显示出来；我们把 `errorColor` 设成 `currentColor`，出错时颜色跟正文一样，不会变成一片红。
+- **公式写错不会让页面崩溃**。`rehype-katex` 自己捕获 KaTeX 的报错，改用宽松模式再排一次，出错时把原文显示出来；我们把 `errorColor` 设成 `currentColor`，出错时颜色跟正文一样，不会变成一片红。
 - **`$` 会被消耗掉**：中文回答里写「$5 和 $10」这种价格，`remark-math` 会把中间那段当成公式，美元符号消失、公式按数学字体显示。这是这套东西的固有毛病，改不掉（要避开只能不用单美元符号的公式，我们上游正是用单美元符号写的）。
 - **流式输出时公式会跳一下**：公式没写完的时候前半段按普通文字显示，闭合的 `$` 到了才变成公式。
 - **体积**：js 从 441 kB（gzip 134 kB）涨到 716 kB（gzip 217 kB），css 多 23 kB。dist 里还会多出 KaTeX 的字体文件（20 个字体、woff2/woff/ttf 三份加起来约 800 kB），浏览器实际只下载用得上的那一两个 woff2。`pnpm build` 会提示 chunk 超过 500 kB。
@@ -184,7 +184,7 @@ Markdown 里没有公式。`$a^2 + b^2 = c^2$` 这种写法，Markdown 只会当
 
 所以规矩是：**新的 Redis 键空间一律挂在 `h2botapp-chat:` 前缀底下**（维护者确认过：这个前缀指的是整个项目，不是只有聊天那一个动作），要另起前缀就得先请维护者放开 ACL。限流键现在是 `h2botapp-chat:ratelimit:{scope}:{identifier}`（`server/src/server/ratelimit.py`）。这条规矩也写进了 [server/AGENTS.md](../server/AGENTS.md) 的「边界」一节。
 
-顺带：验收这类「Redis 不通就放行」的降级路径时，降级被触发这件事本身要从日志里主动确认一遍，不能只看接口返回——接口返回正常恰恰可能是降级在接住错误。
+顺带：验收这类「Redis 不通就放行」的降级路径时，降级被触发这件事本身要从日志里主动确认一遍，不能只看接口返回——接口返回正常恰恰可能是降级路径在处理错误。
 
 ## 2026-11-03 zxcvbn-ts 的中文字典是拼音，收不到无声调的连写
 
@@ -204,7 +204,7 @@ Markdown 里没有公式。`$a^2 + b^2 = c^2$` 这种写法，Markdown 只会当
 
 ## 2026-11-03 LayerFS 的读取和列目录都是分页的，校验脚本必须拼接
 
-`fs.read` 一次调用只回一个窗口（返回体带 `truncated`/`nextLine`），大文件拿到的是前缀。这批做同步校验时没翻页，md5 对不上，差点误判成「main 上的 App.tsx 和 pnpm-lock.yaml 没同步」——其实文件是完整的，是读被截断了。`fs.list` 同样分页，不拼会漏条目（曾把 `.env.example` 误报成 LayerFS 里不存在）。凡是拿内容做比对的脚本，都要循环读到 `truncated` 为假再算哈希。
+`fs.read` 一次调用只回一个窗口（返回体带 `truncated`/`nextLine`），大文件拿到的是前缀。这批做同步校验时没翻页，md5 对不上，差点误判成「main 上的 App.tsx 和 pnpm-lock.yaml 没同步」——实际上文件是完整的，是读被截断了。`fs.list` 同样分页，不拼会漏条目（曾把 `.env.example` 误报成 LayerFS 里不存在）。凡是拿内容做比对的脚本，都要循环读到 `truncated` 为假再算哈希。
 
 ## 2026-11-03 LayerFS 的 fs.apply 不能写不存在的目录
 
@@ -274,7 +274,7 @@ server 的依赖是 `httpx2`（2.16.0），环境里没有 `httpx` 包。这个�
 重建过程遇到的三个具体问题：
 
 - **增量安装不补平台包**：在既有 darwin 树上直接 `pnpm install --frozen-lockfile`，5.9 秒报 Done，但 Linux 平台包依然缺——pnpm 认为树是最新的，跳过了平台可选依赖。必须 `rm -rf node_modules` 全量重建（重建只要 3.9 秒，镜像里有热缓存）。
-- **npm 不能在 pnpm 树里跑**：npm 11 在项目根 `npm i` 会报 `EUNSUPPORTEDPROTOCOL "catalog:"`——它扫描现有 node_modules 树时读到了 pnpm 的 `catalog:` 协议残留，`--no-save` 也躲不开。要用 npm 就在隔离目录装（`/tmp` 下 `npm init -y` + `npm i`，再把包目录 `cp -R` 回来），或者干脆用 pnpm。
+- **npm 不能在 pnpm 树里跑**：npm 11 在项目根 `npm i` 会报 `EUNSUPPORTEDPROTOCOL "catalog:"`——它扫描现有 node_modules 树时读到了 pnpm 的 `catalog:` 协议残留，`--no-save` 也躲不开。要用 npm 就在隔离目录装（`/tmp` 下 `npm init -y` + `npm i`，再把包目录 `cp -R` 回来），或者直接用 pnpm。
 - **沙箱生命周期**：最后一个 workspace 卸载 2 分钟后沙箱自动关闭，再调用报 `NoSuchSandbox`，重新 `sandbox create` 即可；镜像里自带 pnpm 11.28.5（本机是 12.16.1），lockfileVersion 9.0 两者都认；沙箱有外网（npm registry 可达，实测 4 个包 1 秒装完）。
 
 ## 2026-11-06 生产环境 Redis 的 ACL 不放行脚本命令，原子抢占改用 SET … GET

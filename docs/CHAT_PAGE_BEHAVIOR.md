@@ -67,9 +67,9 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 
 - **续传轮询每个周期 500 毫秒**（[src/session/poll.ts](../src/session/poll.ts) 的 `startPartialPolling`）：问服务器「还在写吗」。200 → 把半截文字应用到页面、接着轮询；**404 和 401 都是终止条件**（onEnd 带上那个 ApiError，调用方分开处理「这一轮没在写了」→ 核对并修正数据库，和「会话过期」→ 统一的 401 出口）；网络错继续下一个周期——问不到服务器不等于没在写。
 - **后台标签暂停**：页面切到后台（`document.hidden`）不发请求、光等；回到前台立刻补查一次，不等下一个周期。
-- **断网即时感知与恢复确认**（2026-11-06 改写，[use-service-status.ts](../src/hooks/use-service-status.ts)）：`offline` 事件立即挂既有的服务横幅（`unreachable` 档、`connectionRetry` 文案），不用等最坏 30 秒的下一个周期。`online` 不轻信——网卡通了不代表服务器够得着——主动探测 `GET /api/status` 确认，失败按 1s/2s/4s…封顶 15s 指数退避重试；世代编号（`confirmGeneration`）作废旧的确认循环：offline 和新的 online 都把世代编号加一，不会出现两条确认循环并存；`navigator.onLine` 为假时暂停、等下一次 online。确认进行期间，常规 30 秒周期与可见性补查都让路——同一时刻只有一条探测链在请求 `/api/status`。确认成功后先 `clearTimeout` 再同步重挂 30 秒定时器（倒计时清零，任何时刻只有一个定时器），并广播 window 事件 `h2bot:network-ok`（[poll.ts](../src/session/poll.ts) 导出的 `networkOkEvent`）。
-- **恢复时合并会话列表，不整份替换**（2026-11-11 修正，[use-service-status.ts](../src/hooks/use-service-status.ts) 的 `refreshWorkspace`）：确认服务回来之后重新拉的会话列表，每条都是没读过历史的空壳（消息为空、`messagesKnown` 为假）。早先的做法是拿它直接替换整个列表，已经读出来、正在显示的消息跟着就没了；而「这个会话的历史已经读过」的标记记在线程加载层（[use-thread-loader.ts](../src/hooks/use-thread-loader.ts) 的 `loadedThreads`），没有任何路径会清掉它，也就不会有人再读一次历史——聊天区就一直空着，只能刷新页面。现在改成保留合并：标题、置顶这些信息用服务器的新值，消息和 `messagesKnown` 沿用本地的那一份；服务器上已经不存在的会话照旧跟着消失。断线期间正在流式回答的会话也因此不再被抹掉。按地址重新认领状态仍在合并之后照旧调用。
-- **谁在听 `h2bot:network-ok`**：① 500 毫秒续传轮询循环——提前结束这个周期的等待、立即以全新的周期开始（`finish` 幂等；唤醒后先发请求、请求回来才建下一个周期定时器，没有新旧定时器并存的窗口）。② 断线补查 catchUp（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts)）——不再直接听浏览器 raw `online`：那时补查多半白白失败一趟，还会和主动探测形成双份补查。补查行为不变：对每个还在等回答的会话挨个补查一次线程（`refreshThread`，里面带着续传逻辑），**跳过本页正在流式的会话**——那场让流自己收尾，别在这儿换掉消息列表。`visibilitychange` 回可见的常规补查与可见性提前结束轮询等待照旧。
+- **断网即时感知与恢复确认**（2026-11-06 改写，[use-service-status.ts](../src/hooks/use-service-status.ts)）：`offline` 事件立即挂既有的服务横幅（`unreachable` 档、`connectionRetry` 文案），不用等最坏 30 秒的下一个周期。`online` 不轻信——网卡通了不代表服务器可以连通——主动探测 `GET /api/status` 确认，失败按 1s/2s/4s…封顶 15s 指数退避重试；世代编号（`confirmGeneration`）作废旧的确认循环：offline 和新的 online 都把世代编号加一，不会出现两条确认循环并存；`navigator.onLine` 为假时暂停、等下一次 online。确认进行期间，常规 30 秒周期与可见性补查都让路——同一时刻只有一条探测链在请求 `/api/status`。确认成功后先 `clearTimeout` 再同步重挂 30 秒定时器（倒计时清零，任何时刻只有一个定时器），并广播 window 事件 `h2bot:network-ok`（[poll.ts](../src/session/poll.ts) 导出的 `networkOkEvent`）。
+- **恢复时合并会话列表，不整份替换**（2026-11-11 修正，[use-service-status.ts](../src/hooks/use-service-status.ts) 的 `refreshWorkspace`）：确认服务回来之后重新拉的会话列表，每条都是没读过历史的空壳（消息为空、`messagesKnown` 为假）。早先的做法是拿它直接替换整个列表，已经读出来、正在显示的消息跟着就没了；而「这个会话的历史已经读过」的标记记在线程加载层（[use-thread-loader.ts](../src/hooks/use-thread-loader.ts) 的 `loadedThreads`），没有任何路径会清掉它，也就不会有人再读一次历史——聊天区就一直空着，只能刷新页面。现在改成保留合并：标题、置顶这些信息用服务器的新值，消息和 `messagesKnown` 沿用本地的那一份；服务器上已经不存在的会话照旧跟着消失。断线期间正在流式回答的会话也因此不再被删除。按地址重新认领状态仍在合并之后照旧调用。
+- **谁在听 `h2bot:network-ok`**：① 500 毫秒续传轮询循环——提前结束这个周期的等待、立即以全新的周期开始（`finish` 幂等；唤醒后先发请求、请求回来才建下一个周期定时器，没有新旧定时器并存的窗口）。② 断线补查 catchUp（[use-turn-engine.ts](../src/hooks/use-turn-engine.ts)）——不再直接监听浏览器原生的 `online`：那时补查多半无谓失败一次，还会和主动探测形成双份补查。补查行为不变：对每个还在等回答的会话挨个补查一次线程（`refreshThread`，里面带着续传逻辑），**跳过本页正在流式的会话**——那场让流自己收尾，别在这儿换掉消息列表。`visibilitychange` 回可见的常规补查与可见性提前结束轮询等待照旧。
 - **保底定位键**：从上游回填的老会话消息可能没有轮次编号。waiting 消息没有 turnId 时，轮询用 `message.id` 当定位键（只认还在等待中的那条），续传不再静默失效（`applyPartialText` 的 fallbackKey 分支）。
 - 服务器侧 `/partial` 的收窄语义（200 只回 streaming、其余一律 404）和 `probePartial` 四种结果见 [CHAT_STREAM_PROTOCOL.md](CHAT_STREAM_PROTOCOL.md)「刷新续传与断流恢复」。
 
@@ -84,7 +84,7 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 ## 错误边界与降级
 
 - **单条消息**：[BubbleBoundary](../src/components/chat/BubbleBoundary.tsx) 包住每条消息的渲染。一条消息渲染崩溃了（Markdown/KaTeX 管线、组件定制抛错），那一条降级成纯文本气泡（原文照显），其余消息照常——不再整页白屏。
-- **整页**：[PageBoundary](../src/components/shell/PageBoundary.tsx) 包住 App 根部。非消息区域崩溃了给整页降级：「页面出了点问题」（`pageError` 键）+「刷新页面」（`refreshPage` 键）按钮。`/admin` 懒加载分块的 rejection（分块到手后渲染崩溃了）也由它接住。
+- **整页**：[PageBoundary](../src/components/shell/PageBoundary.tsx) 包住 App 根部。非消息区域崩溃了给整页降级：「页面出了点问题」（`pageError` 键）+「刷新页面」（`refreshPage` 键）按钮。`/admin` 懒加载分块的 rejection（分块到手后渲染崩溃了）也由它捕获。
 - **管理页懒加载与分块加载失败**（2026-11-06）：`/admin` 改 `React.lazy` ＋ `Suspense`，fallback 是控制台自己 checking 占位同款的空白 div（`h-full bg-base-200`，不引入新文案）。发布过渡期（旧页面要旧分块、服务器已换新）会让动态 import 失败，Vite 统一派发 `vite:preloadError`：App 顶层的 PageBoundary **之外**另挂 `ChunkFailureToast` 监听它，弹 toast「有新版本了，刷新页面即可」（`newVersionRefresh` 键，三语）；模块级标志保证一次页面会话只弹一条（刷新页面即复位——刷新后就拿到新分块了，一条就够）。刻意挂在边界外：`/admin` 分块加载失败时 lazy 的 rejection 会把整页送进错误边界，toast 得留在边界外才看得见。它的语言在失败瞬间从本地记的资料取一次快照，读不到随系统。
 
 ## 标签页标题与 html lang
@@ -107,7 +107,7 @@ sessionStorage 的 `h2bot-unsent`（[src/session/unsent.ts](../src/session/unsen
 
 置顶/取消置顶改乐观更新（2026-11-06，[use-session-actions.ts](../src/hooks/use-session-actions.ts) 的 `pinOpenSession`）：
 
-- 点击界面立即生效（`pinnedAt` 用本地时间顶上），请求后台发；成功把本地值换成服务端的权威值；失败回滚界面。回滚简化：原 `pinnedAt` 没快照，恢复成 null——罕见的回滚场景只影响这条会话在置顶组里的先后，可忽略（调研 frontend-app O11 认可过这个简化）。
+- 点击界面立即生效（`pinnedAt` 先写入本地时间），请求后台发；成功把本地值换成服务端的权威值；失败回滚界面。回滚简化：原 `pinnedAt` 没快照，恢复成 null——罕见的回滚场景只影响这条会话在置顶组里的先后，可忽略（调研 frontend-app O11 认可过这个简化）。
 - 失败反馈走错误 toast（菜单点完就关，输入区上方的警示框容易被漏看）——从原来的 `setNotice` 改成 toast；401 走登录界面、带服务器给的说法，不弹 toast；连接类失败照旧挂全局服务横幅（横幅与 toast 一起出现）；成功不提示。
 - 侧栏的 FLIP 重排动画跟着乐观更新立即播，失败回滚时再反向播一次。
 
@@ -137,12 +137,12 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 
 会话类 401 现在带 `reason` 字段（词表和后端实现见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「401 带原因」）。页面这边（[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的 `handleAuthError`）：
 
-- **进入条件**：auth 是 ready 时收到带 reason 的 401 → 进入留在原页面的过期状态（`sessionInvalid`：expired 或 disabled）。不带 reason 的 401（老后端）保守回退整页 `enterLogin` 路径；checking/anonymous 阶段的 401 照旧走整页登录屏。
+- **进入条件**：auth 是 ready 时收到带 reason 的 401 → 进入留在原页面的过期状态（`sessionInvalid`：expired 或 disabled）。不带 reason 的 401（旧后端）保守回退整页 `enterLogin` 路径；checking/anonymous 阶段的 401 照旧走整页登录屏。
 - **留在原页面的过期状态保留什么**：会话列表、消息、草稿、profile 缓存全部原样不动；输入区禁用（`inputLocked` 把 `sessionInvalid` 算进去）；输入区分隔线上方挂**常驻警示条，不可关闭**——expired 用琥珀的「有状况」语气 + 「重新登录」按钮（`logInAgain` 键），disabled 用红色出错语气、不给按钮（终态，登录也没用）。白底黑字、语义色只在图标上（[UI_WARNINGS.md](UI_WARNINGS.md) 的颜色规则）。
 - **在原页面重新登录**：Modal 里嵌 LoginScreen 同款卡片，不清聊天页的任何状态；登录失败弹窗不关、错误留在表单里；成功走 `openAccount` 在原页面恢复——`resetForLogin` 把上一个登录态的进行中请求、轮询和「线程已加载」标记一次清掉，`bumpThreadRetry` 让当前会话的历史重新拉（activeId 和 auth 都没变，线程加载效果只能靠 retry 计数重新触发），然后清 `sessionInvalid`、关弹窗。
-- **其余动作的 401 出口**（侧栏、设置、改密、服务状态恢复）走 `enterLoginGuarded`：已经处于留在原页面的过期状态时不再升级成整页清空——横幅已经挂着了，清空反而会把这个状态下已经保住的东西弄丢。
+- **其余动作的 401 出口**（侧栏、设置、改密、服务状态恢复）走 `enterLoginGuarded`：已经处于留在原页面的过期状态时不再升级成整页清空——横幅已经挂着了，清空反而会把这个状态下已经保留的内容丢失。
 - **断线补查的 401**（轮询碰到 404 后、网络恢复、重试前的 `refreshThread`）走统一的 `onAuthError` 出口：会话已过期就进入留在原页面的过期状态，不再被静默忽略。
-- 触发来源现在有两条（2026-11-06 起）：① 下一次请求收到带 reason 的 401（原路径）；② 服务器 `/api/events` 推送通道实时推来 `valid:false` 失效帧（改密、控制台重置、令牌过期）——与 401 走同一个处理入口进入同一状态。推送的 reason 词表三个词：`expired`/`password_changed`/`admin_reset`。横幅文案 2026-11-08 起统一（维护者决定）：三种 reason 一律「会话已过期，请重新登录」，「为什么被踢」的解释归强制改密页的横幅（被重置的账号重新登录就会撞见它）；`disabled` 是终态、保留「账号已被停用」；不认识的词保守按失效处理（文案退帧里的 `message`，缺失退「会话已过期」）。后端 401 的 detail（「未登录」）自同日起不对用户显示。接线模块：[push-channel.ts](../src/session/push-channel.ts)。
+- 触发来源现在有两条（2026-11-06 起）：① 下一次请求收到带 reason 的 401（原路径）；② 服务器 `/api/events` 推送通道实时推来 `valid:false` 失效帧（改密、控制台重置、令牌过期）——与 401 走同一个处理入口进入同一状态。推送的 reason 词表三个词：`expired`/`password_changed`/`admin_reset`。横幅文案 2026-11-08 起统一（维护者决定）：三种 reason 一律「会话已过期，请重新登录」，「为什么被强制下线」的解释归强制改密页的横幅（被重置的账号重新登录就会撞见它）；`disabled` 是终态、保留「账号已被停用」；不认识的词保守按失效处理（文案退帧里的 `message`，缺失退「会话已过期」）。后端 401 的 detail（「未登录」）自同日起不对用户显示。接线模块：[push-channel.ts](../src/session/push-channel.ts)。
 - **连接断了会自己接回来（2026-11-11）**：连接被彻底关掉（`readyState` 变成 `CLOSED`）时不再一律当成「登录态已失效」而收手——网关故障也会走到这个状态，而浏览器的 `error` 事件不告诉我们状态码，两者长得一模一样。现在先问一次 `/api/profile` 分辨：401 才是登录态真的没了，照旧不再重连并进入「留在原页面的过期状态」；其余情况（网络错、5xx）按 1 秒起、每次翻倍、封顶 30 秒的退避重新建一条连接，关掉通道时在途的探测和排队中的重连都会作废，不会在关掉之后又冒出新连接。改之前的代价是：服务抖动一次，推送能力就一直失灵到用户重新登录。
 
 
@@ -151,10 +151,10 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 密码来自别人手的账号（预设密码、被控制台重置过密码），服务器带着 `must_change_password` 标记（迁移 0002），中间件对它请求非豁免路径一律回 403（code `must_change_password`）。前端对应的拦截（2026-11-06）：
 
 - **进入拦截的三个来源**：登录响应里标记为真；页面恢复时拉到的资料里标记为真；任何请求收到 403 且 code 为 `must_change_password`（[http.ts](../src/api/http.ts) 在唯一的响应体解析口广播全局事件，[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 监听后进入拦截）。
-- **拦截期间的行为**：只渲染强制改密页（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的强制模式：标题「设置新密码」，顶部一条白底说明横幅解释为什么被拦），正常聊天主体一概不渲染；路径守卫把地址按在 `/force-change-pwd`——手输别的地址、用浏览器前进后退都会被送回。进闸门前守卫顺手记下「来路」（只记 `/chat/:id`，别的地址不记）：改密成功或放弃登录都回到这里就地重新登录，登录后路由认领回原会话（契约见 [password-return.ts](../src/session/password-return.ts)）。
+- **拦截期间的行为**：只渲染强制改密页（[ChangePasswordPage.tsx](../src/components/settings/ChangePasswordPage.tsx) 的强制模式：标题「设置新密码」，顶部一条白底说明横幅解释为什么被拦），正常聊天主体一概不渲染；路径守卫把地址强制改到 `/force-change-pwd`——手输别的地址、用浏览器前进后退都会被送回。进闸门前守卫一并记下「来路」（只记 `/chat/:id`，别的地址不记）：改密成功或放弃登录都回到这里就地重新登录，登录后路由认领回原会话（契约见 [password-return.ts](../src/session/password-return.ts)）。
 - **放弃本次登录（2026-11-07 补上，2026-11-08 改名）**：被标记账号的登录不算登录成功——服务器发的只是一条能到豁免路径的受限会话。强制页的「放弃本次登录」即放弃这次登录：尽力调用注销接口作废受限会话（服务器联系不上也照样回登录页，受限会话到不了聊天功能、会自行过期），清掉本地登录态、回「记下的来路」就地渲染登录屏，其他标签页经登出标记一起回登录界面；草稿按主动退出的规矩清空。标记仍留在账号上，下次登录照样被拦，直到改完密码。实现：[use-auth-flow.ts](../src/hooks/use-auth-flow.ts) 的 `cancelGatedLogin`。
-- **拦截期间登录态死掉（2026-11-08 修正）**：拦截时聊天主体不渲染，「留在原页面的过期状态」的警示条看不见，此前推送失效帧和提交收到的 401 都被静默吞掉——点「修改」页面毫无反应，只有开发者工具里能看到 401。现在两条出口都直接带文案回登录页：推送失效帧走 handlePushInvalid 的闸门分支（帧里的 message，缺失时退「会话已过期，请重新登录」）——本页正在改密（提交中或已成功待收尾）时例外，帧不抢先，成功收尾自己会清状态跳登录；提交收到 401 表单错误按 reason 映射成「会话已过期，请重新登录」（不再透出服务端 detail「未登录」），出口直通登录页。重新登录后由登录响应决定要不要再进闸门。
-- **解除（2026-11-08 重做收尾）**：改密成功后服务器在同一事务里吊销全部令牌并清 cookie，「改完接着用」物理上做不到。收尾三步：①提交按钮点击即禁用加转圈（改密页两种模式同款），成功先就地亮一条「密码已修改，请用新密码重新登录」的白底横幅；②片刻后回「记下的来路」（只记 `/chat/:id`，没有就根路径）就地渲染登录屏——地址不动，与被 401 顶回登录页同一套机制，登录屏带同句提示；③用新密码重新登录，claimPath 认领回原会话；登录响应里标记已是 false，拦截解除。收尾不走 enterLoginGuarded：那道守卫在「留在原页面的过期状态」挂起时会吞掉整页清空，而服务器先推 `password_changed` 帧再回 204——帧先到、守卫一吞，就是「点修改毫无反应」卡死的根。万一标记仍为真，拦截重新生效。
+- **拦截期间登录态死掉（2026-11-08 修正）**：拦截时聊天主体不渲染，「留在原页面的过期状态」的警示条看不见，此前推送失效帧和提交收到的 401 都被静默忽略——点「修改」页面毫无反应，只有开发者工具里能看到 401。现在两条出口都直接带文案回登录页：推送失效帧走 handlePushInvalid 的闸门分支（帧里的 message，缺失时退「会话已过期，请重新登录」）——本页正在改密（提交中或已成功待收尾）时例外，帧不抢先，成功收尾自己会清状态跳登录；提交收到 401 表单错误按 reason 映射成「会话已过期，请重新登录」（不再透出服务端 detail「未登录」），出口直通登录页。重新登录后由登录响应决定要不要再进闸门。
+- **解除（2026-11-08 重做收尾）**：改密成功后服务器在同一事务里吊销全部令牌并清 cookie，「改完接着用」物理上做不到。收尾三步：①提交按钮点击即禁用加转圈（改密页两种模式同款），成功先就地亮一条「密码已修改，请用新密码重新登录」的白底横幅；②片刻后回「记下的来路」（只记 `/chat/:id`，没有就根路径）就地渲染登录屏——地址不动，与被 401 强制退回登录页同一套机制，登录屏带同句提示；③用新密码重新登录，claimPath 认领回原会话；登录响应里标记已是 false，拦截解除。收尾不走 enterLoginGuarded：那道守卫在「留在原页面的过期状态」挂起时会忽略整页清空，而服务器先推 `password_changed` 帧再回 204——帧先到、被守卫忽略，就是「点修改毫无反应」卡死的根。万一标记仍为真，拦截重新生效。
 - **控制台一侧**：服务器不做强制改密（维护者永久决定，见 [LOGIN_SESSIONS_AND_RATE_LIMITING.md](LOGIN_SESSIONS_AND_RATE_LIMITING.md)「必须改密标记」）。控制台的「修改我的密码」入口（[ChangeMyPasswordDialog.tsx](../src/components/admin/ChangeMyPasswordDialog.tsx)）纯自助；修改成功后所有设备同样下线，回控制台登录界面用新密码重新登录。
 
 ## SSE 解析器（前端）
@@ -173,7 +173,7 @@ Modal 的焦点管理（2026-11-06，[Modal.tsx](../src/components/shell/Modal.t
 
 - **`probePartial` 把 401 归为 unreachable（原限制，2026-11-07 关闭）**：流断了去问「还在写吗」时如果会话已过期，401 曾被归进「问不到服务器」，走连接警示横幅而不是会话过期后留在原页面的状态。现在 401 单列为「会话已失效」（unauthorized）结果、带上 reason，四个调用点全部接入会话过期处理：引擎的断流恢复（`recoverReply`）和停止收尾（`finishStop`）直接走统一的 401 出口（`onAuthError`）；`chat.ts` 的 `outcomeAfterFailure` 和 `thread.ts` 的 `loadThread` 把 401 原样抛给调用方既有的 401 出口。
 - **留在原页面的过期状态里侧栏/设置操作的 401 静默失败**：`enterLoginGuarded` 保证不清页，但那些操作本身也没成功，用户看不到单独的解释（横幅是共用的那条）。
-- **改密页提交的反馈（原限制，2026-11-08 重做）**：提交按钮点击即禁用加转圈直到请求完成；成功就地亮「密码已修改」横幅再收尾跳登录；401 的表单错误按 reason 映射成「会话已过期，请重新登录」（不透出「未登录」），出口直通登录页、不再被守卫吞掉（见「强制修改密码的拦截」）。
+- **改密页提交的反馈（原限制，2026-11-08 重做）**：提交按钮点击即禁用加转圈直到请求完成；成功就地亮「密码已修改」横幅再收尾跳登录；401 的表单错误按 reason 映射成「会话已过期，请重新登录」（不透出「未登录」），出口直通登录页、不再被守卫忽略（见「强制修改密码的拦截」）。
 - **服务器侧失效已实时推送（原限制，2026-11-06 关闭）**：改密、控制台重置、令牌过期经 `/api/events` 推送通道推到所有开着的标签页、进入与带 reason 的 401 同一套留在原页面的过期状态，下一次请求的 401 作保底；主动退出照旧走 localStorage 标记（退出登录不推送，属设计决定）。
 - **滚动跟随只看消息列表和编辑框文本**：打字机播放的每个周期长高已持续跟随（2026-11-06，每个周期 `onReveal` 查贴底，见「打字机播放」）；其余纯高度变化（高亮懒加载迟到、KaTeX 排版完成、思考气泡进度文本）仍不会重新触发贴底判定，已贴底时跟随可能悄悄脱钩；「回到底部」按钮仍可用。
 - **其余 7 个组件「lang 属性按连接错误硬标 zh-Hans」的临时写法未收敛**：`error === text.connectionError ? htmlLang[locale] : 'zh-Hans'` 还留在 AdminConsole、AdminLoginForm、ConfirmAdminLogout、ConfirmResetPassword、LoginScreen、ConfirmLogout、SettingsModal 七个组件里——错误文案 i18n 映射（2026-11-06）之后，英/繁界面的错误多数已是本地化映射文案，内容正确，但这个写法会把它们的 `lang` 标成 `zh-Hans`，标注不准。另有同族变体第 8 处：ChangePasswordPage 的 `localizedError ? htmlLang[locale] : 'zh-Hans'`（判断条件从「是不是连接错误」换成「是不是本地化映射文案」），收敛时一并处理。归 frontend-app P4 后续收敛。

@@ -274,7 +274,7 @@ dev = ["ruff>=0.17.2"]
 ### 14. WEAK_PASSWORDS 前后端双清单，一致性只靠注释约定
 
 - **位置**：/src/components/settings/password-strength.ts（`WEAK_PASSWORDS`，注释原话「跟 server/src/server/passwords.py 的 _WEAK_PASSWORDS 保持一致，改一处必须改两处」）与 server/src/server/passwords.py。
-- **现状**：同一份弱口令拒绝名单在 TS 与 Python 各维护一份，一致性靠注释和自觉，无任何自动校验。文件头注释和 UI_WARNINGS.md 都强调「后端会拒的，提示不能骗人」——这份名单正是该承诺的载体。
+- **现状**：同一份弱口令拒绝名单在 TS 与 Python 各维护一份，一致性靠注释和自觉，无任何自动校验。文件头注释和 UI_WARNINGS.md 都强调「后端会拒的，提示不能误导用户」——这份名单正是该承诺的载体。
 - **影响**：单边漏改时前端强度提示与后端硬门槛静默不一致，且没有任何检查会报。这是全项目最典型的「跨语言不变量靠人肉同步」点。
 - **方案**（两案，建议先 a 后评估 b）：
   a. **一致性检查脚本**：新增 /scripts/check-weak-passwords.py（Python 单文件，无第三方依赖），分别用正则从 password-strength.ts 提取 `WEAK_PASSWORDS` Set 字面量、从 passwords.py 提取 `_WEAK_PASSWORDS`，排序比对，不一致 exit 1 并打印差集；**提取失败也要 exit 1**（防止格式重排后脚本静默放行）。挂进第 9 条的 check-all.sh 与第 11 条 CI 的 server job。
@@ -445,7 +445,7 @@ store-dir=node_modules/.pnpm-store
 - **位置**：/public/avatar-default.png、/public/favicon.ico。
 - **现状**（实测 grep）：avatar-default.png 在 src、server/src、index.html 中零引用——前后端默认头像统一用 `/avatar-default.svg`（src/api/profile.ts:5 与 server/src/server/app.py:119 双确认），png 是死文件，且每次构建都被拷进 dist。favicon.ico 无 `<link>` 引用，但浏览器存在默认请求 `/favicon.ico` 的惯例行为（老浏览器、地址栏、爬虫），**不算死文件**，属惯例保留。public 其余文件均有引用（favicon.svg、favicon-32.png、apple-touch-icon.png 在 index.html；矢量 logo 走 src/assets）。
 - **影响**：冗余资产体量小，但「是没在用还是我没找到用法」对后人是个悬案。
-- **方案**：git 侧常规提交流程删除 public/avatar-default.png；favicon.ico 保留，并在 TECH.md（或 index.html 注释）记一句「favicon.ico 无显式引用，为浏览器惯例请求保留」。删除前可顺手在部署访问日志里确认 png 无历史请求。
+- **方案**：git 侧常规提交流程删除 public/avatar-default.png；favicon.ico 保留，并在 TECH.md（或 index.html 注释）记一句「favicon.ico 无显式引用，为浏览器惯例请求保留」。删除前可以先在部署访问日志里确认 png 无历史请求。
 - **第三方库/工具**：无。
 - **风险**：极低；若担心某处运行时拼接了 png 路径（实测 grep 'avatar-default' 仅 svg 一处命中，可能性很小），删除后走一轮头像相关流程验证即可。
 - **工作量**：S。

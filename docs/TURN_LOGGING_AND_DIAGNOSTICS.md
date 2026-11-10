@@ -83,4 +83,4 @@ grep "<轮次编号>" logs/server.log
 
 ## 日志轮转现状
 
-`logs/server.log` 超过 5MB 轮转归档（`log.py` 的 `_SizeLogFile`，归档文件按时间戳命名 `server-<时间戳>.log`）。**归档保留已决定（2026-11-05）：不做自动删除**，归档的保留与清理归运维部署机的人负责；程序只提醒——每次轮转后统计归档的个数与总大小，超过阈值（默认 20 个或 500MB，`log.py` 里两个常量，要调改常量）就在日志里写一行 warning，提示人工处理。决定记录见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 22 条注记。AGENTS.md 和 TECH.md 里关于日志文件位置、「不要贴进公开渠道」的规矩不变，这里不搬家。
+`logs/server.log` 超过 5MB 轮转归档（`log.py` 的 `_SizeLogFile`，归档文件按时间戳命名 `server-<时间戳>.log`）。**归档保留已决定（2026-11-05）：不做自动删除**，归档的保留与清理归运维部署机的人负责；程序只提醒——每次轮转后统计归档的个数与总大小，超过阈值（默认 20 个或 500MB，`log.py` 里两个常量，要调改常量）就在日志里写一行 warning，提示人工处理。决定记录见 [improvement-research/backend-infra.md](improvement-research/backend-infra.md) 第 22 条注记。AGENTS.md 和 TECH.md 里关于日志文件位置、「不要贴进公开渠道」的规矩不变，这里不改动位置。

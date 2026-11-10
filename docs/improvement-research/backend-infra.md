@@ -16,7 +16,7 @@
 - **日志怎么走**：`log.py` 自研 `_SizeLogFile` 写 `logs/server.log`，满 5MB 改名归档成带时间戳的文件，归档永不删除；文件 handler 同时挂到 root、`uvicorn`、`uvicorn.access`，终端另走 uvicorn 的彩色格式。日志里有用户提问全文和 FastGPT 上游原文（AGENTS.md 自己也这么写）。
 - **怎么部署**：前端 `pnpm build` 出 `dist/`，nginx 做 SPA 回落 + `/api/` 反向代理（`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md`，默认 `listen 80`）；后端单进程 uvicorn 听 `127.0.0.1:3001`，`scripts/start-server.sh` 或 `uv run server` 前台启动，没有进程守护、没有 CI、没有自动化测试（硬约束：不引入测试框架）。
 
-**值得肯定、别在改造里弄坏的点**：`passwords.py` 用 argon2-cffi 默认参数（Argon2id，t=3、m=64MiB、p=4），强于 OWASP 建议下限，且有 `needs_rehash` 在登录成功时顺手升级旧哈希；登录令牌是 `secrets.token_urlsafe(32)`（256 位随机），数据库里只存 sha256 哈希；改密和管理员重置都在同一事务里吊销该账号全部令牌；头像上传做了格式白名单（PNG/JPEG/HEIF）、5MB 与 2000 万像素双上限、统一重编码成 PNG 并剥 EXIF；Redis 降级策略在 `reply_store.py` 和 `ratelimit.py` 里写法一致。没有 CORS 中间件是刻意设计（同源部署，AGENTS.md 明说），不建议加。
+**值得肯定、别在改造里破坏的点**：`passwords.py` 用 argon2-cffi 默认参数（Argon2id，t=3、m=64MiB、p=4），强于 OWASP 建议下限，且有 `needs_rehash` 在登录成功时一并升级旧哈希；登录令牌是 `secrets.token_urlsafe(32)`（256 位随机），数据库里只存 sha256 哈希；改密和管理员重置都在同一事务里吊销该账号全部令牌；头像上传做了格式白名单（PNG/JPEG/HEIF）、5MB 与 2000 万像素双上限、统一重编码成 PNG 并剥 EXIF；Redis 降级策略在 `reply_store.py` 和 `ratelimit.py` 里写法一致。没有 CORS 中间件是刻意设计（同源部署，AGENTS.md 明说），不建议加。
 
 以下按四个维度编号，共 28 条。每条给位置、现状、影响、方案（关键处附草图）、第三方库、风险、工作量（S/M/L）。所有验证手段都遵守「不引入测试框架」：改完跑 `uv run ruff check .`、`uv run ruff format --check .`，核心链路手动过一遍。
 
@@ -178,7 +178,7 @@
 
 ### 15. 每个认证请求至少 3 次 DB 往返：中间件与端点重复验证、清扫 DELETE 搭车
 
-> **已完成（2026-11-05）**：随早于本节的批次完成（与 backend-api O1 是同一件事），本次结构整理后逐处复验机制健在：校验＋续期合成单条 UPDATE…RETURNING（security/tokens.py）；中间件验证通过后把结果放进请求态 contextvar（middleware.py 写入 security/context.py 的 REQUEST_ACCOUNT），端点鉴权优先复用（security/accounts.py），只多一次按主键取活 ORM 对象；过期清扫整个搬出请求路径（lifespan 定时任务）。每个带 cookie 的请求从「至少 3 次往返」降到 2 次。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
+> **已完成（2026-11-05）**：随早于本节的批次完成（与 backend-api O1 是同一件事），本次结构整理后逐处复验机制健在：校验＋续期合成单条 UPDATE…RETURNING（security/tokens.py）；中间件验证通过后把结果放进请求态 contextvar（middleware.py 写入 security/context.py 的 REQUEST_ACCOUNT），端点鉴权优先复用（security/accounts.py），只多一次按主键取活 ORM 对象；过期清扫完全移出请求路径（lifespan 定时任务）。每个带 cookie 的请求从「至少 3 次往返」降到 2 次。功能描述见 docs/LOGIN_SESSIONS_AND_RATE_LIMITING.md。调研原文以 LayerFS 历史为准。
 
 - **位置**：`app.py` 的 `_RefreshLoginCookie`（`_cookie_is_valid` → `_login_token` 查询+续期+commit）、各端点 `_account_from_cookie`（再走一遍 `_login_token`）、`_login_token` 开头的 `_sweep_expired_tokens()`（第三次，DELETE）
 - **现状**：同一个令牌在一次请求里被查两遍、续期两遍（中间件 set-cookie 前查一次，端点鉴权再查一次），外加一次全表 DELETE 清扫。
@@ -220,7 +220,7 @@
   ```
 
 - **第三方库**：无
-- **风险**：systemd 接管 stdout 后，`log.py` 的终端 handler 输出会进 journal，和 `logs/server.log` 内容重复——接受，或给 `configure_logging` 加个「无 TTY 就不挂 stream handler」的判断（`sys.stderr.isatty()`），顺手的事。
+- **风险**：systemd 接管 stdout 后，`log.py` 的终端 handler 输出会进 journal，和 `logs/server.log` 内容重复——接受，或给 `configure_logging` 加个「无 TTY 就不挂 stream handler」的判断（`sys.stderr.isatty()`），顺带就能做。
 - **工作量**：M
 
 ### 17. 优雅停机：SSE 长连接与后台写数据库任务没有收尾逻辑
@@ -255,7 +255,7 @@
 - **位置**：`server/__init__.py`（`uvicorn.run(app, ...)` 单进程）；`app.py` 的 `_running`、`_pending_stops`、`_records_cache`（全是进程内 dict/set）
 - **现状**：abort 的核心动作是「从 `_running` 里找到那个 asyncio.Task 并 cancel」；「等叫停生效再开新轮」靠 `_pending_stops`；防刷新打垮上游靠 `_records_cache`。这三样都只在单进程内成立。Redis 里有停止标记和半截文字，但任务本体不在 Redis 里。
 - **影响**：性能不够时最自然的动作是 `uvicorn --workers 4`，而它会让 `/abort` 大概率落到另一个 worker 上——找不到任务、直接返回 204，用户按了停止但回答继续写。这和 `server/AGENTS.md` 里「Redis ACL 前缀不对就静默失效」是同一类陷阱：不报错，功能没了。
-- **方案**：短期（本批就能做）：在 `server/AGENTS.md` 和部署文档写明「只能单 worker 运行；容量瓶颈先考虑第 15 条的查询精简和机器规格，不要加 --workers」。长期若确需多进程：轮次归属搬进 Redis（每个 chat_id 由持锁的 worker 处理，abort 只写标记、持有者轮询/键空间通知感知后自己 cancel）——这是大改，立项前先按规矩报备。
+- **方案**：短期（本批就能做）：在 `server/AGENTS.md` 和部署文档写明「只能单 worker 运行；容量瓶颈先考虑第 15 条的查询精简和机器规格，不要加 --workers」。长期若确需多进程：轮次归属移进 Redis（每个 chat_id 由持锁的 worker 处理，abort 只写标记、持有者轮询/键空间通知感知后自己 cancel）——这是大改，立项前先按规矩报备。
 - **第三方库**：无
 - **风险**：文档层面无风险；长期方案改动核心链路，单独评估。
 - **工作量**：S（文档）/ L（真多进程化）
@@ -329,7 +329,7 @@
 - **位置**：全仓库（无 `/metrics`；nginx access log 是唯一的系统性数据源，而指南没提怎么用它）
 - **现状**：应用没有记录任何运行指标。「上游连不上」的次数、每轮回答的失败率、argon2 verify 的耗时、数据库连接池的等待，全部散在日志行里。第 15 条说「中间件让数据库查询翻倍」，这类判断现在也只能靠读代码，没有数据佐证。
 - **影响**：容量规划（比如第 18 条要不要多进程化）和回归定位（发版后变慢了吗）没有量化依据；故障回顾只能靠时间戳对齐日志。
-- **方案**：务实分两步。a) 零依赖先做：部署文档加一节「用 nginx access log 看基础指标」——`goaccess`（点名，只读分析工具，装在服务器上，不进应用依赖）一条命令出 HTML 报表，QPS、状态码分布、最慢 URL 都有了；b) 真有持续监控需求时再点名 prometheus-client 进应用：加 `/metrics`（只听回环、nginx 不转发，天然不对外），记录三类指标就够——HTTP 请求时延直方图、上游失败计数器（`FastGPTError` 抛出点）、数据库连接池状态（SQLAlchemy 事件钩子）。不建议现在顺手做 b：没有采集端（Prometheus server）之前，记录指标也没有人用。
+- **方案**：务实分两步。a) 零依赖先做：部署文档加一节「用 nginx access log 看基础指标」——`goaccess`（点名，只读分析工具，装在服务器上，不进应用依赖）一条命令出 HTML 报表，QPS、状态码分布、最慢 URL 都有了；b) 真有持续监控需求时再点名 prometheus-client 进应用：加 `/metrics`（只听回环、nginx 不转发，天然不对外），记录三类指标就够——HTTP 请求时延直方图、上游失败计数器（`FastGPTError` 抛出点）、数据库连接池状态（SQLAlchemy 事件钩子）。不建议现在一并做 b：没有采集端（Prometheus server）之前，记录指标也没有人用。
 - **第三方库**：goaccess（a，服务器侧工具）、prometheus-client（b，届时进依赖）——都只点名，本批不引入
 - **风险**：`/metrics` 若将来被转发出去会泄露内部行为数据，文档写明「仅回环」。
 - **工作量**：a=S，b=M
@@ -341,7 +341,7 @@
 ### 26. nginx 配置完善度：缺 body 上限、安全头、gzip、HTTP/2、TLS 参数、边缘限速
 
 - **位置**：`/docs/NGINX_SPA_DEPLOYMENT_GUIDE.md` 的「完整配置」
-- **现状**：指南把 SPA 回落、`index.html` 不缓存、assets 一年 immutable、SSE 关缓冲（`proxy_buffering off`）和 300s 读超时都做对了，教学式的行文也好；但对照生产清单缺：`client_max_body_size`（第 8 条）、安全头（第 9 条）、gzip（JS/CSS 文本资产不压缩，首屏流量白白消耗）、HTTP/2、`server_tokens off`、`limit_req`（应用层限流之外的边缘粗粒度限流，对第 1 条的登录暴力破解是最便宜的第一道防线）、TLS 只有一句「certbot 会自动改」（手动配的话没有 `ssl_protocols`/HSTS 可抄）、`proxy_set_header Connection ""`（HTTP/1.1 反向代理上游的标准写法，去掉 hop-by-hop 头）。
+- **现状**：指南把 SPA 回落、`index.html` 不缓存、assets 一年 immutable、SSE 关缓冲（`proxy_buffering off`）和 300s 读超时都做对了，教学式的行文也好；但对照生产清单缺：`client_max_body_size`（第 8 条）、安全头（第 9 条）、gzip（JS/CSS 文本资产不压缩，首屏流量无谓消耗）、HTTP/2、`server_tokens off`、`limit_req`（应用层限流之外的边缘粗粒度限流，对第 1 条的登录暴力破解是最便宜的第一道防线）、TLS 只有一句「certbot 会自动改」（手动配的话没有 `ssl_protocols`/HSTS 可抄）、`proxy_set_header Connection ""`（HTTP/1.1 反向代理上游的标准写法，去掉 hop-by-hop 头）。
 - **影响**：以上每一项都对应一个真实的风险或浪费，且指南是部署者的唯一依据——指南没写，生产上就不会有。
 - **方案**：更新指南，给出一份「HTTPS 完整配置」作为新增章节（保留现有 HTTP 教学配置不动，增量式补充，符合指南「写给第一次部署的人」的定位）。草图（`limit_req_zone` 必须放 `http` 块，指南里要说明这一点）：
 

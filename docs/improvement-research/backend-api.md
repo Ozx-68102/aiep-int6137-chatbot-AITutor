@@ -11,7 +11,7 @@
 - `server/AGENTS.md`（后端特有规矩、FastGPT v4.14.5 版本基线、Redis ACL 前缀约束）
 - `server/src/server/`：`app.py`（1375 行，全部路由和流式转发）、`fastgpt.py`（上游客户端）、`chat_log.py`（自有 message 表读写）、`reply_store.py`（Redis 半截回复）、`ratelimit.py`（失败计数限流）、`url.py`、`settings.py`、`log.py`、`avatar.py`、`passwords.py`、`__init__.py`（uvicorn 入口）
 - `server/src/server/types/`：`api.py`（接口模型）、`env.py`（配置模型）、`__init__.py`
-- `server/src/server/db/`：`models.py`（表结构与索引）、`session.py`（引擎与会话）、`init.py`（幂等建表/补加数据列）、`backfill.py`（历史搬迁命令）
+- `server/src/server/db/`：`models.py`（表结构与索引）、`session.py`（引擎与会话）、`init.py`（幂等建表/补加数据列）、`backfill.py`（历史复制命令）
 - 文档：`docs/FASTGPT_API.md`、原 `docs/INTERRUPTED_REPLY.md`（已退役，内容并入 `docs/CHAT_STREAM_PROTOCOL.md`）、`docs/ACCOUNT_MANAGEMENT.md`、原 `docs/CHAT_STREAM_KNOWN_ISSUES.md`（已退役，内容并入 `docs/CHAT_STREAM_PROTOCOL.md` 等）、`docs/MESSAGE_ACTIONS.md`、`docs/TECH.md`、`docs/FINDINGS.md`（相关条目）、`docs/NGINX_SPA_DEPLOYMENT_GUIDE.md`（SSE 反向代理部分）
 
 ### 架构简述
@@ -283,11 +283,11 @@
 
 > **已完成（2026-11-06）**：「查＋占」合成 `reply_store.claim_round` 一个原子动作——`SET … GET` 单命令（写状态键同时原子拿回旧值，旧值 streaming 即没抢到、回 409；抢到当场完成原 begin_reply 的三键登记）。没按本节设想的 Lua 脚本做：生产环境 ACL 不放行 evalsha（docs/FINDINGS.md 2026-11-06 条目），脚本一降级守卫整个失效；`SET NX` 也不行（落定轮的状态键活到 TTL，NX 永远失败）。同轮次幂等预检、被停路径优先级（忙压过停）、Redis 降级放行全部保持。真实环境冒烟测试：进行中双发不同轮 409、同轮重发 409、落定后下一轮不误拦。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「同一场会话同时只跑一轮」。调研原文以 LayerFS 历史为准。
 >
-> **注记（2026-11-07）**：运行期残留自愈加固。原实现的占用检查（`SET … GET`）和轮次登记（pipeline）是两步，登记失败不回退占用，Redis 在两步中间掉线会留下「状态键=streaming、编号键缺失」的残留——这场会话之后的请求全部被 409 拒发，直到状态键过期（600 秒）或进程重启（启动时有残留键清理，运行期原先没有）。现在 `claim_round` 读到旧值是 streaming 时补查一次：对编号键做 `SET … NX`（带同样的过期时间），登记还在照旧拒发，登记缺失（残留）则 NX 成功的请求赢得这一轮、补齐登记后照常进行。并发请求同时判出残留时由 NX 裁决（只可能一个成功），不用「先删状态键再重新抢」——那样第二个人的删会把第一个人刚写的状态键抹掉，造成同一场会话双重占用。补查时 Redis 不通按真有一轮在写处理、拒掉本次请求。只用 set/get/del 这些既有命令，都在生产环境 ACL 放行范围内（docs/FINDINGS.md 2026-11-02、2026-11-06 两条有记录）。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「同一场会话同时只跑一轮」。
+> **注记（2026-11-07）**：运行期残留自动修复加固。原实现的占用检查（`SET … GET`）和轮次登记（pipeline）是两步，登记失败不回退占用，Redis 在两步中间掉线会留下「状态键=streaming、编号键缺失」的残留——这场会话之后的请求全部被 409 拒发，直到状态键过期（600 秒）或进程重启（启动时有残留键清理，运行期原先没有）。现在 `claim_round` 读到旧值是 streaming 时补查一次：对编号键做 `SET … NX`（带同样的过期时间），登记还在照旧拒发，登记缺失（残留）则 NX 成功的请求赢得这一轮、补齐登记后照常进行。并发请求同时判出残留时由 NX 裁决（只可能一个成功），不用「先删状态键再重新抢」——那样第二个请求的删除会把第一个请求刚写的状态键删除，造成同一场会话双重占用。补查时 Redis 不通按真有一轮在写处理、拒掉本次请求。只用 set/get/del 这些既有命令，都在生产环境 ACL 放行范围内（docs/FINDINGS.md 2026-11-02、2026-11-06 两条有记录）。功能描述见 docs/CHAT_STREAM_PROTOCOL.md「同一场会话同时只跑一轮」。
 
 - **位置**：`app.py:877`（`round_in_flight` 读）→ `app.py:900`（`begin_reply` 写）；`reply_store.py:44-58`（`begin_reply` 用 pipeline 但无条件 SET）。
 - **现状**：「同一场会话同时只跑一轮」靠先读 status 再写 status 实现，两步之间没有原子性。两个并发 `POST /api/chat`（不同 turn_id、同一 chat_id——比如两个标签页同时发、或前端重发时序错开）可以都通过 `round_in_flight` 检查，然后双双 `begin_reply`：后写的把先写的 turn 键覆盖，两轮的片段交错写进同一个 text 键——正是原 INTERRUPTED_REPLY（已退役，内容并入 docs/CHAT_STREAM_PROTOCOL.md）「同一场会话同时只跑一轮」一节描述要防的事故，现在的防线在并发下有缝。turn_id 幂等检查（`app.py:866-873`）只防「同一请求来两次」，防不了「两个不同请求」。
-- **影响**：低概率但后果脏：Redis 半截文字两轮混写、上游多出一轮、message 表 seq 交错（`_next_seq` 的 max+1 也会冲突）。多标签页是真实使用场景（ACCOUNT_MANAGEMENT 通篇在讨论多标签页）。
+- **影响**：低概率但后果严重：Redis 半截文字两轮混写、上游多出一轮、message 表 seq 交错（`_next_seq` 的 max+1 也会冲突）。多标签页是真实使用场景（ACCOUNT_MANAGEMENT 通篇在讨论多标签页）。
 - **方案**：把「占用」做成原子认领。`begin_reply` 返回是否认领成功：status 键用 `SET NX` 抢占，抢不到再看是不是自己的 turn（幂等重发）：
   ```python
   # reply_store.py
@@ -343,7 +343,7 @@
 - **位置**：`app.py:139-141`、`app.py:686-726`（`_session_records`/`_drop_stale_records`）。
 - **现状**：模块级 dict，每场被读过历史的会话存一份**全量** `ChatRecord` 列表（含整场文字）。陈旧项（>100 秒）只在有新写入时被顺带清理：一批会话被集中读过之后再也无人访问，这些条目就永远留在内存里。进程长跑 + 学期内几百个学生各几场会话，是持续增长的常驻内存。
 - **影响**：慢性内存泄漏（有界于「所有会话历史总和」，但这个界不小）；缓存本来只是 5 秒的防刷新临时措施，却按 100 秒+无限期持有。
-- **方案**：加条目上限 + 读路径也顺手清陈旧：
+- **方案**：加条目上限 + 读路径也一并清理陈旧条目：
   ```python
   _RECORDS_CACHE_MAX = 128
   def _cache_put(session_id, now, records):
@@ -448,10 +448,10 @@
 
 - **位置**：`app.py:570-589`。
 - **现状**：顺序是「上游 `delHistory` → 删本地数据库（message 行 + session 行）→ `discard_reply`」，三个已核实的问题：
-  1. **流式中的会话可以被删**：不取消 `_running` 里的任务、不叫停上游。删除后 `_relay` 照跑：上游把答案写完（token 白白消耗），`append_chunk`/`mark_finished` 在 `discard_reply` 之后把 Redis 键又建回来（带 TTL 的残留键），`finish_round` 更新不到行（已被删）静默空转。
+  1. **流式中的会话可以被删**：不取消 `_running` 里的任务、不叫停上游。删除后 `_relay` 照跑：上游把答案写完（token 被无谓消耗），`append_chunk`/`mark_finished` 在 `discard_reply` 之后把 Redis 键又建回来（带 TTL 的残留键），`finish_round` 更新不到行（已被删）静默空转。
   2. **上游成功、本地数据库删除失败** → 500，会话在本地还在但上游上下文已清空；用户重试删除可以走通（`delHistory` 对不存在的 chatId 也回 200，FASTGPT_API 实测），但期间的 `/messages` 会触发 `_backfill_session` 把空历史「抄」进表——数据没丢（本来就要删），语义混乱。
   3. `FastGPTError` 被映射成 **500**（`app.py:578-584`），上游问题报了服务器错误，和 `_backfill_session` 用 502 的口径不一致（P7）。
-- **影响**：删除与流式并发时产生没人再读的残留 Redis 键、白白消耗 token；错误码口径混乱。
+- **影响**：删除与流式并发时产生没人再读的残留 Redis 键、无谓消耗 token；错误码口径混乱。
 - **方案**：删除前先把这一轮收掉，复用 abort 的既有机制：
   ```python
   @app.delete("/api/sessions/{session_id}", status_code=204)
@@ -482,7 +482,7 @@
 
 > **已完成（2026-11-06）**：`chat_log.read_messages` 的数据库错误如实上抛（不再吞成空列表），GET messages 与会话列表两个读端点接住回 503（detail 一句中文人话）；「真的没记录」和「读不出来」从此分得清。流式轮次进行中写进数据库失败的故意吞异常（归档降级）原样保留，读写两个方向的语义差异写进了 docstring。调研原文以 LayerFS 历史为准。
 
-- **位置**：`chat_log.py:122-145`（`read_messages` 把 `SQLAlchemyError` 吞成 `[]`，注释写明「读不出来就当没有，让上游那份顶上」）、`app.py:645-663`（`read_session_messages` 拿 `[]` 当「老会话」走 `_backfill_session`）、`chat_log.py:147-181`（`backfill` 的 `_write` 同样吞错）。
+- **位置**：`chat_log.py:122-145`（`read_messages` 把 `SQLAlchemyError` 忽略成 `[]`，注释写明「读不出来就当没有，让上游那份保底」）、`app.py:645-663`（`read_session_messages` 拿 `[]` 当「旧会话」走 `_backfill_session`）、`chat_log.py:147-181`（`backfill` 的 `_write` 同样忽略错误）。
 - **现状**：DB 挂了时的完整链路：`read_messages` → `[]` → 被当成「没有记录的老会话」→ 问上游要全量历史（成功的话）→ `backfill` 写进数据库静默失败 → 再 `read_messages` 又是 `[]` → **200 + 空 messages**。页面看到的是「这场会话一条消息都没有」。若上游也恰好失败，则 502——同一个故障两种表现。
 - **影响**：「数据库不可用」被伪装成「会话是空的」。用户以为历史丢了；前端若有「空会话自动删除/重建」之类的逻辑会被误触发；排查故障时 200 响应完全不指向真实故障。
 - **方案**：区分「查过了，没有行」和「查不了」。`read_messages` 加一个不吞错的入口（或返回 None 表示故障）：
@@ -542,7 +542,7 @@
 
 - **位置**：`app.py:893-895`（`chat` 在返回 StreamingResponse **之前** `await _wait_for_stop(body.chat_id)`）、`app.py:1115-1124`（`_STOP_WAIT_SECONDS = 7.0`）、`fastgpt.py:124-153`（stop 调用本身，配合 O5 的超时收紧）。
 - **现状**：等停止生效的机制是对的（FASTGPT_API：上游每轮开始会删停止标记，标记晚到会中止新一轮），但它放在响应头发出之前。用户「按停止 → 马上改口重发」是高频动作，此时新请求要干等上一轮的 `_stop_upstream` 生效（正常几百毫秒，上游卡时到 7 秒上限）才拿到响应头。docs/CHAT_STREAM_PROTOCOL.md（原 INTERRUPTED_REPLY，已退役）专门记过「响应头要立刻回」（0.013 秒实测），这条路径把那个修复又局部推翻了。
-- **影响**：停止后重发的体验退化：页面等待气泡不转、前端超时重发逻辑可能被触发（turn_id 幂等保底，不会生成两遍，但请求白白多一轮）。
+- **影响**：停止后重发的体验退化：页面等待气泡不转、前端超时重发逻辑可能被触发（turn_id 幂等保底，不会生成两遍，但请求无谓多一轮）。
 - **方案**：把等待挪进 `_relay` 任务（登记照旧在前，等待发生在真正调上游之前）：
   ```python
   # chat()：删掉 await _wait_for_stop(...)，begin_reply 之后直接建任务、回响应头
@@ -656,10 +656,10 @@
 
 ### P15. `_merge_current_turn` 的文本比对保底处理在编辑重发后会失真（新增，小项）
 
-> **更正注记（2026-11-06，取代原「已完成（2026-11-05）」注记）**：原注记说「『按提问文本比对』的保底处理整个删除」，与代码不符。实际情况：合并主路径（history.merge_current_turn）确已按轮次编号对号——Redis 里半截的这一轮，编号与表里的行对得上才合并，对不上如实降级为 failed 展示（启动核对随后清理数据库）；但「表里没有这一轮」的补提问分支仍按提问文本比对防重（代码注释自书「按老办法」）。维护者已决定保留该分支（2026-11-06）：真删会让写库失败但仍在生成的轮次从页面整个消失。编辑重发、上游文本加工两个失真情形在该分支里仍然存在，见下文「现状」。
+> **更正注记（2026-11-06，取代原「已完成（2026-11-05）」注记）**：原注记说「『按提问文本比对』的保底处理整个删除」，与代码不符。实际情况：合并主路径（history.merge_current_turn）确已按轮次编号对号——Redis 里半截的这一轮，编号与表里的行对得上才合并，对不上如实降级为 failed 展示（启动核对随后清理数据库）；但「表里没有这一轮」的补提问分支仍按提问文本比对防重（代码注释自书「按原有做法」）。维护者已决定保留该分支（2026-11-06）：真删会让写库失败但仍在生成的轮次从页面整个消失。编辑重发、上游文本加工两个失真情形在该分支里仍然存在，见下文「现状」。
 
 - **位置**：`app.py:770-799`（表里没有当前轮时，按「最后一条 user 记录的文字与 Redis 里的 question `strip()` 相等」判断要不要补提问行）。
-- **现状**：这个保底处理的注释自己承认是「按老办法」。两个已知失真情形：上游记录与 Redis question 有任何文本差异（前端 trim/换行处理、上游对消息做过加工——FINDINGS 记录过上游回答开头带换行的例子）就会重复显示提问；N9 的编辑重发（问题文本被改）会让「删旧轮」后的窗口期里新旧文本对不上。
+- **现状**：这个保底处理的注释自己承认是「按原有做法」。两个已知失真情形：上游记录与 Redis question 有任何文本差异（前端 trim/换行处理、上游对消息做过加工——FINDINGS 记录过上游回答开头带换行的例子）就会重复显示提问；N9 的编辑重发（问题文本被改）会让「删旧轮」后的窗口期里新旧文本对不上。
 - **影响**：偶发的重复提问气泡；只在「表里没有这一轮」的异常路径出现（写进数据库失败或轮次早于建表），概率低。
 - **方案**：P5 的核对 + N1 的结局事件完成后，这条路径的出现率进一步降低，短期只需在保底分支加一行 warning 日志（带 turn_id），让「出现了保底处理」这件事可观测；中期随 O11 词表统一时把 `_merge_current_turn` 整体简化（表为准，Redis 只补当前轮，删掉文本比对）。
 - **第三方库**：无。

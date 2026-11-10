@@ -288,7 +288,7 @@
 
 - **位置**：`/src/components/settings/AvatarPicker.tsx` 或 `/src/hooks/use-profile-actions.ts` 的 `pickAvatar`；`/src/i18n.ts` 加 key。
 - **现状**：`avatarHint` 写着「支持格式：PNG/JPG/JPEG/HEIC，大小不超过5MB」，但选择文件后不做任何本地检查，直接 `POST /api/avatar`，靠服务器拒绝。
-- **影响**：传一个 20MB 的照片要等整个上传走完才收到错误，移动端流量和时间都白白消耗；错误还是服务器中文 detail（见 P4）。本地能判定的提前拦掉，跟改密页「客户端硬门槛」的既有做法一致。
+- **影响**：传一个 20MB 的照片要等整个上传走完才收到错误，移动端流量和时间都无谓消耗；错误还是服务器中文 detail（见 P4）。本地能判定的提前拦掉，跟改密页「客户端硬门槛」的既有做法一致。
 - **方案**：`pickAvatar` 开头加：
 
   ```ts
@@ -476,7 +476,7 @@
   };
   ```
 
-  组件侧 `translations[locale]` 类型不变（`Copy`），零改动。顺手删掉已死的 `switchLanguage` key（全仓 grep 无使用，三语各一条）。
+  组件侧 `translations[locale]` 类型不变（`Copy`），零改动。一并删掉已死的 `switchLanguage` key（全仓 grep 无使用，三语各一条）。
 - **第三方库**：无。
 - **风险**：极低。改完 `tsc --noEmit` 立刻暴露现有缺漏（如果有）。
 - **工作量**：S。
@@ -523,7 +523,7 @@
         }
         setAuth('ready');
       } catch (error) {
-        // 现有的 401 / connectionFailure / 其它三分支原样搬进来
+        // 现有的 401 / connectionFailure / 其它三分支原样移进来
       }
     })();
     return () => { cancelled = true; };
@@ -532,7 +532,7 @@
 
   语义差异要留意：现在 profile 的非 401 失败会被吞掉、照常 `ready`（username 留 null），而 sessions 失败才走错误分支——并行版保持一致（`catch` 里返回 null 那步）。StrictMode 下双执行照旧被 `cancelled` 接住。
 - **第三方库**：无。
-- **风险**：中低。启动路径是核心链路，错误分支的搬迁要逐条对照；改完手点四种场景：正常登录、cookie 过期（401）、后端没起（connectionFailure）、profile 500。
+- **风险**：中低。启动路径是核心链路，错误分支的迁移要逐条对照；改完手点四种场景：正常登录、cookie 过期（401）、后端没起（connectionFailure）、profile 500。
 - **工作量**：S。
 
 ### O6. 登录响应直接带全 profile，省掉登录后的第二次 readProfile
@@ -643,17 +643,17 @@
 
 ### O11. 置顶动作改乐观更新
 
-> **已完成（2026-11-06）**：点击立即生效（pinnedAt 用本地时间顶上）→ 成功换服务端权威值 → 失败回滚。本节指出的「回滚 pinnedAt 不精确」简化被采纳（恢复成 null、不快照原值，罕见回滚场景只影响置顶组内先后，文档认可）。失败反馈从 `setNotice` 改为错误 toast（菜单点完就关，警示框容易被漏看）；401 走登录界面不弹 toast，连接类失败照旧挂全局服务横幅，成功不提示。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「侧栏置顶乐观更新」。调研原文以 LayerFS 历史为准。
+> **已完成（2026-11-06）**：点击立即生效（pinnedAt 先写入本地时间）→ 成功换服务端权威值 → 失败回滚。本节指出的「回滚 pinnedAt 不精确」简化被采纳（恢复成 null、不快照原值，罕见回滚场景只影响置顶组内先后，文档认可）。失败反馈从 `setNotice` 改为错误 toast（菜单点完就关，警示框容易被漏看）；401 走登录界面不弹 toast，连接类失败照旧挂全局服务横幅，成功不提示。功能描述见 docs/CHAT_PAGE_BEHAVIOR.md「侧栏置顶乐观更新」。调研原文以 LayerFS 历史为准。
 
 - **位置**：`/src/hooks/use-session-actions.ts` 的 `pinOpenSession`。
-- **现状**：`await pinSession(...)` 成功回来才 `setSessions` 更新 UI。网络一般时，点「置顶」到列表重排之间有可感知的延迟，且期间没有任何 pending 指示（菜单已经关了）。改名和删除同样是等服务端，但那两个有弹窗 pending 态撑着；置顶是菜单点完即关，延迟直接裸露。
+- **现状**：`await pinSession(...)` 成功回来才 `setSessions` 更新 UI。网络一般时，点「置顶」到列表重排之间有可感知的延迟，且期间没有任何 pending 指示（菜单已经关了）。改名和删除同样是等服务端，但那两个有弹窗 pending 态撑着；置顶是菜单点完即关，延迟直接暴露。
 - **影响**：手感问题；置顶失败率低（同一个 PATCH 端点），乐观更新的回滚场景罕见。
 - **方案**：
 
   ```ts
   async function pinOpenSession(id: string, pinned: boolean) {
     const {setSessions, /* … */} = depsRef.current;
-    // 先本地生效：pinnedAt 用本地时间顶上，服务端回来再换成权威值。
+    // 先本地生效：pinnedAt 先写入本地时间，服务端回来再换成权威值。
     setSessions((current) =>
       current.map((s) =>
         s.id === id
@@ -789,7 +789,7 @@
   // 提交处：setGateError(rejected === 'tooShort' ? t(text.passwordTooShort, {min: minLength, max: 128}) : text.passwordTooCommon);
   ```
 
-  后端仍是唯一门槛，其中文 detail 走 P4 的错误码路径显示。顺手把 `minLength` 参数化（N4 的 admin 侧要传 8）。改完在 ACCOUNT_MANAGEMENT.md 把「消息一字不差」那条更新成本地化后的新约定，别让文档和代码继续互相矛盾。
+  后端仍是唯一门槛，其中文 detail 走 P4 的错误码路径显示。一并把 `minLength` 参数化（N4 的 admin 侧要传 8）。改完在 ACCOUNT_MANAGEMENT.md 把「消息一字不差」那条更新成本地化后的新约定，别让文档和代码继续互相矛盾。
 - **第三方库**：无。
 - **风险**：低；主要是文档同步，避免下一个人按旧规矩把硬编码中文加回来。
 - **工作量**：S。
