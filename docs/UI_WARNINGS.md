@@ -66,3 +66,4 @@
 2. 不要新造浮层（角标、居中弹窗、漂浮文字）。要更显眼就用输入区上方的警示框（error 语气）。
 3. 三种语言都要有：简体中文、繁体中文、英文（`src/i18n.ts`）。
 4. 颜色规则（2026-11-04 维护者决定）：提示面（警示框、行内表单错误、Toast、脚注）背景一律白（`bg-base-100`）、文字一律黑（`base-content`），语义色只允许出现在图标上：红 `text-error` 出错、琥珀 `text-warning` 有状况、绿 `text-success` 成功。不要用 `alert-error` / `alert-warning` / `alert-success` 这种整块语义色背景。
+5. 图片下方的说明不算提示面：它是回答内容的一部分，用 `base-content` 加 0.6 透明度（灰），比正文小一号，位置在图片下方。见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「回答里的图片」。

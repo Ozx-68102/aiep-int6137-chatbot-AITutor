@@ -33,6 +33,7 @@ npm install -g pnpm
 - 组件库：daisyUI 5.7.50（Tailwind 插件，`src/index.css` 里用 `@plugin` 接线）。内置主题已关掉，只用自定义 `aiep` 主题：语义变量（base-*、primary、error 等）与 stone/emerald 色板同值。组件类按需生成，源码里没出现的类不会进产物
 - 动画：tw-animate-css 1.4.0
 - 代码高亮：react-syntax-highlighter 16.1.2（2026-11-05 装上并同日接线：`dist/esm/prism-light` 按需路线，只注册 python / javascript / typescript / java；第一个命中语言的代码块触发动态 `import()`，独立 chunk 约 45.5 kB（gzip 约 13.4 kB），主包不因此上涨；`@types/react-syntax-highlighter` 15.5.13 已于 2026-11-05 装为开发依赖，临时垫片已删除；该包的子路径类型是环境模块声明，tsconfig 用 `"types": ["react-syntax-highlighter"]` 显式把它拉进编译才生效）
+- Markdown 与图片：react-markdown 10.1.0、remark-gfm 4.0.1、remark-math 6.0.0、rehype-katex 7.0.1、katex 0.16.47。上游回答里的内嵌 SVG（`![说明](data:image/svg+xml;base64,…)`）由 `dompurify` 3.4.17 按 SVG 白名单清理后才显示（2026-11 装，见 [CHAT_PAGE_BEHAVIOR.md](CHAT_PAGE_BEHAVIOR.md)「回答里的图片」）。`unified` 11.0.5 和 `remark-parse` 11.0.0 同期声明为直接依赖：拆消息时要在打字机之前解析整条回答，它们本来就在 Markdown 的间接依赖链里，显式声明之后本项目才能稳定直接用（不依赖 pnpm 恰好把间接依赖暴露到顶层）
 - 语言：TypeScript 7.0.2。tsconfig 在 `strict` 全开之外再加两档（2026-11-06）：`noUncheckedIndexedAccess`（索引访问的类型含 `undefined`）与 `exactOptionalPropertyTypes`（可选属性不再默默接受显式 `undefined`）
 - 检查：oxlint 1.89.0，插件 oxlint-tailwindcss 1.16.0、oxlint-tsgolint 7.0.2005。命令是 `pnpm lint`
 - 格式化：oxfmt 0.75.0，规则写在 `.oxfmtrc.json`。`pnpm fmt` 改格式，`pnpm fmt:check` 只查不改。`pnpm check` 是 oxlint、oxfmt --check 加类型检查（`pnpm exec tsc --noEmit`）一起跑
