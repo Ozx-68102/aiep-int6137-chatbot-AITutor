@@ -11,7 +11,11 @@ type BubbleBoundaryState = {failed: boolean};
  * 拿最终文本再试一次；最终文本仍坏才停留在纯文本降级。
  */
 export class BubbleBoundary extends Component<
-  {fallbackText: string; children: ReactNode},
+  {
+    /** 降级时要显示的文字。给函数的话只在真出错时才调用——正常渲染不该为它花解析成本。 */
+    fallbackText: string | (() => string);
+    children: ReactNode;
+  },
   BubbleBoundaryState
 > {
   state: BubbleBoundaryState = {failed: false};
@@ -26,7 +30,9 @@ export class BubbleBoundary extends Component<
 
   render(): ReactNode {
     if (this.state.failed) {
-      return <p className="chat-bubble whitespace-pre-wrap">{this.props.fallbackText}</p>;
+      const {fallbackText} = this.props;
+      const text = typeof fallbackText === 'function' ? fallbackText() : fallbackText;
+      return <p className="chat-bubble whitespace-pre-wrap">{text}</p>;
     }
     return this.props.children;
   }

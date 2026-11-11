@@ -1,10 +1,12 @@
 import {Check, Copy} from 'lucide-react';
 import {isValidElement, memo, type ReactNode, useEffect, useMemo, useRef, useState} from 'react';
 import type {Components} from 'react-markdown';
-import Markdown from 'react-markdown';
+import Markdown, {defaultUrlTransform} from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import type {PluggableList} from 'unified';
+import {type MessageImage, rehypeMessageImages} from './image-marks.ts';
 
 type HighlighterModule = typeof import('./highlighter.ts');
 
@@ -167,6 +169,20 @@ function CodeBlock({
 }
 
 /**
+ * 图片地址的放行规则：普通链接继续用 Markdown 库默认那一套（http、https、mailto
+ * 这些），只有图片多开一个口子，而且只认校验过的内嵌 SVG。
+ *
+ * 校验在 message-body.ts 里做（解码、解析、清理、重新编码），这里拿到的是清理后的
+ * 地址；地址不在这条白名单里的直接清空，页面上不会去请求任何外部图片。
+ */
+function imageUrlTransform(value: string, key: string): string {
+  if (key === 'src') {
+    return value.startsWith('data:image/svg+xml;base64,') ? value : '';
+  }
+  return defaultUrlTransform(value);
+}
+
+/**
  * 助手回答里的 Markdown。
  *
  * markdown 库默认不解析原始 HTML（HTML 会当文字显示），链接和图片的地址也只放行
@@ -176,19 +192,38 @@ function CodeBlock({
  * 公式写错时 KaTeX 会把原文显示出来，出错颜色跟正文一样，不另外标红。
  *
  * 代码块（pre）换成 CodeBlock：右上角复制按钮 + 按需加载的语法高亮。
+ *
+ * 图片：上游把内嵌图写成 `![说明](data:image/svg+xml;base64,…)`。原文在
+ * message-body.ts 里换成了占位标记，这里由 rehypeMessageImages 把标记变回图片，
+ * 说明文字渲染成灰色小字挂在图片下方。打字机把地址排除在播放之外就是靠这一层。
  */
 export const MarkdownText = memo(function MarkdownText({
   text,
   copyLabel,
   copiedLabel,
+  images = [],
+  showImages = true,
+  imageLabel,
+  imageUnavailableLabel,
+  onImageLoad,
 }: {
   text: string;
   /** 代码块复制按钮的文字（i18n copy / copied）。 */
   copyLabel: string;
   copiedLabel: string;
+  /** 消息里的图片（message-body.ts 拆出来的，按标记编号排列）。 */
+  images?: readonly MessageImage[];
+  /** 图片显不显示：打字机还在放的时候只显示灰色说明，放完才是 true。 */
+  showImages?: boolean;
+  /** 没有说明文字时图片的替代文字（i18n image）。 */
+  imageLabel?: string;
+  /** 图片没通过校验时的提示（i18n imageUnavailable）。 */
+  imageUnavailableLabel?: string;
+  /** 图片加载完长高了：滚动容器贴底时靠它继续跟随（不贴底就保持阅读位置）。 */
+  onImageLoad?: () => void;
 }) {
-  // 组件表：链接在新窗口打开；图片不真加载，只留一个链接；表格外面套一层
-  // 可以横着滚；代码块进 CodeBlock。复制按钮的文案跟着语言环境走，
+  // 组件表：链接在新窗口打开；图片只认校验过的内嵌 SVG，其余地址清空；表格外面套
+  // 一层可以横着滚；代码块进 CodeBlock。复制按钮的文案跟着语言环境走，
   // 所以表按 labels memo 一份，不放在模块级。
   const components = useMemo<Components>(
     () => ({
@@ -199,18 +234,26 @@ export const MarkdownText = memo(function MarkdownText({
           </a>
         );
       },
-      // TODO：图片暂时不加载，只渲染成一个链接。
-      // 图片和视频生成那部分还没开放，现在不能动。等那边放开，
-      // 这里改回渲染 <img>，再定图片地址放在哪儿、怎么留住。
-      img({src, alt}) {
-        const address = src ?? '';
-        if (address === '') {
-          return <span>{alt ?? ''}</span>;
+      img({src, alt, width, height}) {
+        // 地址在这一层之前已经被 imageUrlTransform 清过；空地址说明图片没通过校验
+        // 或者根本不是内嵌 SVG，此时不画空的 <img>，只把说明文字留下。
+        if (src === undefined || src === '') {
+          return alt === undefined || alt === '' ? null : (
+            <span className="chat-image-failed">{alt}</span>
+          );
         }
+        // 宽高交给浏览器先占位（CSS 的 max-width: 100% 会把它压进气泡），
+        // 图片加载完那一帧才不会把下面的内容顶一下。
         return (
-          <a href={address} target="_blank" rel="noopener noreferrer">
-            {alt === undefined || alt === '' ? address : alt}
-          </a>
+          <img
+            className="chat-image"
+            src={src}
+            alt={alt ?? ''}
+            width={width}
+            height={height}
+            decoding="async"
+            onLoad={onImageLoad}
+          />
         );
       },
       table({children}) {
@@ -228,13 +271,32 @@ export const MarkdownText = memo(function MarkdownText({
         );
       },
     }),
-    [copyLabel, copiedLabel],
+    [copyLabel, copiedLabel, onImageLoad],
+  );
+  // 只带图片标记的文本才走改写插件：没有图片时插件不挂，渲染路径跟以前完全一样。
+  const rehypePlugins = useMemo<PluggableList>(
+    () => [
+      [rehypeKatex, {errorColor: 'currentColor'}],
+      [
+        rehypeMessageImages,
+        {
+          images,
+          showImages,
+          labels: {
+            image: imageLabel ?? '',
+            unavailable: imageUnavailableLabel ?? '',
+          },
+        },
+      ],
+    ],
+    [images, showImages, imageLabel, imageUnavailableLabel],
   );
   return (
     <div className="markdown">
       <Markdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, {errorColor: 'currentColor'}]]}
+        rehypePlugins={rehypePlugins}
+        urlTransform={imageUrlTransform}
         components={components}
       >
         {text}

@@ -7,6 +7,7 @@ import {visibleText, waitingForText} from '../../session/text.ts';
 import type {Session} from '../../type/chat.ts';
 import {htmlLang, type Locale} from '../../type/locale.ts';
 import {BubbleBoundary} from './BubbleBoundary.tsx';
+import {degradedText} from './message-body.ts';
 import {bubbleClass} from './message-class.ts';
 import {MessageActions} from './MessageActions.tsx';
 import {ThinkingBubble} from './ThinkingBubble.tsx';
@@ -244,7 +245,7 @@ export function ChatMain({
                     <div key={message.id} className={`${classes.wrap} group`}>
                       <BubbleBoundary
                         key={`${message.id}:${message.waiting === true ? 'waiting' : 'final'}`}
-                        fallbackText={textShown}
+                        fallbackText={() => degradedText(textShown)}
                       >
                         <div
                           lang={message.locale ? htmlLang[message.locale] : undefined}
@@ -259,6 +260,8 @@ export function ChatMain({
                             onReveal={handleReveal}
                             copyLabel={text.copy}
                             copiedLabel={text.copied}
+                            imageLabel={text.image}
+                            imageUnavailableLabel={text.imageUnavailable}
                           />
                         </div>
                       </BubbleBoundary>

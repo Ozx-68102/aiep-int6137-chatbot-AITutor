@@ -196,3 +196,48 @@
   overflow-y: hidden;
   padding-bottom: 0.125rem;
 }
+
+/* 助手回答里的内嵌图片（上游把图写成 ![说明](data:image/svg+xml;base64,…)）。
+   图片按气泡宽度缩放、保留宽高比；说明是灰色小字，和黑色正文区分开。 */
+.markdown .chat-image-figure {
+  margin: 0 0 0.5rem;
+}
+
+.markdown .chat-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+
+/* 说明文字：图片下方那一行，灰色、比正文小一号。打字机播放期间它先出现，
+   图片随后才来，两段时间里样式保持一致，不会跳一下。 */
+.markdown .chat-image-caption,
+.markdown figcaption.chat-image-caption {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--color-base-content);
+  opacity: 0.6;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+}
+
+/* 图片夹在正文中间时保持行内：图在上、说明在下，外面不套 figure。 */
+.markdown p .chat-image {
+  margin: 0.25rem 0;
+}
+
+.markdown p .chat-image-caption {
+  margin-top: 0.125rem;
+}
+
+/* 没通过校验的图片：只留一行提示，不显示地址。 */
+.markdown .chat-image-failed {
+  color: var(--color-base-content);
+  opacity: 0.6;
+  font-size: 0.875rem;
+}
+
+.markdown > .chat-image-figure:last-child {
+  margin-bottom: 0;
+}

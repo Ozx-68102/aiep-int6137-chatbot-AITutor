@@ -1,5 +1,7 @@
-import {useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {stripMarkCharacters} from './image-marks.ts';
 import {MarkdownText} from './MarkdownText.tsx';
+import {splitMessageBody} from './message-body.ts';
 
 // 周期间隔：决定要求每个周期至少 ~50ms，取 60ms 略高于下限、跟常见刷新率对得上。
 // 按块显示＋节流，不做 rAF 级批处理（渲染批处理两条已搁置，见
@@ -38,6 +40,12 @@ function tickCount(length: number): number {
  * 文本拿到的都是全文。读屏不逐字：渐进显示部分 aria-hidden，另配一个 sr-only
  * 全文节点，辅助技术一次拿到全文；播放结束两层撤掉，DOM 与现状一致。
  *
+ * 图片（2026-11 起）：上游的内嵌图地址是几千字符的 Base64，按字符切出来就是一堆乱码。
+ * 所以先由 message-body.ts 把整条回答拆成「播放文本 + 图片列表」——地址换成占位标记，
+ * 说明文字留在原位。打字机只播放这段文本，播放长度、速度、进度都不含地址；图片下方的
+ * 说明文字是灰色，跟着正文一起打出来；图片本身等全部文字放完才出现。拆分只做一次
+ * （useMemo），不随每个播放周期重算。
+ *
  * present 被父层撤下（用户点停止、轮次以断流/中止收场）时立刻全部显示——撤销
  * 直接从 props 派生，不走状态翻转；历史消息、刷新恢复、断线补回的回答根本
  * 不会进 presentIds，天然全部显示。
@@ -50,6 +58,8 @@ export function TypewriterText({
   onReveal,
   copyLabel,
   copiedLabel,
+  imageLabel,
+  imageUnavailableLabel,
 }: {
   /** 消息 id：「每条消息只播放一次」的判定依据。 */
   id: string;
@@ -63,7 +73,15 @@ export function TypewriterText({
   onReveal: () => void;
   copyLabel: string;
   copiedLabel: string;
+  /** 没有说明文字时图片的替代文字（i18n image）。 */
+  imageLabel: string;
+  /** 图片没通过校验时的提示（i18n imageUnavailable）。 */
+  imageUnavailableLabel: string;
 }) {
+  // 整条回答只拆一次：图片从这里起就不在播放文本里了（地址不进切片范围）。
+  // text 变长（上游分块、极罕见）时重算，拆出来的图片跟着更新。
+  const body = useMemo(() => splitMessageBody(text), [text]);
+
   // 只在首渲染判定一次：本轮刚收到、从没播放过、且没开减弱动态效果才开始播放。
   // 组件重渲染不重跑这个判定，滚动、切标签页回来都不会重播。
   // 引擎的播放标记和全文在同一批 setState 里生效，挂载时 present 一定已就位；
@@ -75,11 +93,12 @@ export function TypewriterText({
   const revealedRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   // 异步回调跨渲染拿最新值：统一走 ref 镜像（渲染期间写 ref 是被禁止的）。
-  const textRef = useRef(text);
+  // 播放长度按「去掉图片地址的播放文本」算，图片地址不参与速度和进度。
+  const textRef = useRef(body.playText);
   const onEndRef = useRef(onEnd);
   const onRevealRef = useRef(onReveal);
   useEffect(() => {
-    textRef.current = text;
+    textRef.current = body.playText;
     onEndRef.current = onEnd;
     onRevealRef.current = onReveal;
   });
@@ -122,6 +141,16 @@ export function TypewriterText({
     };
   }, [presenting, id]);
 
+  // 图片冒出来那一帧也长高了：跟每个周期一样通知滚动容器。用 ref 转一层，
+  // 保证传给 MarkdownText 的回调引用稳定（它在 useMemo 的依赖里，换引用会让组件表重建）。
+  const onRevealLatest = useRef(onReveal);
+  useEffect(() => {
+    onRevealLatest.current = onReveal;
+  });
+  const handleImageLoad = useCallback(() => {
+    onRevealLatest.current();
+  }, []);
+
   // 每个周期长高：通知滚动容器贴底跟随（消息数组不变，外面的滚动效果指望不上）。
   useEffect(() => {
     if (!presenting) {
@@ -140,21 +169,42 @@ export function TypewriterText({
   }, [present, presenting, id]);
 
   if (!presenting) {
-    return <MarkdownText text={text} copyLabel={copyLabel} copiedLabel={copiedLabel} />;
+    // 不播放：历史消息、刷新恢复、减弱动态效果，以及「这一轮刚放完」。
+    // 图片在这里显示，也就是全部文字放完之后。
+    return (
+      <MarkdownText
+        text={body.playText}
+        copyLabel={copyLabel}
+        copiedLabel={copiedLabel}
+        images={body.images}
+        showImages
+        imageLabel={imageLabel}
+        imageUnavailableLabel={imageUnavailableLabel}
+        onImageLoad={handleImageLoad}
+      />
+    );
   }
   return (
     <>
-      {/* 视觉层：渐进显示的 Markdown，不进读屏；辅助技术的内容在下面。 */}
+      {/* 视觉层：渐进显示的 Markdown，不进读屏；辅助技术的内容在下面。
+          打字机放的是去掉图片地址的播放文本，图片本身等屏幕
+          上的文字放完（presenting 变 false）才出现。 */}
       <div aria-hidden="true">
         <MarkdownText
-          text={text.slice(0, revealed)}
+          text={body.playText.slice(0, revealed)}
           copyLabel={copyLabel}
           copiedLabel={copiedLabel}
+          images={body.images}
+          showImages={false}
+          imageLabel={imageLabel}
+          imageUnavailableLabel={imageUnavailableLabel}
+          onImageLoad={handleImageLoad}
         />
       </div>
       {/* 读屏一次拿到全文，不逐字播报；播放结束后本节点撤掉，
-          可访问结构与不打字机时一致。 */}
-      <span className="sr-only">{text}</span>
+          可访问结构与不打字机时一致。全文用去掉标记的播放文本：
+          读屏读的是正文和图片说明，不会读到占位标记，也不会读到 Base64。 */}
+      <span className="sr-only">{stripMarkCharacters(body.playText)}</span>
     </>
   );
 }
